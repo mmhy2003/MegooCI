@@ -1,0 +1,28 @@
+[project]
+name = "megooci-backend"
+version = "0.1.0"
+description = "MegooCI – A simpler, modern open-source alternative to Jenkins"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]",
+    "uvicorn[standard]",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic",
+    "asyncpg",
+    "pydantic>=2.0",
+    "pydantic-settings",
+    "python-jose[cryptography]",
+    "passlib[bcrypt]",
+    "celery[redis]",
+    "redis",
+    "websockets",
+    "httpx",
+    "pyyaml",
+    "python-multipart",
+    "email-validator",
+    "cryptography",
+]
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"

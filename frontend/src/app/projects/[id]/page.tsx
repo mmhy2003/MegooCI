@@ -1,0 +1,455 @@
+"use client";
+
+import * as React from "react";
+import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { formatDistanceToNow } from "date-fns";
+import { toast } from "sonner";
+import {
+  ArrowLeft,
+  GitBranch,
+  Plus,
+  KeyRound,
+  Trash2,
+  Settings,
+} from "lucide-react";
+import { AppLayout } from "@/components/layout/app-layout";
+import {
+  projectsApi,
+  pipelinesApi,
+  secretsApi,
+  envVarsApi,
+  type Project,
+  type Pipeline,
+  type Secret,
+  type EnvVar,
+} from "@/lib/api";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+
+type Tab = "pipelines" | "settings";
+
+export default function ProjectDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const id = params.id as string;
+
+  const [project, setProject] = React.useState<Project | null>(null);
+  const [pipelines, setPipelines] = React.useState<Pipeline[]>([]);
+  const [secrets, setSecrets] = React.useState<Secret[]>([]);
+  const [envVars, setEnvVars] = React.useState<EnvVar[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [activeTab, setActiveTab] = React.useState<Tab>("pipelines");
+
+  const [secretDialogOpen, setSecretDialogOpen] = React.useState(false);
+  const [newSecretName, setNewSecretName] = React.useState("");
+  const [newSecretValue, setNewSecretValue] = React.useState("");
+  const [creatingSec, setCreatingSec] = React.useState(false);
+
+  const [envDialogOpen, setEnvDialogOpen] = React.useState(false);
+  const [newEnvName, setNewEnvName] = React.useState("");
+  const [newEnvValue, setNewEnvValue] = React.useState("");
+  const [creatingEnv, setCreatingEnv] = React.useState(false);
+
+  React.useEffect(() => {
+    async function load() {
+      try {
+        const [p, pipes, secs, vars] = await Promise.all([
+          projectsApi.get(id),
+          pipelinesApi.list({ project_id: id }),
+          secretsApi.list("project", id).catch(() => [] as Secret[]),
+          envVarsApi.list("project", id).catch(() => [] as EnvVar[]),
+        ]);
+        setProject(p);
+        setPipelines(pipes);
+        setSecrets(secs);
+        setEnvVars(vars);
+      } catch {
+        toast.error("Failed to load project");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [id]);
+
+  async function handleAddSecret(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newSecretName.trim() || !newSecretValue.trim()) {
+      toast.error("Name and value are required");
+      return;
+    }
+    setCreatingSec(true);
+    try {
+      const secret = await secretsApi.create({
+        scope_type: "project",
+        scope_id: id,
+        name: newSecretName,
+        value: newSecretValue,
+      });
+      setSecrets((prev) => [...prev, secret]);
+      setSecretDialogOpen(false);
+      setNewSecretName("");
+      setNewSecretValue("");
+      toast.success("Secret added");
+    } catch {
+      toast.error("Failed to add secret");
+    } finally {
+      setCreatingSec(false);
+    }
+  }
+
+  async function handleDeleteSecret(secretId: string) {
+    if (!confirm("Delete this secret?")) return;
+    try {
+      await secretsApi.delete(secretId);
+      setSecrets((prev) => prev.filter((s) => s.id !== secretId));
+      toast.success("Secret deleted");
+    } catch {
+      toast.error("Failed to delete secret");
+    }
+  }
+
+  async function handleAddEnv(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newEnvName.trim() || !newEnvValue.trim()) {
+      toast.error("Name and value are required");
+      return;
+    }
+    setCreatingEnv(true);
+    try {
+      const envVar = await envVarsApi.create({
+        scope_type: "project",
+        scope_id: id,
+        name: newEnvName,
+        value: newEnvValue,
+      });
+      setEnvVars((prev) => [...prev, envVar]);
+      setEnvDialogOpen(false);
+      setNewEnvName("");
+      setNewEnvValue("");
+      toast.success("Environment variable added");
+    } catch {
+      toast.error("Failed to add environment variable");
+    } finally {
+      setCreatingEnv(false);
+    }
+  }
+
+  async function handleDeleteEnv(envId: string) {
+    if (!confirm("Delete this environment variable?")) return;
+    try {
+      await envVarsApi.delete(envId);
+      setEnvVars((prev) => prev.filter((v) => v.id !== envId));
+      toast.success("Variable deleted");
+    } catch {
+      toast.error("Failed to delete variable");
+    }
+  }
+
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "pipelines", label: "Pipelines" },
+    { key: "settings", label: "Settings" },
+  ];
+
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="space-y-6">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-48" />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Skeleton className="h-32" />
+            <Skeleton className="h-32" />
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!project) {
+    return (
+      <AppLayout>
+        <div className="py-16 text-center">
+          <p className="text-muted-foreground">Project not found.</p>
+          <Button
+            variant="link"
+            className="mt-2"
+            onClick={() => router.push("/projects")}
+          >
+            Back to Projects
+          </Button>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  return (
+    <AppLayout>
+      <div className="space-y-6">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => router.push("/projects")}
+        >
+          <ArrowLeft className="mr-1.5 h-4 w-4" />
+          Projects
+        </Button>
+
+        <div>
+          <h1 className="text-2xl font-bold">{project.name}</h1>
+          {project.description && (
+            <p className="mt-1 text-muted-foreground">{project.description}</p>
+          )}
+          <p className="mt-1 text-sm text-muted-foreground font-mono">
+            {project.slug}
+          </p>
+        </div>
+
+        <div className="flex gap-1 border-b">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+                activeTab === tab.key
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === "pipelines" && (
+          <div className="space-y-4">
+            {pipelines.length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <GitBranch className="mb-3 h-8 w-8 text-muted-foreground/40" />
+                  <p className="text-sm text-muted-foreground">
+                    No pipelines in this project yet.
+                  </p>
+                  <Button
+                    className="mt-4"
+                    size="sm"
+                    onClick={() => router.push("/pipelines/new")}
+                  >
+                    <Plus className="mr-1.5 h-4 w-4" />
+                    Create Pipeline
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {pipelines.map((pipe) => (
+                  <Link key={pipe.id} href={`/pipelines/${pipe.id}`}>
+                    <Card className="h-full transition-shadow hover:shadow-lg cursor-pointer">
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-base">
+                            {pipe.name}
+                          </CardTitle>
+                          <Badge variant="secondary">
+                            {pipe.definition_format.toUpperCase()}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="text-xs text-muted-foreground">
+                        Created{" "}
+                        {formatDistanceToNow(new Date(pipe.created_at), {
+                          addSuffix: true,
+                        })}
+                      </CardContent>
+                    </Card>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "settings" && (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <KeyRound className="h-4 w-4" />
+                  Secrets
+                </CardTitle>
+                <Dialog
+                  open={secretDialogOpen}
+                  onOpenChange={setSecretDialogOpen}
+                >
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSecretDialogOpen(true)}
+                  >
+                    <Plus className="mr-1.5 h-4 w-4" />
+                    Add Secret
+                  </Button>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add Secret</DialogTitle>
+                      <DialogDescription>
+                        Secrets are encrypted and never displayed after creation.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleAddSecret} className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Name</label>
+                        <Input
+                          placeholder="SECRET_NAME"
+                          value={newSecretName}
+                          onChange={(e) => setNewSecretName(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Value</label>
+                        <Input
+                          type="password"
+                          placeholder="••••••••"
+                          value={newSecretValue}
+                          onChange={(e) => setNewSecretValue(e.target.value)}
+                        />
+                      </div>
+                      <DialogFooter>
+                        <Button type="submit" disabled={creatingSec}>
+                          {creatingSec ? "Adding…" : "Add Secret"}
+                        </Button>
+                      </DialogFooter>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </CardHeader>
+              <CardContent>
+                {secrets.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    No secrets configured
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {secrets.map((secret) => (
+                      <div
+                        key={secret.id}
+                        className="flex items-center justify-between rounded-lg border px-4 py-2.5 text-sm"
+                      >
+                        <code className="font-medium">{secret.name}</code>
+                        <div className="flex items-center gap-3 text-muted-foreground">
+                          <span className="text-xs">
+                            {formatDistanceToNow(new Date(secret.created_at), {
+                              addSuffix: true,
+                            })}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive"
+                            onClick={() => handleDeleteSecret(secret.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
+                  Environment Variables
+                </CardTitle>
+                <Dialog open={envDialogOpen} onOpenChange={setEnvDialogOpen}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEnvDialogOpen(true)}
+                  >
+                    <Plus className="mr-1.5 h-4 w-4" />
+                    Add Variable
+                  </Button>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add Environment Variable</DialogTitle>
+                    </DialogHeader>
+                    <form onSubmit={handleAddEnv} className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Name</label>
+                        <Input
+                          placeholder="ENV_NAME"
+                          value={newEnvName}
+                          onChange={(e) => setNewEnvName(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Value</label>
+                        <Input
+                          placeholder="value"
+                          value={newEnvValue}
+                          onChange={(e) => setNewEnvValue(e.target.value)}
+                        />
+                      </div>
+                      <DialogFooter>
+                        <Button type="submit" disabled={creatingEnv}>
+                          {creatingEnv ? "Adding…" : "Add Variable"}
+                        </Button>
+                      </DialogFooter>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </CardHeader>
+              <CardContent>
+                {envVars.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    No environment variables configured
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {envVars.map((v) => (
+                      <div
+                        key={v.id}
+                        className="flex items-center justify-between rounded-lg border px-4 py-2.5 text-sm"
+                      >
+                        <div className="flex items-center gap-3">
+                          <code className="font-medium">{v.name}</code>
+                          <span className="text-muted-foreground">
+                            {v.is_secret_ref ? "••••••" : v.value}
+                          </span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive"
+                          onClick={() => handleDeleteEnv(v.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  );
+}

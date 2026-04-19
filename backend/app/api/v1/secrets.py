@@ -1,0 +1,153 @@
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.core.deps import get_current_active_user
+from app.core.security import encrypt_secret
+from app.database import get_db
+from app.models.secret import EnvVar, Secret
+from app.models.user import User
+from app.schemas.secret import (
+    EnvVarCreate,
+    EnvVarResponse,
+    EnvVarUpdate,
+    SecretCreate,
+    SecretResponse,
+)
+
+router = APIRouter()
+
+# ── Secrets ──────────────────────────────────────────────────────────────
+
+
+@router.get("/secrets", response_model=list[SecretResponse])
+async def list_secrets(
+    scope_type: str = Query(...),
+    scope_id: uuid.UUID | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_active_user),
+) -> list[Secret]:
+    query = select(Secret).where(Secret.scope_type == scope_type)
+    if scope_id is not None:
+        query = query.where(Secret.scope_id == scope_id)
+    else:
+        query = query.where(Secret.scope_id.is_(None))
+    result = await db.execute(query.order_by(Secret.name))
+    return list(result.scalars().all())
+
+
+@router.post("/secrets", response_model=SecretResponse, status_code=status.HTTP_201_CREATED)
+async def create_secret(
+    body: SecretCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Secret:
+    settings = get_settings()
+    encrypted = encrypt_secret(body.value, settings.MEGOOCI_SECRET_KEY)
+
+    secret = Secret(
+        scope_type=body.scope_type,
+        scope_id=body.scope_id,
+        name=body.name,
+        secret_type=body.secret_type,
+        encrypted_payload=encrypted,
+        created_by=current_user.id,
+    )
+    db.add(secret)
+    await db.commit()
+    await db.refresh(secret)
+    return secret
+
+
+@router.delete("/secrets/{secret_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_secret(
+    secret_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_active_user),
+) -> None:
+    secret = await db.get(Secret, secret_id)
+    if secret is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Secret not found"
+        )
+    await db.delete(secret)
+    await db.commit()
+
+
+# ── Environment Variables ────────────────────────────────────────────────
+
+
+@router.get("/env-vars", response_model=list[EnvVarResponse])
+async def list_env_vars(
+    scope_type: str = Query(...),
+    scope_id: uuid.UUID | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_active_user),
+) -> list[EnvVar]:
+    query = select(EnvVar).where(EnvVar.scope_type == scope_type)
+    if scope_id is not None:
+        query = query.where(EnvVar.scope_id == scope_id)
+    else:
+        query = query.where(EnvVar.scope_id.is_(None))
+    result = await db.execute(query.order_by(EnvVar.name))
+    return list(result.scalars().all())
+
+
+@router.post("/env-vars", response_model=EnvVarResponse, status_code=status.HTTP_201_CREATED)
+async def create_env_var(
+    body: EnvVarCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> EnvVar:
+    env_var = EnvVar(
+        scope_type=body.scope_type,
+        scope_id=body.scope_id,
+        name=body.name,
+        value=body.value,
+        created_by=current_user.id,
+    )
+    db.add(env_var)
+    await db.commit()
+    await db.refresh(env_var)
+    return env_var
+
+
+@router.put("/env-vars/{env_var_id}", response_model=EnvVarResponse)
+async def update_env_var(
+    env_var_id: uuid.UUID,
+    body: EnvVarUpdate,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_active_user),
+) -> EnvVar:
+    env_var = await db.get(EnvVar, env_var_id)
+    if env_var is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Environment variable not found"
+        )
+
+    update_data = body.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(env_var, field, value)
+
+    await db.commit()
+    await db.refresh(env_var)
+    return env_var
+
+
+@router.delete("/env-vars/{env_var_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_env_var(
+    env_var_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_active_user),
+) -> None:
+    env_var = await db.get(EnvVar, env_var_id)
+    if env_var is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Environment variable not found",
+        )
+    await db.delete(env_var)
+    await db.commit()

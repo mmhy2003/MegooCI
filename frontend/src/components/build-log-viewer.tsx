@@ -1,0 +1,213 @@
+"use client";
+
+import * as React from "react";
+import { cn } from "@/lib/utils";
+import {
+  Search,
+  Copy,
+  Maximize2,
+  Minimize2,
+  ArrowDown,
+  Check,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+export interface LogLine {
+  timestamp?: string;
+  text: string;
+  stream?: "stdout" | "stderr";
+}
+
+interface BuildLogViewerProps {
+  lines: LogLine[];
+  className?: string;
+}
+
+export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [follow, setFollow] = React.useState(true);
+  const [fullscreen, setFullscreen] = React.useState(false);
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const [searchTerm, setSearchTerm] = React.useState("");
+  const [copied, setCopied] = React.useState(false);
+
+  React.useEffect(() => {
+    if (follow && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+  }, [lines, follow]);
+
+  React.useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+      if (e.key === "Escape") {
+        if (fullscreen) setFullscreen(false);
+        else setSearchOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [fullscreen]);
+
+  function handleScroll() {
+    if (!containerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+    const atBottom = scrollHeight - scrollTop - clientHeight < 40;
+    if (!atBottom && follow) setFollow(false);
+  }
+
+  async function handleCopy() {
+    const text = lines.map((l) => l.text).join("\n");
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  const filtered = searchTerm
+    ? lines.filter((l) =>
+        l.text.toLowerCase().includes(searchTerm.toLowerCase()),
+      )
+    : lines;
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col rounded-lg border bg-[#0d1117] text-[#c9d1d9]",
+        fullscreen && "fixed inset-0 z-50 rounded-none",
+        className,
+      )}
+    >
+      {/* Toolbar */}
+      <div className="flex items-center justify-between border-b border-[#21262d] px-3 py-1.5">
+        <span className="text-xs font-medium text-[#8b949e]">
+          Build Logs ({lines.length} lines)
+        </span>
+        <div className="flex items-center gap-1">
+          {searchOpen && (
+            <Input
+              className="h-7 w-48 border-[#30363d] bg-[#161b22] text-xs text-[#c9d1d9] placeholder:text-[#484f58]"
+              placeholder="Search logs…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              autoFocus
+            />
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-[#8b949e] hover:bg-[#21262d] hover:text-[#c9d1d9]"
+            onClick={() => setSearchOpen(!searchOpen)}
+          >
+            <Search className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-[#8b949e] hover:bg-[#21262d] hover:text-[#c9d1d9]"
+            onClick={handleCopy}
+          >
+            {copied ? (
+              <Check className="h-3.5 w-3.5 text-emerald-400" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-7 w-7 hover:bg-[#21262d] hover:text-[#c9d1d9]",
+              follow ? "text-blue-400" : "text-[#8b949e]",
+            )}
+            onClick={() => {
+              setFollow(!follow);
+              if (!follow && containerRef.current) {
+                containerRef.current.scrollTop =
+                  containerRef.current.scrollHeight;
+              }
+            }}
+            title="Auto-scroll"
+          >
+            <ArrowDown className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-[#8b949e] hover:bg-[#21262d] hover:text-[#c9d1d9]"
+            onClick={() => setFullscreen(!fullscreen)}
+          >
+            {fullscreen ? (
+              <Minimize2 className="h-3.5 w-3.5" />
+            ) : (
+              <Maximize2 className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {/* Log content */}
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className={cn(
+          "flex-1 overflow-auto p-3 font-mono text-xs leading-5",
+          fullscreen ? "max-h-none" : "max-h-[500px]",
+        )}
+      >
+        {filtered.length === 0 ? (
+          <p className="py-8 text-center text-[#484f58]">
+            {lines.length === 0
+              ? "Waiting for logs…"
+              : "No matching log lines"}
+          </p>
+        ) : (
+          filtered.map((line, idx) => (
+            <div key={idx} className="flex gap-3 hover:bg-[#161b22]">
+              <span className="w-10 shrink-0 select-none text-right text-[#484f58]">
+                {idx + 1}
+              </span>
+              {line.timestamp && (
+                <span className="shrink-0 text-[#484f58]">
+                  {line.timestamp}
+                </span>
+              )}
+              <span
+                className={cn(
+                  "flex-1 whitespace-pre-wrap break-all",
+                  line.stream === "stderr"
+                    ? "text-red-400"
+                    : "text-[#c9d1d9]",
+                )}
+              >
+                {searchTerm ? highlightSearch(line.text, searchTerm) : line.text}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function highlightSearch(text: string, term: string): React.ReactNode {
+  if (!term) return text;
+  const regex = new RegExp(`(${escapeRegex(term)})`, "gi");
+  const parts = text.split(regex);
+  return parts.map((part, i) =>
+    regex.test(part) ? (
+      <mark key={i} className="bg-yellow-500/30 text-yellow-200 rounded-sm px-0.5">
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
+function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

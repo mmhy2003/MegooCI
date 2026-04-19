@@ -1,0 +1,111 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: megooci
+      POSTGRES_PASSWORD: megooci
+      POSTGRES_DB: megooci
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U megooci"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - MEGOOCI_DATABASE_URL=postgresql+asyncpg://megooci:megooci@postgres:5432/megooci
+      - MEGOOCI_REDIS_URL=redis://redis:6379/0
+      - MEGOOCI_SECRET_KEY=dev-secret-key-change-in-production
+      - MEGOOCI_JWT_SECRET=dev-jwt-secret-change-in-production
+      - MEGOOCI_STORAGE_ROOT=/var/lib/megooci
+      - MEGOOCI_PUBLIC_URL=http://localhost:8000
+      - MEGOOCI_SIGNUP_ENABLED=true
+      - MEGOOCI_AI_ENABLED=false
+    volumes:
+      - ./backend:/app
+      - megooci_storage:/var/lib/megooci
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - MEGOOCI_DATABASE_URL=postgresql+asyncpg://megooci:megooci@postgres:5432/megooci
+      - MEGOOCI_REDIS_URL=redis://redis:6379/0
+      - MEGOOCI_SECRET_KEY=dev-secret-key-change-in-production
+      - MEGOOCI_STORAGE_ROOT=/var/lib/megooci
+    volumes:
+      - ./backend:/app
+      - megooci_storage:/var/lib/megooci
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - MEGOOCI_DATABASE_URL=postgresql+asyncpg://megooci:megooci@postgres:5432/megooci
+      - MEGOOCI_REDIS_URL=redis://redis:6379/0
+      - MEGOOCI_SECRET_KEY=dev-secret-key-change-in-production
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    command: npm run dev
+
+volumes:
+  postgres_data:
+  redis_data:
+  megooci_storage:

@@ -1,0 +1,132 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { formatDistanceToNow } from "date-fns";
+import { toast } from "sonner";
+import { Plus, GitBranch, ExternalLink } from "lucide-react";
+import { AppLayout } from "@/components/layout/app-layout";
+import { pipelinesApi, type Pipeline } from "@/lib/api";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+
+export default function PipelinesPage() {
+  const router = useRouter();
+  const [pipelines, setPipelines] = React.useState<Pipeline[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    pipelinesApi
+      .list()
+      .then((data) => setPipelines(data))
+      .catch(() => toast.error("Failed to load pipelines"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <AppLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Pipelines</h1>
+            <p className="text-muted-foreground">
+              {pipelines.length} pipeline{pipelines.length !== 1 ? "s" : ""}{" "}
+              configured
+            </p>
+          </div>
+          <Button onClick={() => router.push("/pipelines/new")}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            New Pipeline
+          </Button>
+        </div>
+
+        {/* Loading */}
+        {loading ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Card key={i}>
+                <CardHeader>
+                  <Skeleton className="h-5 w-32" />
+                  <Skeleton className="h-4 w-48" />
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-4 w-24" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : pipelines.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <div className="mb-4 rounded-full bg-muted p-4">
+                <GitBranch className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <h3 className="mb-1 text-lg font-semibold">No pipelines yet</h3>
+              <p className="mb-6 max-w-sm text-center text-sm text-muted-foreground">
+                Create your first pipeline to start automating your builds and
+                deployments.
+              </p>
+              <Button onClick={() => router.push("/pipelines/new")}>
+                <Plus className="mr-1.5 h-4 w-4" />
+                Create Pipeline
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {pipelines.map((pipeline) => (
+              <Link key={pipeline.id} href={`/pipelines/${pipeline.id}`}>
+                <Card className="h-full transition-shadow hover:shadow-lg cursor-pointer">
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <CardTitle className="text-base">
+                        {pipeline.name}
+                      </CardTitle>
+                      <Badge variant="secondary" className="ml-2 shrink-0">
+                        {pipeline.definition_format.toUpperCase()}
+                      </Badge>
+                    </div>
+                    {pipeline.source_repo_url && (
+                      <CardDescription className="line-clamp-1">
+                        {pipeline.source_repo_url}
+                      </CardDescription>
+                    )}
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm text-muted-foreground">
+                    <div className="flex items-center gap-1.5">
+                      <GitBranch className="h-3.5 w-3.5" />
+                      <span>{pipeline.default_branch}</span>
+                    </div>
+                    {pipeline.enabled && (
+                      <div className="flex items-center gap-1.5">
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        <span>Active</span>
+                      </div>
+                    )}
+                    <p className="text-xs">
+                      Created{" "}
+                      {formatDistanceToNow(new Date(pipeline.created_at), {
+                        addSuffix: true,
+                      })}
+                    </p>
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  );
+}
