@@ -409,6 +409,56 @@ export interface CreateAgentRequest {
   capacity?: number;
 }
 
+// ------------------------------------------------------------------
+// System / Runtime config
+// ------------------------------------------------------------------
+export type AiStatus =
+  | "ready"
+  | "disabled"
+  | "missing_api_key"
+  | "misconfigured";
+
+export interface AiInfo {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  base_url: string | null;
+  has_api_key: boolean;
+  configured: boolean;
+  status: AiStatus;
+  status_detail: string;
+}
+
+export interface StorageInfo {
+  storage_root: string;
+  retention_builds: number;
+  retention_days: number;
+}
+
+export interface AuthInfo {
+  signup_enabled: boolean;
+  default_role: string;
+}
+
+export interface RegistryInfo {
+  enabled: boolean;
+  host: string;
+}
+
+export interface SystemInfo {
+  version: string;
+  public_url: string;
+  log_level: string;
+  ai: AiInfo;
+  storage: StorageInfo;
+  auth: AuthInfo;
+  registry: RegistryInfo;
+}
+
+export const systemApi = {
+  info: () => fetchApi<SystemInfo>("/api/v1/system/info"),
+};
+
 export const agentsApi = {
   list: (params?: { status?: string; skip?: number; limit?: number }) => {
     const qs = new URLSearchParams();
