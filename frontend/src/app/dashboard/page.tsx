@@ -16,6 +16,7 @@ import {
 import { AppLayout } from "@/components/layout/app-layout";
 import { useAuthStore } from "@/lib/auth";
 import {
+  agentsApi,
   buildsApi,
   pipelinesApi,
   type Build,
@@ -71,12 +72,16 @@ export default function DashboardPage() {
   React.useEffect(() => {
     async function fetchData() {
       try {
-        const [pipelines, builds] = await Promise.all([
+        const [pipelines, builds, agents] = await Promise.all([
           pipelinesApi.list(),
           buildsApi.list({ limit: 10 }),
+          agentsApi.list().catch(() => []),
         ]);
         const successCount = builds.filter(
           (b) => b.status === "success",
+        ).length;
+        const activeAgents = agents.filter(
+          (a) => a.status === "online" || a.status === "busy",
         ).length;
         setStats({
           totalPipelines: pipelines.length,
@@ -85,7 +90,7 @@ export default function DashboardPage() {
             builds.length > 0
               ? Math.round((successCount / builds.length) * 100)
               : 0,
-          activeAgents: 0,
+          activeAgents,
         });
         setRecentBuilds(builds);
       } catch {

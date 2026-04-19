@@ -46,3 +46,8 @@ docker-compose.override.yml
 htmlcov/
 .coverage
 coverage/
+
+# Celery runtime state
+celerybeat-schedule
+celerybeat-schedule.*
+celerybeat.pid

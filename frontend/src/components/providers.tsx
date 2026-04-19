@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useAuthStore } from "@/lib/auth";
 
 // ------------------------------------------------------------------
 // Theme
@@ -96,12 +97,24 @@ function getQueryClient() {
 // ------------------------------------------------------------------
 // Combined Providers
 // ------------------------------------------------------------------
+function AuthBootstrap({ children }: { children: React.ReactNode }) {
+  const loadUser = useAuthStore((s) => s.loadUser);
+
+  React.useEffect(() => {
+    loadUser();
+  }, [loadUser]);
+
+  return <>{children}</>;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const queryClient = getQueryClient();
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider>{children}</ThemeProvider>
+      <ThemeProvider>
+        <AuthBootstrap>{children}</AuthBootstrap>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

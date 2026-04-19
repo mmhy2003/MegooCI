@@ -1,0 +1,51 @@
+# Python bytecode / build artifacts
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+*.egg-info
+dist
+build
+.eggs
+
+# Virtual environments
+venv
+.venv
+env
+
+# IDE / editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Celery runtime state
+celerybeat-schedule
+celerybeat-schedule.*
+celerybeat.pid
+
+# Tests / coverage
+.pytest_cache
+htmlcov
+.coverage
+coverage
+
+# Logs
+*.log

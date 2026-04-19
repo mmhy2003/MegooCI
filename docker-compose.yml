@@ -1,24 +1,35 @@
+# =============================================================================
+# MegooCI — production-ready base compose file
+#
+# This file targets a single-node production deployment. For local development
+# with hot-reload, bind mounts, and dev Dockerfiles, layer the dev overrides:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Or run production as-is:
+#
+#     docker compose up -d
+# =============================================================================
+
 services:
-  postgres:
+  db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: megooci
-      POSTGRES_PASSWORD: megooci
-      POSTGRES_DB: megooci
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-megooci}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-megooci}
+      POSTGRES_DB: ${POSTGRES_DB:-megooci}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U megooci"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-megooci}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
     volumes:
       - redis_data:/data
     healthcheck:
@@ -31,79 +42,67 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      target: production
+    image: megooci-backend:latest
+    restart: unless-stopped
     ports:
       - "8000:8000"
-    environment:
-      - MEGOOCI_DATABASE_URL=postgresql+asyncpg://megooci:megooci@postgres:5432/megooci
-      - MEGOOCI_REDIS_URL=redis://redis:6379/0
-      - MEGOOCI_SECRET_KEY=dev-secret-key-change-in-production
-      - MEGOOCI_JWT_SECRET=dev-jwt-secret-change-in-production
-      - MEGOOCI_STORAGE_ROOT=/var/lib/megooci
-      - MEGOOCI_PUBLIC_URL=http://localhost:8000
-      - MEGOOCI_SIGNUP_ENABLED=true
-      - MEGOOCI_AI_ENABLED=false
+    env_file:
+      - .env
     volumes:
-      - ./backend:/app
       - megooci_storage:/var/lib/megooci
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    environment:
-      - MEGOOCI_DATABASE_URL=postgresql+asyncpg://megooci:megooci@postgres:5432/megooci
-      - MEGOOCI_REDIS_URL=redis://redis:6379/0
-      - MEGOOCI_SECRET_KEY=dev-secret-key-change-in-production
-      - MEGOOCI_STORAGE_ROOT=/var/lib/megooci
+    image: megooci-backend:latest
+    restart: unless-stopped
+    env_file:
+      - .env
     volumes:
-      - ./backend:/app
       - megooci_storage:/var/lib/megooci
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      backend:
+        condition: service_started
     command: celery -A app.tasks.celery_app worker --loglevel=info
 
   celery-beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    environment:
-      - MEGOOCI_DATABASE_URL=postgresql+asyncpg://megooci:megooci@postgres:5432/megooci
-      - MEGOOCI_REDIS_URL=redis://redis:6379/0
-      - MEGOOCI_SECRET_KEY=dev-secret-key-change-in-production
+    image: megooci-backend:latest
+    restart: unless-stopped
+    env_file:
+      - .env
     volumes:
-      - ./backend:/app
+      - megooci_storage:/var/lib/megooci
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      backend:
+        condition: service_started
     command: celery -A app.tasks.celery_app beat --loglevel=info
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      target: dev
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    image: megooci-frontend:latest
+    restart: unless-stopped
     ports:
       - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+    env_file:
+      - .env
     depends_on:
       - backend
-    command: npm run dev
 
 volumes:
   postgres_data:

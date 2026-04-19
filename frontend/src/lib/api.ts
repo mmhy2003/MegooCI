@@ -378,3 +378,61 @@ export const envVarsApi = {
       method: "DELETE",
     }),
 };
+
+// ------------------------------------------------------------------
+// Agents
+// ------------------------------------------------------------------
+export type AgentStatus = "online" | "offline" | "busy";
+
+export interface Agent {
+  id: string;
+  name: string;
+  labels: string[];
+  os: string | null;
+  arch: string | null;
+  capacity: number;
+  last_seen_at: string | null;
+  status: AgentStatus | string;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface AgentRegistrationResponse extends Agent {
+  registration_token: string;
+}
+
+export interface CreateAgentRequest {
+  name: string;
+  labels?: string[];
+  os?: string;
+  arch?: string;
+  capacity?: number;
+}
+
+export const agentsApi = {
+  list: (params?: { status?: string; skip?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.skip) qs.set("skip", String(params.skip));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return fetchApi<Agent[]>(`/api/v1/agents${query ? `?${query}` : ""}`);
+  },
+
+  create: (data: CreateAgentRequest) =>
+    fetchApi<AgentRegistrationResponse>("/api/v1/agents", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  get: (id: string) => fetchApi<Agent>(`/api/v1/agents/${id}`),
+
+  update: (id: string, data: Partial<CreateAgentRequest>) =>
+    fetchApi<Agent>(`/api/v1/agents/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    fetchApi<void>(`/api/v1/agents/${id}`, { method: "DELETE" }),
+};

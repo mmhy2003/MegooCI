@@ -1,0 +1,68 @@
+# =============================================================================
+# MegooCI — development overrides
+#
+# Usage:
+#     docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Or add the shortcut to your shell:
+#     export COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+#     docker compose up
+#
+# Overrides compared to the production base:
+#   - Source code is bind-mounted into backend & frontend containers.
+#   - Frontend uses `Dockerfile.dev` (hot-reload, polling watcher).
+#   - Backend builds the `dev` stage and runs uvicorn with `--reload`.
+#   - No `restart: unless-stopped` so Ctrl+C stops cleanly.
+#   - Postgres & Redis expose their ports on the host for direct tool access.
+# =============================================================================
+
+services:
+  db:
+    restart: "no"
+    ports:
+      - "5432:5432"
+
+  redis:
+    restart: "no"
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: dev
+    image: megooci-backend:dev
+    restart: "no"
+    volumes:
+      - ./backend:/app
+      - megooci_storage:/var/lib/megooci
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  celery-worker:
+    image: megooci-backend:dev
+    restart: "no"
+    volumes:
+      - ./backend:/app
+      - megooci_storage:/var/lib/megooci
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+
+  celery-beat:
+    image: megooci-backend:dev
+    restart: "no"
+    volumes:
+      - ./backend:/app
+      - megooci_storage:/var/lib/megooci
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: megooci-frontend:dev
+    restart: "no"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev

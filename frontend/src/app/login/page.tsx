@@ -18,14 +18,14 @@ import {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, accessToken } = useAuthStore();
+  const { login, accessToken, hasHydrated } = useAuthStore();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   React.useEffect(() => {
-    if (accessToken) router.replace("/dashboard");
-  }, [accessToken, router]);
+    if (hasHydrated && accessToken) router.replace("/dashboard");
+  }, [hasHydrated, accessToken, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

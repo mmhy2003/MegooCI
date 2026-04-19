@@ -18,7 +18,7 @@ import {
 
 export default function SignupPage() {
   const router = useRouter();
-  const { signup, accessToken } = useAuthStore();
+  const { signup, accessToken, hasHydrated } = useAuthStore();
   const [fullName, setFullName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -26,8 +26,8 @@ export default function SignupPage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   React.useEffect(() => {
-    if (accessToken) router.replace("/dashboard");
-  }, [accessToken, router]);
+    if (hasHydrated && accessToken) router.replace("/dashboard");
+  }, [hasHydrated, accessToken, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

@@ -11,7 +11,9 @@ interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
   isLoading: boolean;
+  hasHydrated: boolean;
 
+  hydrate: () => void;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name: string) => Promise<void>;
   logout: () => void;
@@ -22,15 +24,24 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  accessToken:
-    typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null,
-  refreshToken:
-    typeof window !== "undefined" ? localStorage.getItem(REFRESH_KEY) : null,
+  accessToken: null,
+  refreshToken: null,
   isLoading: true,
+  hasHydrated: false,
+
+  hydrate: () => {
+    if (typeof window === "undefined") return;
+    if (get().hasHydrated) return;
+    const accessToken = localStorage.getItem(TOKEN_KEY);
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    set({ accessToken, refreshToken, hasHydrated: true });
+  },
 
   setTokens: (tokens: AuthTokens) => {
-    localStorage.setItem(TOKEN_KEY, tokens.access_token);
-    localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(TOKEN_KEY, tokens.access_token);
+      localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
+    }
     set({
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
@@ -52,10 +63,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_KEY);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(REFRESH_KEY);
+    }
     set({ user: null, accessToken: null, refreshToken: null });
-    window.location.href = "/login";
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
   },
 
   refreshAccessToken: async () => {
@@ -73,6 +88,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   loadUser: async () => {
+    get().hydrate();
     const { accessToken } = get();
     if (!accessToken) {
       set({ isLoading: false });
@@ -87,8 +103,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const user = await authApi.getMe();
         set({ user, isLoading: false });
       } catch {
-        set({ isLoading: false });
-        get().logout();
+        set({ user: null, accessToken: null, refreshToken: null, isLoading: false });
       }
     }
   },
