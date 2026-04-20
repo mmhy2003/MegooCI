@@ -27,8 +27,13 @@ DB_USER       ?= megooci
 DB_NAME       ?= megooci
 
 # --- Go agent configuration --------------------------------------------------
+#
+# The root Makefile owns only *system-level* agent targets: building the
+# Docker image and starting / stopping / tailing the agent container wired to
+# the running Compose stack. Go-workflow targets (build, test, vet, fmt,
+# tidy, goreleaser snapshot, clean) live in `agent/Makefile` — run those
+# from inside the `agent/` directory.
 AGENT_DIR            := ./agent
-AGENT_BIN            := megooci-agent
 AGENT_VERSION        ?= 0.1.0-dev
 AGENT_COMMIT         := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 AGENT_DATE           := $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)
@@ -98,8 +103,7 @@ MegooCI Makefile - available targets:
     migrate-down               Roll back the most recent migration
 
   Agent (megooci-agent, PRD F-3.4)
-    agent-bin                  Build the Go binary locally (./agent/bin/megooci-agent)
-    agent-image                Build the agent Docker image (no local Go needed)
+    agent-image                Build the agent Docker image
     agent-image-push           Push the image to the configured registry
     agent-up ID=.. TOKEN=..    Run the agent container, passing ID and token as
                                  CLI flags to `docker run`. Extra overrides:
@@ -109,9 +113,7 @@ MegooCI Makefile - available targets:
     agent-restart              Restart the agent container (keeps its config)
     agent-logs                 Tail agent container logs
     agent-shell                Open a shell inside the running agent container
-    agent-test                 Run `go test ./...` in the agent module
-    agent-tidy                 Run `go mod tidy` in the agent module
-    agent-clean                Remove ./agent/bin/
+    (Go developer workflow: `cd agent && make build|test|vet|fmt|tidy|snapshot|clean`)
 
   Cleanup
     clean             Stop stack & remove orphan containers
@@ -250,10 +252,17 @@ migrate-down: ## Roll back the most recent migration
 	$(COMPOSE_DEV) exec $(BACKEND_SVC) alembic downgrade -1
 
 # =============================================================================
-# Agent (megooci-agent — Go binary + Docker image + direct docker run)
+# Agent (megooci-agent — Docker image + container lifecycle)
 # =============================================================================
 #
-# Typical flow:
+# These targets glue the agent to the rest of the running stack. For pure Go
+# workflows (build / test / vet / fmt / tidy / goreleaser snapshot / clean)
+# use `agent/Makefile` instead:
+#
+#     cd agent && make build
+#     cd agent && make test
+#
+# Typical operator flow:
 #
 #   1. make agent-image                    (one-off: build the Docker image)
 #   2. Register the agent in the MegooCI UI and copy its ID + token.
@@ -261,11 +270,9 @@ migrate-down: ## Roll back the most recent migration
 #      (ID + token are passed as CLI flags to `docker run`, never persisted)
 #   4. make agent-logs                     (verify it connected)
 #
-# For host-side builds (e.g. to run the agent directly on a bare machine)
-# use `make agent-bin` — requires Go 1.22+ on PATH.
 # -----------------------------------------------------------------------------
 #
-# Runtime overrides (all passable as make variables):
+# Runtime overrides (all passable as make variables to `agent-up`):
 #
 #   ID             required — agent UUID from the UI
 #   TOKEN          required — one-shot registration / rotate token
@@ -286,18 +293,6 @@ _AGENT_CAPACITY      := $(or $(CAPACITY),$(AGENT_CAPACITY))
 _AGENT_LOG_LEVEL     := $(or $(LOG_LEVEL),$(AGENT_LOG_LEVEL))
 _AGENT_NETWORK       := $(or $(NETWORK),$(AGENT_NETWORK))
 _AGENT_NAME          := $(or $(NAME),$(AGENT_CONTAINER_NAME))
-
-.PHONY: agent-bin
-agent-bin: ## Build the megooci-agent Go binary into ./agent/bin/
-	@command -v go >/dev/null 2>&1 || { echo "go is not installed — use 'make agent-image' to build via Docker instead"; exit 1; }
-	cd $(AGENT_DIR) && \
-		CGO_ENABLED=0 go build -trimpath \
-		-ldflags "-s -w \
-			-X github.com/megooci/megooci-agent/internal/version.Version=$(AGENT_VERSION) \
-			-X github.com/megooci/megooci-agent/internal/version.Commit=$(AGENT_COMMIT) \
-			-X github.com/megooci/megooci-agent/internal/version.Date=$(AGENT_DATE)" \
-		-o bin/$(AGENT_BIN) ./cmd/megooci-agent
-	@echo "Built $(AGENT_DIR)/bin/$(AGENT_BIN) (version $(AGENT_VERSION))"
 
 .PHONY: agent-image
 agent-image: ## Build the agent Docker image (tags: $(AGENT_IMAGE_FULL) + latest)
@@ -360,18 +355,6 @@ agent-logs: ## Tail agent container logs
 .PHONY: agent-shell
 agent-shell: ## Open a shell in the running agent container
 	docker exec -it $(_AGENT_NAME) /bin/sh
-
-.PHONY: agent-test
-agent-test: ## Run go test ./... inside the agent module
-	cd $(AGENT_DIR) && go test ./...
-
-.PHONY: agent-tidy
-agent-tidy: ## Run go mod tidy inside the agent module
-	cd $(AGENT_DIR) && go mod tidy
-
-.PHONY: agent-clean
-agent-clean: ## Remove the locally-built agent binary
-	rm -rf $(AGENT_DIR)/bin $(AGENT_DIR)/dist
 
 # =============================================================================
 # Cleanup
