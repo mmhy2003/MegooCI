@@ -145,7 +145,37 @@ async def cancel_build(
     build.status = "cancelled"
     await db.commit()
     await db.refresh(build)
+
+    # If any step of this build is currently running on an agent, tell that
+    # agent to stop. The local executor watches `build.status` between steps
+    # and bails out on its own, but a step already in-flight on an agent
+    # needs an explicit cancel frame to terminate promptly.
+    await _notify_agents_of_cancel(db, build_id)
+
     return build
+
+
+async def _notify_agents_of_cancel(
+    db: AsyncSession, build_id: uuid.UUID
+) -> None:
+    """Publish cancel frames for every running step of `build_id` that has
+    an `agent_id`. Best-effort; errors are swallowed to avoid failing the
+    cancel request itself."""
+    from sqlalchemy import select
+    from app.models.build import Stage, Step
+    from app.services.agent_dispatcher import signal_cancel_step
+
+    result = await db.execute(
+        select(Step)
+        .join(Stage, Step.stage_id == Stage.id)
+        .where(Stage.build_id == build_id, Step.status == "running", Step.agent_id.isnot(None))
+    )
+    for step in result.scalars().all():
+        try:
+            if step.agent_id is not None:
+                await signal_cancel_step(step.agent_id, step.id)
+        except Exception:
+            pass
 
 
 @router.post("/{build_id}/retry", response_model=BuildResponse, status_code=status.HTTP_201_CREATED)

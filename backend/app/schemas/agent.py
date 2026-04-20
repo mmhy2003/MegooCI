@@ -1,4 +1,3 @@
-import secrets
 import uuid
 from datetime import datetime
 
@@ -21,6 +20,15 @@ class AgentUpdate(BaseModel):
     capacity: int | None = Field(default=None, ge=1, le=64)
 
 
+class HeartbeatRequest(BaseModel):
+    """Optional payload the agent sends with its periodic heartbeat.
+
+    Empty-body heartbeats are also accepted for compatibility.
+    """
+
+    version: str | None = None
+
+
 class AgentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -32,16 +40,20 @@ class AgentResponse(BaseModel):
     capacity: int
     last_seen_at: datetime | None
     status: str
+    # Token metadata — the plaintext token is never returned here.
+    token_prefix: str | None = None
+    token_issued_at: datetime | None = None
+    # Runtime info.
+    agent_version: str | None = None
+    connected_at: datetime | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
 
 class AgentRegistrationResponse(AgentResponse):
-    """Response when registering a new agent — includes a one-time token."""
+    """Response when registering (or rotating) — includes the plaintext token.
+
+    The plaintext token is returned exactly once and is not recoverable.
+    """
 
     registration_token: str
-
-
-def generate_registration_token() -> str:
-    """URL-safe random token used by the agent to authenticate back to the controller."""
-    return secrets.token_urlsafe(32)

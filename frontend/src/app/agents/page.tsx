@@ -10,7 +10,9 @@ import {
   Copy,
   Check,
   Cpu,
+  KeyRound,
   Monitor,
+  RefreshCw,
   Tag,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -140,6 +142,37 @@ export default function AgentsPage() {
       toast.success("Agent deleted");
     } catch {
       toast.error("Failed to delete agent");
+    }
+  }
+
+  async function handleRotate(id: string, name: string) {
+    const ok = await confirm({
+      title: `Rotate token for '${name}'?`,
+      description: (
+        <>
+          The current token will be invalidated immediately. Any running agent
+          using the old token will be disconnected at its next reconnect and
+          must be restarted with the new token.
+        </>
+      ),
+      confirmText: "Rotate token",
+      cancelText: "Keep current",
+      tone: "warning",
+    });
+    if (!ok) return;
+    try {
+      const updated = await agentsApi.rotateToken(id);
+      setAgents((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, ...updated } : a)),
+      );
+      // Reuse the same one-shot card as registration to show the new token.
+      setJustRegistered(updated);
+      setTokenCopied(false);
+      toast.success("Token rotated");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to rotate token";
+      toast.error(message);
     }
   }
 
@@ -277,13 +310,14 @@ export default function AgentsPage() {
           <Card className="border-primary/50 bg-primary/5">
             <CardHeader>
               <CardTitle className="text-base">
-                Registration token for {justRegistered.name}
+                Agent token for {justRegistered.name}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 Copy this token now — it will not be shown again. Run the
                 agent binary with this token to connect it to MegooCI.
+                Previous tokens (if any) are invalidated immediately.
               </p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs">
@@ -408,13 +442,35 @@ export default function AgentsPage() {
                       ))}
                     </div>
                   )}
+                  {agent.token_prefix && (
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <KeyRound className="h-3.5 w-3.5" />
+                      <code className="truncate font-mono text-xs">
+                        {agent.token_prefix}
+                        {"\u2026"}
+                      </code>
+                    </div>
+                  )}
+                  {agent.agent_version && (
+                    <div className="text-xs text-muted-foreground">
+                      Binary: {agent.agent_version}
+                    </div>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     {agent.last_seen_at
                       ? `Last seen ${formatDistanceToNow(new Date(agent.last_seen_at), { addSuffix: true })}`
                       : "Never connected"}
                   </p>
                   {isAdmin && (
-                    <div className="flex justify-end pt-2">
+                    <div className="flex flex-wrap justify-end gap-1 pt-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRotate(agent.id, agent.name)}
+                      >
+                        <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                        Rotate token
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"

@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     agents,
+    agents_ws,
     auth,
     builds,
     git_connections,
@@ -33,3 +34,4 @@ api_v1_router.include_router(
 )
 api_v1_router.include_router(webhooks_git.router, tags=["git-integration"])
 api_v1_router.include_router(websocket.router, tags=["websocket"])
+api_v1_router.include_router(agents_ws.router, tags=["agents"])

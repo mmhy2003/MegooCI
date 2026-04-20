@@ -4,13 +4,14 @@
 | --- | --- |
 | **Product Name** | MegooCI |
 | **Tagline** | A simpler, modern open-source alternative to Jenkins |
-| **Document Status** | Draft v1.3 |
+| **Document Status** | Draft v1.4 |
 | **Last Updated** | 2026-04-20 |
 | **Owner** | MegooCI Core Team |
 | **License (planned)** | Apache-2.0 (OSS) |
 
 > **Change log**
 >
+> - **v1.4 (2026-04-20)** — Agent control plane delivered (F-3.4, F-3.7). New `agent/` Go module ships the `megooci-agent` binary (Cobra CLI, gorilla/websocket client, subprocess executor, heartbeat, reconnect, capacity semaphore, cancellation). Backend gains `/api/v1/ws/agents/{id}/connect` with bcrypt-hashed token auth, a Redis-queue dispatcher, `/rotate-token` endpoint, and a try-agent-first / fall-back-to-local execution strategy. Alembic migration `003_agent_tokens.py`. §6.15 status updated accordingly.
 > - **v1.3 (2026-04-20)** — Added §6.16 "Git Provider Integration" (admin-scoped Git connections with PAT auth, per-project repository linking, manual-paste webhook receivers with HMAC verification for GitHub/GitLab/Generic, delivery log, webhook-triggered builds). Added `GitProviderConnection`, `ProjectRepository`, and `WebhookDelivery` to §10. Added OAuth and delivery-retention env vars to §6.14. Marked Phase 1 as delivered in §6.15.
 > - **v1.2 (2026-04-20)** — Added §6.15 "Implementation Status Snapshot" reflecting a full-codebase audit of `backend/` and `frontend/`. No requirement changes; the feature tables above remain the target specification.
 > - **v1.1 (2026-04-19)** — Added embedded OCI registry (§6.13), AI assistant details (§6.12), env-var model.
@@ -413,10 +414,11 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 | Freestyle jobs · Multi-branch · Parameterized · Matrix | F-1.3 – F-1.6 | ❌ | None of these are wired into the trigger or executor. |
 | Parallel stages, conditional `when`, matrix/axis | F-1.6 – F-1.8 | ❌ | Executor runs stages strictly sequentially; `when` is not evaluated; no matrix expansion. |
 | Pipeline env variable scoping & inheritance | F-1.9 | ❌ | Secrets/env vars are not loaded by the executor at build time. |
-| Local executor (shell on controller) | F-3.1 | 🟡 | `services/build_executor.py` invokes `asyncio.create_subprocess_shell(step.command)` inside the Celery worker. Cancellation by polling `build.status`; no Celery task revocation. |
-| Docker / SSH / Kubernetes executors | F-3.2, F-3.3, F-3.5 | ❌ | No executor implementations. |
-| Dedicated agent binary + self-registration | F-3.4 | 🟡 | `POST /agents/` (admin) and `POST /agents/{id}/heartbeat` exist. **Registration token is returned once but never persisted** on the `Agent` row and is never verified on subsequent calls. No controller ↔ agent control channel. |
-| Agent labels · concurrency limits | F-3.6, F-3.7 | 🟡 | Columns exist on `Agent`; scheduler does not consult them. |
+| Local executor (shell on controller) | F-3.1 | ✅ | `services/build_executor.py` invokes `asyncio.create_subprocess_shell(step.command)` as a fallback when no agent is online. Used unchanged for back-compat. |
+| Docker / SSH / Kubernetes executors | F-3.2, F-3.3, F-3.5 | ❌ | Agent-side `executor.Executor` interface is in place for future implementations; only `Local` ships today. |
+| **Agent control plane** (Go binary + WebSocket + token auth + dispatcher) | F-3.4 | ✅ | `agent/` module: `megooci-agent` Go binary with Cobra CLI, gorilla/websocket client, subprocess executor, heartbeat, reconnect, cancellation. Backend: `agents_ws.py` WS endpoint, `core/agent_auth.py` bcrypt token auth, `services/agent_dispatcher.py` Redis queue + pub/sub, `build_executor.py` dispatches to a connected agent when available and falls back to local otherwise. Alembic migration `003_agent_tokens.py` persists bcrypt-hashed tokens + 12-char prefix + issued-at. Dockerfile + GoReleaser config included. |
+| Agent capacity limits | F-3.7 | ✅ | Enforced client-side via a buffered-channel semaphore in the Go agent (`internal/executor/local.go`). |
+| Agent labels / label-based scheduling | F-3.6 | 🟡 | `Agent.labels` is persisted and shown in the UI; Phase-1 dispatcher picks the least-recently-used online agent without consulting labels. Label matching is the next scheduler improvement. |
 | Live build logs via WebSocket | F-5.1 | 🟡 | `WS /api/v1/ws/builds/{id}/logs` bridges Redis pub/sub channel `build:{id}:logs`. **No auth on the socket.** |
 | Archived log storage on disk | F-5.2 | 🟡 | Logs are written to `LogChunk` rows in Postgres. No flush to `MEGOOCI_STORAGE_ROOT/logs/...` yet. |
 | Artifact upload/download · retention · quotas | F-5.3 – F-5.6 | 🟡 | `Artifact` model + migration exist; no API, no upload/download flow, executor never creates rows. |
@@ -476,15 +478,16 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 #### 6.15.3 End-to-end capability today
 
 - ✅ A user can sign up, log in, create a project, create a YAML pipeline, trigger a build, and watch live logs stream from a shell-executed build.
-- ✅ An admin can register an agent and copy a registration token (the token is **not** usable yet — see 6.15.1).
+- ✅ An admin can register an agent, copy its registration token, and run the `megooci-agent` Go binary on a build host. Subsequent builds are dispatched to that agent (WebSocket control channel + bcrypt-hashed tokens + Redis dispatch queue); if no agent is online the controller falls back to running steps in-process.
 - ✅ Operators can view current backend configuration (AI, auth, storage, registry) via the Settings page.
-- 🟡 Cancellation, retry, and live log streaming all work, but only because the executor polls `build.status`; there is no task revocation and no auth on the log WebSocket.
-- ❌ Nothing outside the controller process actually runs builds yet — there is no agent control plane, no Docker/SSH/K8s executor, no artifact flow, no notifications, and no registry.
+- 🟡 Cancellation, retry, and live log streaming all work. A cancel on a running build now also signals any agent executing a step; the build log WebSocket to the browser remains unauthenticated.
+- ❌ Docker / SSH / K8s executors, artifact flow, notifications, and registry are still unbuilt.
 
 #### 6.15.4 Largest gaps vs. the specification (priority-ordered for upcoming work)
 
-1. **Agent control plane + remote execution.** Prerequisite for every executor other than "local shell on controller" — unblocks F-3.2 (Docker), F-3.3 (SSH), F-3.5 (K8s), F-3.6 (labels), F-3.7 (concurrency limits), and the whole scaling story.
-2. **Pipeline runtime fidelity.** Parallel stages (F-1.7), conditional `when` (F-1.8), matrix (F-1.6), parameters (F-1.5), and **secret/env injection** into `build_executor` (F-8.5, F-1.9). Today's executor is much simpler than the compiler implies.
+1. **Pipeline runtime fidelity.** Parallel stages (F-1.7), conditional `when` (F-1.8), matrix (F-1.6), parameters (F-1.5), and **secret/env injection** into the executor (F-8.5, F-1.9). The agent side is ready to receive richer step descriptors; the controller's compiler output needs to catch up.
+2. **Alternative executors on the agent** — Docker (F-3.2), SSH (F-3.3), Kubernetes (F-3.5). The agent exposes an `executor.Executor` interface; only `Local` ships today.
+3. **Label-based agent scheduling** (F-3.6). Labels are persisted and displayed; the dispatcher currently ignores them when selecting an online agent.
 3. **Webhooks — incoming + outgoing** (F-2.2, F-11.1, F-11.2). The `WebhookEndpoint` model is in place; the HTTP layer is missing.
 4. **Scheduled triggers** via Celery Beat (F-2.3). Beat is wired up; the schedule is empty.
 5. **Artifacts + test results** (F-5.3 – F-5.8). No endpoints, no on-disk layout, no UI.

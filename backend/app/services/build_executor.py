@@ -17,6 +17,10 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.models.build import Build, LogChunk, Stage, Step
+from app.services.agent_dispatcher import (
+    dispatch_step_to_agent,
+    pick_online_agent,
+)
 
 
 async def execute_build(
@@ -85,17 +89,33 @@ async def execute_build(
                 })
 
                 if step.command:
-                    exit_code = await _run_command(
-                        step, db, redis_client, channel
+                    # Try to dispatch to a connected agent first. If no agent
+                    # is online, or if the agent times out / disconnects, fall
+                    # back to running the command locally in the Celery worker
+                    # (the pre-agent behaviour).
+                    agent_result = await _try_dispatch_to_agent(
+                        step, stage.name, build.id, db
                     )
-                    step.exit_code = exit_code
-                    step.status = "success" if exit_code == 0 else "failed"
+                    if agent_result is not None:
+                        # The agent's WS handler has already persisted
+                        # step.status, step.started_at, step.finished_at, and
+                        # exit_code, and has streamed log lines into the same
+                        # build pubsub channel. Refresh the ORM instance so
+                        # the downstream status comparisons are accurate.
+                        await db.refresh(step)
+                    else:
+                        exit_code = await _run_command(
+                            step, db, redis_client, channel
+                        )
+                        step.exit_code = exit_code
+                        step.status = "success" if exit_code == 0 else "failed"
+                        step.finished_at = datetime.now(timezone.utc)
+                        await db.commit()
                 else:
                     step.status = "success"
                     step.exit_code = 0
-
-                step.finished_at = datetime.now(timezone.utc)
-                await db.commit()
+                    step.finished_at = datetime.now(timezone.utc)
+                    await db.commit()
 
                 await _publish(redis_client, channel, {
                     "event": "step_finished",
@@ -221,3 +241,24 @@ async def _publish(
 ) -> None:
     """Publish a JSON message to a Redis pub/sub channel."""
     await redis_client.publish(channel, json.dumps(data))
+
+
+async def _try_dispatch_to_agent(
+    step: Step,
+    stage_name: str,
+    build_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict | None:
+    """If a healthy agent is online, run this step there and return its
+    result dict. Returns None if no agent picks it up within the timeout,
+    so the caller can transparently fall back to local execution.
+    """
+    agent = await pick_online_agent(db)
+    if agent is None:
+        return None
+    return await dispatch_step_to_agent(
+        step=step,
+        stage_name=stage_name,
+        build_id=build_id,
+        agent_id=agent.id,
+    )

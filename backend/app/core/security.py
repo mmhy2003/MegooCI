@@ -136,3 +136,42 @@ def credential_hint(token: str) -> str:
     if not token:
         return ""
     return token[-4:] if len(token) > 4 else "*" * len(token)
+
+
+# ----------------------------------------------------------------------------
+# Agent tokens (PRD §6.3 / F-3.4)
+# ----------------------------------------------------------------------------
+_AGENT_TOKEN_PREFIX = "megci_agt_"
+
+
+def generate_agent_token() -> str:
+    """Generate a URL-safe random token for an agent to authenticate with.
+
+    The `megci_agt_` prefix makes tokens self-describing (operators can tell
+    the difference between an agent token and, say, a provider PAT at a
+    glance) and makes it easy for future secret-scanning tools to catch
+    accidental commits.
+    """
+    import secrets
+
+    return _AGENT_TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def agent_token_prefix(token: str) -> str:
+    """Return the first 12 characters of a token for non-sensitive display."""
+    return token[:12]
+
+
+def hash_agent_token(token: str) -> str:
+    """bcrypt-hash an agent token for database storage."""
+    hashed = bcrypt.hashpw(_truncate_to_72_bytes(token), bcrypt.gensalt())
+    return hashed.decode("utf-8")
+
+
+def verify_agent_token(plain: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(
+            _truncate_to_72_bytes(plain), hashed.encode("utf-8")
+        )
+    except ValueError:
+        return False

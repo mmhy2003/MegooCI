@@ -476,6 +476,13 @@ export interface Agent {
   capacity: number;
   last_seen_at: string | null;
   status: AgentStatus | string;
+  // Agent-token metadata (PRD §6.3 / F-3.4). Plaintext token is returned
+  // only on register / rotate via AgentRegistrationResponse.
+  token_prefix?: string | null;
+  token_issued_at?: string | null;
+  // Reported by the agent on connect.
+  agent_version?: string | null;
+  connected_at?: string | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -576,6 +583,12 @@ export const agentsApi = {
 
   delete: (id: string) =>
     fetchApi<void>(`/api/v1/agents/${id}`, { method: "DELETE" }),
+
+  rotateToken: (id: string) =>
+    fetchApi<AgentRegistrationResponse>(
+      `/api/v1/agents/${id}/rotate-token`,
+      { method: "POST" },
+    ),
 };
 
 // ------------------------------------------------------------------

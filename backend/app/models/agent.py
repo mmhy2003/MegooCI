@@ -23,6 +23,26 @@ class Agent(Base):
         DateTime(timezone=True), nullable=True
     )
     status: Mapped[str] = mapped_column(String(20), default="offline")
+
+    # Agent authentication (PRD §6.3 / F-3.4).
+    #
+    # `token_hash` is a bcrypt hash of the plaintext token we return once at
+    # registration / rotation. The plaintext is never stored server-side.
+    # `token_prefix` is the first 12 characters of the plaintext (e.g.
+    # "megci_agt_Ab") — safe to display so operators can tell tokens apart in
+    # the UI and in logs.
+    token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    token_prefix: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    token_issued_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Runtime info reported by the agent when it connects.
+    agent_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    connected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
