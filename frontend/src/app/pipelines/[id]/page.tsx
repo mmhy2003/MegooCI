@@ -13,6 +13,7 @@ import {
   Clock,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   pipelinesApi,
   buildsApi,
@@ -58,6 +59,7 @@ type Tab = "overview" | "builds" | "configuration";
 export default function PipelineDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const confirm = useConfirm();
   const id = params.id as string;
 
   const [pipeline, setPipeline] = React.useState<Pipeline | null>(null);
@@ -99,7 +101,22 @@ export default function PipelineDetailPage() {
   }
 
   async function handleDelete() {
-    if (!confirm("Are you sure you want to delete this pipeline?")) return;
+    const ok = await confirm({
+      title: "Delete this pipeline?",
+      description: (
+        <>
+          <span className="font-medium text-foreground">
+            {pipeline?.name ?? "This pipeline"}
+          </span>{" "}
+          and all of its build history will be permanently removed. This action
+          cannot be undone.
+        </>
+      ),
+      confirmText: "Delete pipeline",
+      cancelText: "Keep",
+      tone: "destructive",
+    });
+    if (!ok) return;
     try {
       await pipelinesApi.delete(id);
       toast.success("Pipeline deleted");

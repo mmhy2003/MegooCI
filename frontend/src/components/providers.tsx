@@ -3,6 +3,7 @@
 import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/lib/auth";
+import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 
 // ------------------------------------------------------------------
 // Theme
@@ -113,7 +114,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <AuthBootstrap>{children}</AuthBootstrap>
+        <ConfirmProvider>
+          <AuthBootstrap>{children}</AuthBootstrap>
+        </ConfirmProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

@@ -14,6 +14,7 @@ import {
   Settings,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   projectsApi,
   pipelinesApi,
@@ -43,6 +44,7 @@ type Tab = "pipelines" | "settings";
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const confirm = useConfirm();
   const id = params.id as string;
 
   const [project, setProject] = React.useState<Project | null>(null);
@@ -111,7 +113,23 @@ export default function ProjectDetailPage() {
   }
 
   async function handleDeleteSecret(secretId: string) {
-    if (!confirm("Delete this secret?")) return;
+    const secret = secrets.find((s) => s.id === secretId);
+    const ok = await confirm({
+      title: "Delete this secret?",
+      description: (
+        <>
+          <code className="font-mono text-foreground">
+            {secret?.name ?? "This secret"}
+          </code>{" "}
+          will be permanently removed. Pipelines using it will fail until it&apos;s
+          recreated.
+        </>
+      ),
+      confirmText: "Delete secret",
+      cancelText: "Keep",
+      tone: "destructive",
+    });
+    if (!ok) return;
     try {
       await secretsApi.delete(secretId);
       setSecrets((prev) => prev.filter((s) => s.id !== secretId));
@@ -148,7 +166,22 @@ export default function ProjectDetailPage() {
   }
 
   async function handleDeleteEnv(envId: string) {
-    if (!confirm("Delete this environment variable?")) return;
+    const envVar = envVars.find((v) => v.id === envId);
+    const ok = await confirm({
+      title: "Delete this variable?",
+      description: (
+        <>
+          <code className="font-mono text-foreground">
+            {envVar?.name ?? "This variable"}
+          </code>{" "}
+          will be removed from this project.
+        </>
+      ),
+      confirmText: "Delete variable",
+      cancelText: "Keep",
+      tone: "destructive",
+    });
+    if (!ok) return;
     try {
       await envVarsApi.delete(envId);
       setEnvVars((prev) => prev.filter((v) => v.id !== envId));

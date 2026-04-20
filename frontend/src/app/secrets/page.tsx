@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { KeyRound, Plus, Trash2, Variable } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   projectsApi,
   secretsApi,
@@ -34,6 +35,7 @@ interface ProjectSecrets {
 }
 
 export default function SecretsPage() {
+  const confirm = useConfirm();
   const [projectData, setProjectData] = React.useState<ProjectSecrets[]>([]);
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -118,7 +120,26 @@ export default function SecretsPage() {
   }
 
   async function handleDeleteSecret(secretId: string) {
-    if (!confirm("Delete this secret?")) return;
+    const secret = allSecrets.find((s) => s.id === secretId);
+    const ok = await confirm({
+      title: "Delete this secret?",
+      description: (
+        <>
+          <code className="font-mono text-foreground">
+            {secret?.name ?? "This secret"}
+          </code>{" "}
+          will be permanently removed from{" "}
+          <span className="font-medium text-foreground">
+            {secret?.projectName ?? "the project"}
+          </span>
+          . Pipelines using it will fail until it&apos;s recreated.
+        </>
+      ),
+      confirmText: "Delete secret",
+      cancelText: "Keep",
+      tone: "destructive",
+    });
+    if (!ok) return;
     try {
       await secretsApi.delete(secretId);
       toast.success("Secret deleted");
@@ -155,7 +176,26 @@ export default function SecretsPage() {
   }
 
   async function handleDeleteEnv(envId: string) {
-    if (!confirm("Delete this variable?")) return;
+    const envVar = allEnvVars.find((v) => v.id === envId);
+    const ok = await confirm({
+      title: "Delete this variable?",
+      description: (
+        <>
+          <code className="font-mono text-foreground">
+            {envVar?.name ?? "This variable"}
+          </code>{" "}
+          will be removed from{" "}
+          <span className="font-medium text-foreground">
+            {envVar?.projectName ?? "the project"}
+          </span>
+          .
+        </>
+      ),
+      confirmText: "Delete variable",
+      cancelText: "Keep",
+      tone: "destructive",
+    });
+    if (!ok) return;
     try {
       await envVarsApi.delete(envId);
       toast.success("Variable deleted");

@@ -14,6 +14,7 @@ import {
   Tag,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAuthStore } from "@/lib/auth";
 import {
   agentsApi,
@@ -45,6 +46,7 @@ function agentStatusVariant(
 
 export default function AgentsPage() {
   const { user } = useAuthStore();
+  const confirm = useConfirm();
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [loading, setLoading] = React.useState(true);
 
@@ -123,7 +125,15 @@ export default function AgentsPage() {
   }
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`Delete agent '${name}'? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete agent '${name}'?`,
+      description:
+        "This agent will be disconnected and permanently removed. This action cannot be undone.",
+      confirmText: "Delete agent",
+      cancelText: "Keep",
+      tone: "destructive",
+    });
+    if (!ok) return;
     try {
       await agentsApi.delete(id);
       setAgents((prev) => prev.filter((a) => a.id !== id));
