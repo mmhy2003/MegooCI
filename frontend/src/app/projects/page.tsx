@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
-import { Plus, FolderKanban } from "lucide-react";
+import { Plus, FolderKanban, Trash2, Loader2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { projectsApi, type Project } from "@/lib/api";
 import {
@@ -26,12 +26,15 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 export default function ProjectsPage() {
+  const confirm = useConfirm();
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
+  const [deletingId, setDeletingId] = React.useState<string | null>(null);
 
   const [newName, setNewName] = React.useState("");
   const [newDesc, setNewDesc] = React.useState("");
@@ -65,6 +68,86 @@ export default function ProjectsPage() {
       toast.error("Failed to create project");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleDeleteProject(project: Project) {
+    // Mirrors the detail-page flow: try a plain delete first, and if the
+    // backend refuses because dependents exist (409 with a `cannot delete
+    // project` detail), offer a second confirmation that retries with
+    // ?force=true to cascade.
+    const ok = await confirm({
+      title: `Delete project '${project.name}'?`,
+      description: (
+        <>
+          The project will be removed. Pipelines, linked repositories, secrets,
+          and environment variables scoped to this project must already be
+          empty. This action cannot be undone.
+        </>
+      ),
+      confirmText: "Delete project",
+      cancelText: "Keep",
+      tone: "destructive",
+    });
+    if (!ok) return;
+
+    setDeletingId(project.id);
+    try {
+      await projectsApi.delete(project.id);
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
+      toast.success("Project deleted");
+      return;
+    } catch (err: unknown) {
+      const body = (err as { body?: { detail?: string } } | undefined)?.body;
+      const detail = body?.detail;
+
+      const isDependentsConflict =
+        typeof detail === "string" &&
+        detail.toLowerCase().includes("cannot delete project");
+
+      if (!isDependentsConflict) {
+        toast.error(
+          detail ||
+            (err instanceof Error ? err.message : "Failed to delete project"),
+        );
+        return;
+      }
+
+      const forceOk = await confirm({
+        title: "Delete everything in this project?",
+        description: (
+          <>
+            <p>{detail}</p>
+            <p className="mt-2 text-sm">
+              Proceeding will permanently remove{" "}
+              <span className="font-medium text-foreground">
+                all pipelines, linked repositories, webhook history, secrets,
+                and environment variables
+              </span>{" "}
+              that belong to this project, then delete the project itself.
+            </p>
+          </>
+        ),
+        confirmText: "Delete everything",
+        cancelText: "Cancel",
+        tone: "destructive",
+      });
+      if (!forceOk) return;
+
+      try {
+        await projectsApi.delete(project.id, { force: true });
+        setProjects((prev) => prev.filter((p) => p.id !== project.id));
+        toast.success("Project and its contents deleted");
+      } catch (err2: unknown) {
+        const body2 = (err2 as { body?: { detail?: string } } | undefined)
+          ?.body;
+        toast.error(
+          body2?.detail ||
+            (err2 instanceof Error ? err2.message : "Failed to delete project"),
+        );
+      }
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -163,29 +246,54 @@ export default function ProjectsPage() {
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {projects.map((project) => (
-              <Link key={project.id} href={`/projects/${project.id}`}>
-                <Card className="h-full transition-shadow hover:shadow-lg cursor-pointer">
-                  <CardHeader>
-                    <CardTitle className="text-base">{project.name}</CardTitle>
-                    {project.description && (
-                      <CardDescription className="line-clamp-2">
-                        {project.description}
-                      </CardDescription>
+            {projects.map((project) => {
+              const isDeleting = deletingId === project.id;
+              return (
+                <div key={project.id} className="group relative">
+                  <Link href={`/projects/${project.id}`} className="block">
+                    <Card className="h-full transition-shadow hover:shadow-lg cursor-pointer">
+                      <CardHeader>
+                        <CardTitle className="pr-9 text-base">
+                          {project.name}
+                        </CardTitle>
+                        {project.description && (
+                          <CardDescription className="line-clamp-2">
+                            {project.description}
+                          </CardDescription>
+                        )}
+                      </CardHeader>
+                      <CardContent className="text-sm text-muted-foreground">
+                        <p className="font-mono text-xs">{project.slug}</p>
+                        <p className="mt-1 text-xs">
+                          Created{" "}
+                          {formatDistanceToNow(new Date(project.created_at), {
+                            addSuffix: true,
+                          })}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </Link>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Delete project ${project.name}`}
+                    disabled={isDeleting}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleDeleteProject(project);
+                    }}
+                    className="absolute right-2 top-2 h-8 w-8 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
                     )}
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    <p className="font-mono text-xs">{project.slug}</p>
-                    <p className="mt-1 text-xs">
-                      Created{" "}
-                      {formatDistanceToNow(new Date(project.created_at), {
-                        addSuffix: true,
-                      })}
-                    </p>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
+                  </Button>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
