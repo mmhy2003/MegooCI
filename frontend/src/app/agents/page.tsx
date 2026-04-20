@@ -20,6 +20,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAuthStore } from "@/lib/auth";
 import {
   agentsApi,
+  systemApi,
   type Agent,
   type AgentRegistrationResponse,
 } from "@/lib/api";
@@ -126,6 +127,22 @@ export default function AgentsPage() {
     React.useState<AgentRegistrationResponse | null>(null);
   const [tokenCopied, setTokenCopied] = React.useState(false);
 
+  // Controller URL the snippets suggest to the user. Seeded from
+  // `MEGOOCI_PUBLIC_URL` via /api/v1/system/info (which is what external
+  // agents should use) and toggled by the "Where will the agent run?"
+  // picker — see DEPLOY_MODE comment below.
+  const [publicUrl, setPublicUrl] = React.useState<string | null>(null);
+
+  // "compose" = agent shares the Docker network with MegooCI (uses
+  // `http://backend:8000` + `--network megooci_default`).
+  // "remote"  = agent runs on a separate host and reaches MegooCI via
+  // its public URL (no Docker network override).
+  const [deployMode, setDeployMode] = React.useState<"compose" | "remote">(
+    "compose",
+  );
+  // Editable by the user so they can paste a custom reverse-proxy URL.
+  const [controllerOverride, setControllerOverride] = React.useState("");
+
   const isAdmin = user?.is_admin ?? false;
 
   async function loadAgents() {
@@ -143,6 +160,18 @@ export default function AgentsPage() {
     loadAgents();
     const interval = setInterval(loadAgents, 15_000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Fetch the backend's public URL once so the snippets default to the
+  // address that works from outside the Compose network. Failure is
+  // non-fatal; we just fall back to the window origin.
+  React.useEffect(() => {
+    systemApi
+      .info()
+      .then((info) => setPublicUrl(info.public_url || null))
+      .catch(() => {
+        /* non-fatal; snippets fall back to `http://localhost:8000` */
+      });
   }, []);
 
   function resetForm() {
@@ -367,27 +396,31 @@ export default function AgentsPage() {
 
         {/* Registration token (shown once) */}
         {justRegistered && (() => {
-          // Prefer the browser's current origin as a safe default controller
-          // URL — that's the URL the admin is already using to reach the
-          // dashboard, so the agent will be able to reach it the same way.
-          const controller =
-            typeof window !== "undefined"
-              ? window.location.origin
-              : "https://megooci.example.com";
+          // Pick a sensible default controller URL per deployment mode:
+          //   compose -> internal Docker DNS `backend:8000` (reachable
+          //              only inside `megooci_default`).
+          //   remote  -> MEGOOCI_PUBLIC_URL as reported by the backend,
+          //              falling back to localhost:8000 if unavailable.
+          // Users can still override with the text field below.
+          const presetUrl =
+            deployMode === "compose"
+              ? "http://backend:8000"
+              : publicUrl || "http://localhost:8000";
+          const controller = controllerOverride.trim() || presetUrl;
+
+          // --network flag is only right for an agent running on the same
+          // host as the Compose stack; remote hosts use default bridge
+          // networking, so we omit the flag entirely.
+          const networkFlag =
+            deployMode === "compose" ? "\n  --network megooci_default \\" : "";
 
           const binarySnippet = `megooci-agent run \\
   --controller ${controller} \\
   --agent-id ${justRegistered.id} \\
   --token ${justRegistered.registration_token}`;
 
-          // `docker run` with CLI flags mirrors `make agent-up` and keeps
-          // the token out of env vars and `docker inspect` of other
-          // containers. `--network megooci_default` works when the agent
-          // runs on the same host as the Compose stack; override for
-          // remote hosts.
           const dockerSnippet = `docker run -d --name megooci-agent \\
-  --restart unless-stopped \\
-  --network megooci_default \\
+  --restart unless-stopped \\${networkFlag}
   megooci/agent:latest \\
   run \\
     --controller ${controller} \\
@@ -411,6 +444,58 @@ export default function AgentsPage() {
                   of the examples below to connect the agent. Previous
                   tokens (if any) are invalidated immediately.
                 </p>
+
+                {/* Deployment mode picker — flips the controller URL and
+                    the Docker --network flag across all three snippets. */}
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Where will the agent run?
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeployMode("compose");
+                        setControllerOverride("");
+                      }}
+                      className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                        deployMode === "compose"
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-input hover:bg-accent"
+                      }`}
+                    >
+                      Same host as MegooCI (Compose network)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeployMode("remote");
+                        setControllerOverride("");
+                      }}
+                      className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                        deployMode === "remote"
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-input hover:bg-accent"
+                      }`}
+                    >
+                      A different host
+                    </button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Controller URL{" "}
+                      <span className="text-muted-foreground/70">
+                        (override if your MegooCI is behind a reverse proxy)
+                      </span>
+                    </label>
+                    <Input
+                      value={controllerOverride}
+                      onChange={(e) => setControllerOverride(e.target.value)}
+                      placeholder={presetUrl}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                </div>
 
                 {/* Token itself, with its own copy button. */}
                 <div className="space-y-1.5">
@@ -446,36 +531,45 @@ export default function AgentsPage() {
                 <SnippetBlock
                   title="Run via Docker"
                   description={
-                    <>
-                      Uses the prebuilt{" "}
-                      <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
-                        megooci/agent:latest
-                      </code>{" "}
-                      image. Keep{" "}
-                      <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
-                        --network megooci_default
-                      </code>{" "}
-                      when running on the Compose host; drop it for
-                      remote hosts.
-                    </>
+                    deployMode === "compose" ? (
+                      <>
+                        Uses the prebuilt{" "}
+                        <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                          megooci/agent:latest
+                        </code>{" "}
+                        image on the Compose network so it can reach the
+                        backend by service name.
+                      </>
+                    ) : (
+                      <>
+                        Uses the prebuilt{" "}
+                        <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                          megooci/agent:latest
+                        </code>{" "}
+                        image on the host&apos;s default bridge network; the
+                        agent reaches MegooCI via its public URL.
+                      </>
+                    )
                   }
                   snippet={dockerSnippet}
                 />
 
-                <SnippetBlock
-                  title="Using the stack Makefile"
-                  description={
-                    <>
-                      Shortest path if you run MegooCI via{" "}
-                      <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
-                        make up
-                      </code>
-                      . Builds the image if needed and runs the container
-                      on the Compose network.
-                    </>
-                  }
-                  snippet={makeSnippet}
-                />
+                {deployMode === "compose" && (
+                  <SnippetBlock
+                    title="Using the stack Makefile"
+                    description={
+                      <>
+                        Shortest path if you run MegooCI via{" "}
+                        <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                          make up
+                        </code>
+                        . Builds the image if needed and runs the container
+                        on the Compose network.
+                      </>
+                    }
+                    snippet={makeSnippet}
+                  />
+                )}
 
                 <div className="flex justify-end">
                   <Button
