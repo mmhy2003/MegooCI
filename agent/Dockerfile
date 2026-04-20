@@ -28,11 +28,17 @@ ARG GO_VERSION=1.22
 FROM golang:${GO_VERSION}-bookworm AS builder
 WORKDIR /src
 
-# Cache deps first.
+# Copy the dependency manifest. `go.sum` is optional (the `*` glob tolerates
+# its absence) because we regenerate it with `go mod tidy` below. Keeping
+# this as its own layer means deps aren't re-resolved unless go.mod changes.
 COPY go.mod go.sum* ./
-RUN go mod download
 
+# Copy all sources, then run `tidy` so go.sum is always consistent with the
+# imports in the code. This makes the image buildable even if the caller
+# hasn't committed a go.sum (e.g. fresh clone, Go not installed locally).
 COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod tidy
 
 ARG VERSION=0.1.0-dev
 ARG COMMIT=unknown
@@ -44,6 +50,7 @@ ARG TARGETARCH
 # instead of ~25. Trimpath makes the binary reproducible across build hosts.
 ENV CGO_ENABLED=0
 RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
     GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath \
       -ldflags "-s -w \
