@@ -4,6 +4,11 @@
 
 @layer base {
   :root {
+    /* Signal to the browser that this root is in light mode so native
+       widgets (native <select> dropdowns, scrollbars, date pickers, etc.)
+       render with a matching light palette. */
+    color-scheme: light;
+
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
 
@@ -42,6 +47,9 @@
   }
 
   .dark {
+    /* Flip native widgets to their dark variants in dark mode. */
+    color-scheme: dark;
+
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
 
@@ -84,5 +92,15 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+
+  /* Native <select> dropdown items inherit the OS chrome unless we force
+     the background + color here. Browsers (Chromium/Firefox) honor these
+     two properties on <option>; it's the only reliable cross-browser way
+     to keep native select popups readable against a dark app body. */
+  select option,
+  select optgroup {
+    background-color: hsl(var(--popover));
+    color: hsl(var(--popover-foreground));
   }
 }
