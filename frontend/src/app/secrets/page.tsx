@@ -174,18 +174,18 @@ export default function SecretsPage() {
     <AppLayout>
       <div className="space-y-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
             Secrets & Variables
           </h1>
-          <p className="text-muted-foreground">
+          <p className="text-sm text-muted-foreground sm:text-base">
             Manage secrets and environment variables across your projects.
           </p>
         </div>
 
         {/* Secrets Section */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <KeyRound className="h-5 w-5" />
               Secrets
             </CardTitle>
@@ -252,14 +252,18 @@ export default function SecretsPage() {
                 No secrets configured. Add your first secret to get started.
               </p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="-mx-2 overflow-x-auto px-2">
+                <table className="w-full min-w-[480px] text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
                       <th className="pb-3 pr-4 font-medium">Name</th>
-                      <th className="pb-3 pr-4 font-medium">Type</th>
+                      <th className="hidden pb-3 pr-4 font-medium md:table-cell">
+                        Type
+                      </th>
                       <th className="pb-3 pr-4 font-medium">Project</th>
-                      <th className="pb-3 pr-4 font-medium">Created</th>
+                      <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                        Created
+                      </th>
                       <th className="pb-3 font-medium w-12"></th>
                     </tr>
                   </thead>
@@ -267,15 +271,17 @@ export default function SecretsPage() {
                     {allSecrets.map((secret) => (
                       <tr key={secret.id} className="border-b last:border-0">
                         <td className="py-3 pr-4">
-                          <code className="font-medium">{secret.name}</code>
+                          <code className="break-all font-medium">
+                            {secret.name}
+                          </code>
                         </td>
-                        <td className="py-3 pr-4 text-muted-foreground">
+                        <td className="hidden py-3 pr-4 text-muted-foreground md:table-cell">
                           {secret.secret_type}
                         </td>
                         <td className="py-3 pr-4 text-muted-foreground">
                           {secret.projectName}
                         </td>
-                        <td className="py-3 pr-4 text-muted-foreground">
+                        <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
                           {formatDistanceToNow(new Date(secret.created_at), {
                             addSuffix: true,
                           })}
@@ -301,8 +307,8 @@ export default function SecretsPage() {
 
         {/* Environment Variables Section */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <Variable className="h-5 w-5" />
               Environment Variables
             </CardTitle>
@@ -365,12 +371,14 @@ export default function SecretsPage() {
                 No environment variables configured.
               </p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="-mx-2 overflow-x-auto px-2">
+                <table className="w-full min-w-[420px] text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
                       <th className="pb-3 pr-4 font-medium">Name</th>
-                      <th className="pb-3 pr-4 font-medium">Value</th>
+                      <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                        Value
+                      </th>
                       <th className="pb-3 pr-4 font-medium">Project</th>
                       <th className="pb-3 font-medium w-12"></th>
                     </tr>
@@ -379,10 +387,14 @@ export default function SecretsPage() {
                     {allEnvVars.map((v) => (
                       <tr key={v.id} className="border-b last:border-0">
                         <td className="py-3 pr-4">
-                          <code className="font-medium">{v.name}</code>
+                          <code className="break-all font-medium">
+                            {v.name}
+                          </code>
                         </td>
-                        <td className="py-3 pr-4 text-muted-foreground">
-                          {v.is_secret_ref ? "••••••" : v.value}
+                        <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
+                          <span className="block max-w-[200px] truncate">
+                            {v.is_secret_ref ? "••••••" : v.value}
+                          </span>
                         </td>
                         <td className="py-3 pr-4 text-muted-foreground">
                           {v.projectName}

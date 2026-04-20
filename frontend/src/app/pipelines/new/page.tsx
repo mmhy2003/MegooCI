@@ -206,16 +206,21 @@ export default function NewPipelinePage() {
                 />
               </div>
 
-              <div className="flex gap-3">
-                <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? "Creating…" : "Create Pipeline"}
-                </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => router.push("/pipelines")}
+                  className="w-full sm:w-auto"
                 >
                   Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full sm:w-auto"
+                >
+                  {isSubmitting ? "Creating…" : "Create Pipeline"}
                 </Button>
               </div>
             </form>

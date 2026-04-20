@@ -65,9 +65,9 @@ function ConfigRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border px-4 py-3 text-sm">
+    <div className="flex flex-col gap-1.5 rounded-lg border px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-4">
       <span className="text-muted-foreground">{label}</span>
-      <div className="text-right">{children}</div>
+      <div className="break-all text-left sm:text-right">{children}</div>
     </div>
   );
 }
@@ -89,8 +89,10 @@ export default function SettingsPage() {
     <AppLayout>
       <div className="mx-auto max-w-3xl space-y-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
+            Settings
+          </h1>
+          <p className="text-sm text-muted-foreground sm:text-base">
             Manage your profile and view the current system configuration.
           </p>
         </div>

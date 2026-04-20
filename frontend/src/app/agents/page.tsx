@@ -156,13 +156,15 @@ export default function AgentsPage() {
     <AppLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
-            <p className="text-muted-foreground">
+            <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
+              Agents
+            </h1>
+            <p className="text-sm text-muted-foreground sm:text-base">
               Build agents that execute pipeline steps.{" "}
               {agents.length > 0 && (
-                <span className="ml-1 text-xs">
+                <span className="ml-1 block text-xs sm:inline">
                   {statusCounts["online"] || 0} online,{" "}
                   {statusCounts["busy"] || 0} busy,{" "}
                   {statusCounts["offline"] || 0} offline
@@ -172,7 +174,10 @@ export default function AgentsPage() {
           </div>
           {isAdmin && (
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-              <Button onClick={() => setDialogOpen(true)}>
+              <Button
+                onClick={() => setDialogOpen(true)}
+                className="w-full sm:w-auto"
+              >
                 <Plus className="mr-1.5 h-4 w-4" />
                 Register Agent
               </Button>

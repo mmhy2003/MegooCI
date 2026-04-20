@@ -137,24 +137,28 @@ export default function DashboardPage() {
     <AppLayout>
       <div className="space-y-8">
         {/* Welcome */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
+            <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
               Welcome back{user?.name ? `, ${user.name}` : ""}
             </h1>
-            <p className="text-muted-foreground">
+            <p className="text-sm text-muted-foreground sm:text-base">
               Here&apos;s what&apos;s happening with your pipelines today.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
               onClick={() => router.push("/pipelines/new")}
+              className="flex-1 sm:flex-none"
             >
               <Plus className="mr-1.5 h-4 w-4" />
               New Pipeline
             </Button>
-            <Button onClick={() => router.push("/pipelines")}>
+            <Button
+              onClick={() => router.push("/pipelines")}
+              className="flex-1 sm:flex-none"
+            >
               <Play className="mr-1.5 h-4 w-4" />
               Trigger Build
             </Button>
@@ -194,8 +198,8 @@ export default function DashboardPage() {
 
         {/* Recent Builds */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Recent Builds</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+            <CardTitle className="text-base sm:text-lg">Recent Builds</CardTitle>
             <Button variant="ghost" size="sm" asChild>
               <Link href="/builds">View all</Link>
             </Button>
@@ -221,15 +225,21 @@ export default function DashboardPage() {
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="-mx-2 overflow-x-auto px-2">
+                <table className="w-full min-w-[480px] text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
-                      <th className="pb-3 pr-4 font-medium">Pipeline</th>
                       <th className="pb-3 pr-4 font-medium">Build</th>
-                      <th className="pb-3 pr-4 font-medium">Branch</th>
+                      <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                        Pipeline
+                      </th>
+                      <th className="hidden pb-3 pr-4 font-medium md:table-cell">
+                        Branch
+                      </th>
                       <th className="pb-3 pr-4 font-medium">Status</th>
-                      <th className="pb-3 pr-4 font-medium">Duration</th>
+                      <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                        Duration
+                      </th>
                       <th className="pb-3 font-medium text-right">Time</th>
                     </tr>
                   </thead>
@@ -241,10 +251,12 @@ export default function DashboardPage() {
                         onClick={() => router.push(`/builds/${build.id}`)}
                       >
                         <td className="py-3 pr-4 font-medium">
+                          #{build.number}
+                        </td>
+                        <td className="hidden py-3 pr-4 sm:table-cell">
                           {build.pipeline_id.slice(0, 8)}…
                         </td>
-                        <td className="py-3 pr-4">#{build.number}</td>
-                        <td className="py-3 pr-4">
+                        <td className="hidden py-3 pr-4 md:table-cell">
                           <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
                             {build.branch || "—"}
                           </code>
@@ -254,7 +266,7 @@ export default function DashboardPage() {
                             {build.status}
                           </Badge>
                         </td>
-                        <td className="py-3 pr-4 text-muted-foreground">
+                        <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
                           {formatDuration(build.started_at, build.finished_at)}
                         </td>
                         <td className="py-3 text-right text-muted-foreground">

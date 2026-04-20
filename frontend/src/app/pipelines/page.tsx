@@ -36,15 +36,20 @@ export default function PipelinesPage() {
     <AppLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Pipelines</h1>
-            <p className="text-muted-foreground">
+            <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
+              Pipelines
+            </h1>
+            <p className="text-sm text-muted-foreground sm:text-base">
               {pipelines.length} pipeline{pipelines.length !== 1 ? "s" : ""}{" "}
               configured
             </p>
           </div>
-          <Button onClick={() => router.push("/pipelines/new")}>
+          <Button
+            onClick={() => router.push("/pipelines/new")}
+            className="w-full sm:w-auto"
+          >
             <Plus className="mr-1.5 h-4 w-4" />
             New Pipeline
           </Button>

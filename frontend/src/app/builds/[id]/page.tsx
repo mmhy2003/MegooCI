@@ -203,10 +203,12 @@ export default function BuildDetailPage() {
         </Button>
 
         {/* Header */}
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold">Build #{build.number}</h1>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-xl font-bold sm:text-2xl">
+                Build #{build.number}
+              </h1>
               <Badge
                 variant={statusVariant(build.status)}
                 className="text-sm"
@@ -214,7 +216,7 @@ export default function BuildDetailPage() {
                 {build.status}
               </Badge>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground sm:text-sm">
               <span className="flex items-center gap-1">
                 <Hash className="h-3.5 w-3.5" />
                 {build.pipeline_id.slice(0, 8)}…
@@ -241,8 +243,13 @@ export default function BuildDetailPage() {
               </span>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={handleRetry}>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRetry}
+              className="flex-1 sm:flex-none"
+            >
               <RotateCw className="mr-1.5 h-4 w-4" />
               Re-run
             </Button>
@@ -250,7 +257,7 @@ export default function BuildDetailPage() {
               <Button
                 variant="outline"
                 size="sm"
-                className="text-destructive"
+                className="flex-1 text-destructive sm:flex-none"
                 onClick={handleCancel}
               >
                 <XCircle className="mr-1.5 h-4 w-4" />
@@ -296,24 +303,24 @@ export default function BuildDetailPage() {
                     .map((step) => (
                       <div
                         key={step.id}
-                        className="flex items-center justify-between rounded-lg border px-4 py-3 text-sm"
+                        className="flex flex-col gap-2 rounded-lg border px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-4"
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 items-start gap-3 sm:items-center">
                           <span
-                            className={`text-lg font-bold ${statusColor[toStageStatus(step.status)]}`}
+                            className={`shrink-0 text-lg font-bold ${statusColor[toStageStatus(step.status)]}`}
                           >
                             {statusIcon[toStageStatus(step.status)]}
                           </span>
-                          <div>
+                          <div className="min-w-0 flex-1">
                             <span className="font-medium">{step.name}</span>
                             {step.command && (
-                              <code className="ml-2 text-xs text-muted-foreground">
+                              <code className="ml-0 mt-1 block break-all text-xs text-muted-foreground sm:ml-2 sm:mt-0 sm:inline">
                                 {step.command}
                               </code>
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-4 text-muted-foreground">
+                        <div className="flex items-center gap-3 pl-7 text-xs text-muted-foreground sm:gap-4 sm:pl-0 sm:text-sm">
                           <span>
                             {formatDuration(step.started_at, step.finished_at)}
                           </span>

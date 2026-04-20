@@ -71,18 +71,20 @@ export default function BuildsPage() {
     <AppLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Builds</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
+            Builds
+          </h1>
+          <p className="text-sm text-muted-foreground sm:text-base">
             {allBuilds.length} build{allBuilds.length !== 1 ? "s" : ""} total
           </p>
         </div>
 
-        <div className="flex gap-1 border-b">
+        <div className="-mx-4 flex gap-1 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0">
           {STATUS_TABS.map((tab) => (
             <button
               key={tab.value}
               onClick={() => setStatusFilter(tab.value)}
-              className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              className={`shrink-0 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
                 statusFilter === tab.value
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -119,16 +121,24 @@ export default function BuildsPage() {
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="-mx-2 overflow-x-auto px-2">
+                <table className="w-full min-w-[560px] text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
                       <th className="pb-3 pr-4 font-medium">Build</th>
-                      <th className="pb-3 pr-4 font-medium">Pipeline</th>
-                      <th className="pb-3 pr-4 font-medium">Branch</th>
+                      <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                        Pipeline
+                      </th>
+                      <th className="hidden pb-3 pr-4 font-medium md:table-cell">
+                        Branch
+                      </th>
                       <th className="pb-3 pr-4 font-medium">Status</th>
-                      <th className="pb-3 pr-4 font-medium">Duration</th>
-                      <th className="pb-3 pr-4 font-medium">Trigger</th>
+                      <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                        Duration
+                      </th>
+                      <th className="hidden pb-3 pr-4 font-medium lg:table-cell">
+                        Trigger
+                      </th>
                       <th className="pb-3 font-medium text-right">Time</th>
                     </tr>
                   </thead>
@@ -142,7 +152,7 @@ export default function BuildsPage() {
                         <td className="py-3 pr-4 font-medium">
                           #{build.number}
                         </td>
-                        <td className="py-3 pr-4">
+                        <td className="hidden py-3 pr-4 sm:table-cell">
                           <button
                             className="text-primary hover:underline"
                             onClick={(e) => {
@@ -153,7 +163,7 @@ export default function BuildsPage() {
                             {build.pipeline_id.slice(0, 8)}…
                           </button>
                         </td>
-                        <td className="py-3 pr-4">
+                        <td className="hidden py-3 pr-4 md:table-cell">
                           <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
                             {build.branch || "—"}
                           </code>
@@ -163,10 +173,10 @@ export default function BuildsPage() {
                             {build.status}
                           </Badge>
                         </td>
-                        <td className="py-3 pr-4 text-muted-foreground">
+                        <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
                           {formatDuration(build.started_at, build.finished_at)}
                         </td>
-                        <td className="py-3 pr-4 text-muted-foreground">
+                        <td className="hidden py-3 pr-4 text-muted-foreground lg:table-cell">
                           {build.trigger_type}
                         </td>
                         <td className="py-3 text-right text-muted-foreground">

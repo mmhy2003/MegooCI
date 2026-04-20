@@ -208,21 +208,25 @@ export default function ProjectDetailPage() {
         </Button>
 
         <div>
-          <h1 className="text-2xl font-bold">{project.name}</h1>
+          <h1 className="break-all text-xl font-bold sm:text-2xl">
+            {project.name}
+          </h1>
           {project.description && (
-            <p className="mt-1 text-muted-foreground">{project.description}</p>
+            <p className="mt-1 text-sm text-muted-foreground sm:text-base">
+              {project.description}
+            </p>
           )}
-          <p className="mt-1 text-sm text-muted-foreground font-mono">
+          <p className="mt-1 break-all font-mono text-xs text-muted-foreground sm:text-sm">
             {project.slug}
           </p>
         </div>
 
-        <div className="flex gap-1 border-b">
+        <div className="-mx-4 flex gap-1 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0">
           {tabs.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              className={`shrink-0 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === tab.key
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -284,7 +288,7 @@ export default function ProjectDetailPage() {
         {activeTab === "settings" && (
           <div className="space-y-6">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
                 <CardTitle className="text-base flex items-center gap-2">
                   <KeyRound className="h-4 w-4" />
                   Secrets
@@ -345,11 +349,13 @@ export default function ProjectDetailPage() {
                     {secrets.map((secret) => (
                       <div
                         key={secret.id}
-                        className="flex items-center justify-between rounded-lg border px-4 py-2.5 text-sm"
+                        className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-sm sm:px-4"
                       >
-                        <code className="font-medium">{secret.name}</code>
-                        <div className="flex items-center gap-3 text-muted-foreground">
-                          <span className="text-xs">
+                        <code className="min-w-0 flex-1 truncate font-medium">
+                          {secret.name}
+                        </code>
+                        <div className="flex shrink-0 items-center gap-2 text-muted-foreground sm:gap-3">
+                          <span className="hidden text-xs sm:inline">
                             {formatDistanceToNow(new Date(secret.created_at), {
                               addSuffix: true,
                             })}
@@ -371,7 +377,7 @@ export default function ProjectDetailPage() {
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Settings className="h-4 w-4" />
                   Environment Variables
@@ -425,18 +431,20 @@ export default function ProjectDetailPage() {
                     {envVars.map((v) => (
                       <div
                         key={v.id}
-                        className="flex items-center justify-between rounded-lg border px-4 py-2.5 text-sm"
+                        className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-sm sm:px-4"
                       >
-                        <div className="flex items-center gap-3">
-                          <code className="font-medium">{v.name}</code>
-                          <span className="text-muted-foreground">
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
+                          <code className="truncate font-medium">
+                            {v.name}
+                          </code>
+                          <span className="truncate text-xs text-muted-foreground sm:text-sm">
                             {v.is_secret_ref ? "••••••" : v.value}
                           </span>
                         </div>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 text-destructive"
+                          className="h-7 w-7 shrink-0 text-destructive"
                           onClick={() => handleDeleteEnv(v.id)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />

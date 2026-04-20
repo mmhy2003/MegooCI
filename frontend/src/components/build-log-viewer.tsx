@@ -82,15 +82,17 @@ export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
       )}
     >
       {/* Toolbar */}
-      <div className="flex items-center justify-between border-b border-[#21262d] px-3 py-1.5">
-        <span className="text-xs font-medium text-[#8b949e]">
-          Build Logs ({lines.length} lines)
+      <div className="flex items-center justify-between gap-2 border-b border-[#21262d] px-2 py-1.5 sm:px-3">
+        <span className="shrink-0 text-xs font-medium text-[#8b949e]">
+          <span className="hidden sm:inline">Build Logs </span>
+          <span className="sm:hidden">Logs </span>
+          ({lines.length})
         </span>
         <div className="flex items-center gap-1">
           {searchOpen && (
             <Input
-              className="h-7 w-48 border-[#30363d] bg-[#161b22] text-xs text-[#c9d1d9] placeholder:text-[#484f58]"
-              placeholder="Search logs…"
+              className="h-7 w-32 border-[#30363d] bg-[#161b22] text-xs text-[#c9d1d9] placeholder:text-[#484f58] sm:w-48"
+              placeholder="Search…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               autoFocus
@@ -154,8 +156,8 @@ export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
         ref={containerRef}
         onScroll={handleScroll}
         className={cn(
-          "flex-1 overflow-auto p-3 font-mono text-xs leading-5",
-          fullscreen ? "max-h-none" : "max-h-[500px]",
+          "flex-1 overflow-auto p-2 font-mono text-xs leading-5 sm:p-3",
+          fullscreen ? "max-h-none" : "max-h-[60vh] sm:max-h-[500px]",
         )}
       >
         {filtered.length === 0 ? (
@@ -166,12 +168,12 @@ export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
           </p>
         ) : (
           filtered.map((line, idx) => (
-            <div key={idx} className="flex gap-3 hover:bg-[#161b22]">
-              <span className="w-10 shrink-0 select-none text-right text-[#484f58]">
+            <div key={idx} className="flex gap-2 hover:bg-[#161b22] sm:gap-3">
+              <span className="w-6 shrink-0 select-none text-right text-[#484f58] sm:w-10">
                 {idx + 1}
               </span>
               {line.timestamp && (
-                <span className="shrink-0 text-[#484f58]">
+                <span className="hidden shrink-0 text-[#484f58] sm:inline">
                   {line.timestamp}
                 </span>
               )}

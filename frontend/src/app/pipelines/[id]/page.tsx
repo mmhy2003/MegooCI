@@ -177,10 +177,12 @@ export default function PipelineDetailPage() {
         </Button>
 
         {/* Header */}
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold">{pipeline.name}</h1>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <h1 className="break-all text-xl font-bold sm:text-2xl">
+                {pipeline.name}
+              </h1>
               <Badge variant="secondary">
                 {pipeline.definition_format.toUpperCase()}
               </Badge>
@@ -189,20 +191,25 @@ export default function PipelineDetailPage() {
               </Badge>
             </div>
             {pipeline.source_repo_url && (
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-1 break-all text-xs text-muted-foreground sm:text-sm">
                 {pipeline.source_repo_url}
               </p>
             )}
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={handleTrigger}>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTrigger}
+              className="flex-1 sm:flex-none"
+            >
               <Play className="mr-1.5 h-4 w-4" />
               Trigger Build
             </Button>
             <Button
               variant="outline"
               size="sm"
-              className="text-destructive"
+              className="flex-1 text-destructive sm:flex-none"
               onClick={handleDelete}
             >
               <Trash2 className="mr-1.5 h-4 w-4" />
@@ -212,12 +219,12 @@ export default function PipelineDetailPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b">
+        <div className="-mx-4 flex gap-1 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0">
           {tabs.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              className={`shrink-0 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
                 activeTab === tab.key
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -275,7 +282,7 @@ export default function PipelineDetailPage() {
                     {builds.slice(0, 5).map((build) => (
                       <div
                         key={build.id}
-                        className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm hover:bg-muted/50 cursor-pointer transition-colors"
+                        className="flex flex-col gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-muted/50 cursor-pointer transition-colors sm:flex-row sm:items-center sm:justify-between"
                         onClick={() => router.push(`/builds/${build.id}`)}
                       >
                         <div className="flex items-center gap-3">
@@ -287,7 +294,7 @@ export default function PipelineDetailPage() {
                           </Badge>
                           <span className="font-medium">#{build.number}</span>
                         </div>
-                        <div className="flex items-center gap-4 text-muted-foreground">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground sm:text-sm">
                           <span className="flex items-center gap-1">
                             <GitBranch className="h-3 w-3" />
                             {build.branch || "—"}
@@ -318,15 +325,21 @@ export default function PipelineDetailPage() {
                   No builds for this pipeline yet.
                 </p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                <div className="-mx-2 overflow-x-auto px-2">
+                  <table className="w-full min-w-[520px] text-sm">
                     <thead>
                       <tr className="border-b text-left text-muted-foreground">
                         <th className="pb-3 pr-4 font-medium">Build</th>
-                        <th className="pb-3 pr-4 font-medium">Branch</th>
+                        <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                          Branch
+                        </th>
                         <th className="pb-3 pr-4 font-medium">Status</th>
-                        <th className="pb-3 pr-4 font-medium">Duration</th>
-                        <th className="pb-3 pr-4 font-medium">Trigger</th>
+                        <th className="hidden pb-3 pr-4 font-medium md:table-cell">
+                          Duration
+                        </th>
+                        <th className="hidden pb-3 pr-4 font-medium lg:table-cell">
+                          Trigger
+                        </th>
                         <th className="pb-3 font-medium text-right">Time</th>
                       </tr>
                     </thead>
@@ -340,7 +353,7 @@ export default function PipelineDetailPage() {
                           <td className="py-3 pr-4 font-medium">
                             #{build.number}
                           </td>
-                          <td className="py-3 pr-4">
+                          <td className="hidden py-3 pr-4 sm:table-cell">
                             <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
                               {build.branch || "—"}
                             </code>
@@ -350,13 +363,13 @@ export default function PipelineDetailPage() {
                               {build.status}
                             </Badge>
                           </td>
-                          <td className="py-3 pr-4 text-muted-foreground">
+                          <td className="hidden py-3 pr-4 text-muted-foreground md:table-cell">
                             {formatDuration(
                               build.started_at,
                               build.finished_at,
                             )}
                           </td>
-                          <td className="py-3 pr-4 text-muted-foreground">
+                          <td className="hidden py-3 pr-4 text-muted-foreground lg:table-cell">
                             {build.trigger_type}
                           </td>
                           <td className="py-3 text-right text-muted-foreground">
@@ -377,7 +390,7 @@ export default function PipelineDetailPage() {
         {/* Configuration tab */}
         {activeTab === "configuration" && (
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Pipeline Definition</CardTitle>
               {!editing ? (
                 <Button

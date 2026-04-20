@@ -82,7 +82,7 @@ export function StageGraph({
             <button
               onClick={() => onSelectStage?.(stage.id)}
               className={cn(
-                "flex items-center gap-2 rounded-lg border-2 px-4 py-2.5 text-sm font-medium transition-all",
+                "flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-all sm:px-4 sm:py-2.5 sm:text-sm",
                 config.bg,
                 config.border,
                 isSelected
@@ -97,7 +97,9 @@ export function StageGraph({
                   stage.status === "running" && "animate-spin",
                 )}
               />
-              <span className={config.color}>{stage.name}</span>
+              <span className={cn("break-all", config.color)}>
+                {stage.name}
+              </span>
             </button>
           </React.Fragment>
         );
