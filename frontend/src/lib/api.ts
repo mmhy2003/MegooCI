@@ -1,5 +1,8 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
+const ACCESS_KEY = "megooci_access_token";
+const REFRESH_KEY = "megooci_refresh_token";
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -13,28 +16,106 @@ class ApiError extends Error {
 
 function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("megooci_access_token");
+  return localStorage.getItem(ACCESS_KEY);
+}
+
+function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(REFRESH_KEY);
+}
+
+function setTokensInStorage(access: string, refresh: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(ACCESS_KEY, access);
+  localStorage.setItem(REFRESH_KEY, refresh);
+}
+
+function clearTokens(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+}
+
+/**
+ * Single-flight refresh: concurrent 401s share one /refresh call instead of
+ * racing and consuming multiple refresh tokens. Resolves to the new access
+ * token on success, or null if refresh fails (user needs to re-authenticate).
+ */
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function refreshAccessTokenOnce(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  const refresh = getRefreshToken();
+  if (!refresh) return null;
+
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/v1/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refresh }),
+      });
+      if (!res.ok) {
+        clearTokens();
+        return null;
+      }
+      const tokens = (await res.json()) as {
+        access_token: string;
+        refresh_token: string;
+      };
+      setTokensInStorage(tokens.access_token, tokens.refresh_token);
+      return tokens.access_token;
+    } catch {
+      clearTokens();
+      return null;
+    } finally {
+      // Release the lock so the next 401 can trigger a fresh refresh if
+      // needed (for long-lived SPA sessions).
+      setTimeout(() => {
+        refreshInFlight = null;
+      }, 0);
+    }
+  })();
+
+  return refreshInFlight;
+}
+
+async function performFetch(
+  endpoint: string,
+  options: RequestInit,
+  token: string | null,
+): Promise<Response> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers as Record<string, string>),
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
 }
 
 async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const token = getAccessToken();
+  // Never attempt silent-refresh on the auth endpoints themselves, otherwise
+  // a bad login loops against /refresh.
+  const isAuthEndpoint = endpoint.startsWith("/api/v1/auth/");
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
-  };
+  let res = await performFetch(endpoint, options, getAccessToken());
 
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  // On 401, try exactly one silent refresh + retry. This extends sessions
+  // far beyond the access-token TTL without re-login, for as long as the
+  // refresh token is valid.
+  if (res.status === 401 && !isAuthEndpoint) {
+    const newAccess = await refreshAccessTokenOnce();
+    if (newAccess) {
+      res = await performFetch(endpoint, options, newAccess);
+    } else if (typeof window !== "undefined") {
+      // Refresh failed: surface the 401 to the caller. The AppLayout
+      // redirect-to-login guard will kick in once the auth store hydrates
+      // without tokens.
+    }
   }
-
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
 
   if (!res.ok) {
     let body: unknown;

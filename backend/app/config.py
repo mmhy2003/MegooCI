@@ -11,8 +11,11 @@ class Settings(BaseSettings):
     MEGOOCI_SECRET_KEY: str = "change-me-in-production"
     MEGOOCI_JWT_SECRET: str = "change-me-jwt-secret"
     MEGOOCI_JWT_ALGORITHM: str = "HS256"
-    MEGOOCI_JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
-    MEGOOCI_JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # 12h gives a typical workday on a single login while still bounding
+    # exposure if a token is leaked. Silent refresh on the client extends
+    # this further without requiring re-login.
+    MEGOOCI_JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 720
+    MEGOOCI_JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     MEGOOCI_SIGNUP_ENABLED: bool = True
     MEGOOCI_DEFAULT_ROLE: str = "viewer"
     MEGOOCI_STORAGE_ROOT: str = "/var/lib/megooci"

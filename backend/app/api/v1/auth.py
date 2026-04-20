@@ -15,6 +15,7 @@ from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import (
     LoginRequest,
+    RefreshRequest,
     SignupRequest,
     TokenResponse,
     UserResponse,
@@ -104,11 +105,15 @@ async def login(
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    refresh_token: str,
+    body: RefreshRequest,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    """Exchange a refresh token for a new access+refresh pair.
+
+    The token is accepted in the JSON body to match the frontend auth client.
+    """
     try:
-        payload = decode_token(refresh_token)
+        payload = decode_token(body.refresh_token)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
