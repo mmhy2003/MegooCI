@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "sonner";
 import { useAuthStore } from "@/lib/auth";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 
@@ -26,14 +27,40 @@ export function useTheme() {
   return React.useContext(ThemeContext);
 }
 
-function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = React.useState<Theme>("system");
-  const [resolvedTheme, setResolvedTheme] = React.useState<"light" | "dark">("light");
+const THEME_STORAGE_KEY = "megooci_theme";
 
-  React.useEffect(() => {
-    const stored = localStorage.getItem("megooci_theme") as Theme | null;
-    if (stored) setThemeState(stored);
-  }, []);
+/**
+ * Reads the stored or OS-detected theme synchronously on mount. Matches the
+ * logic in the inline `THEME_INIT_SCRIPT` in `layout.tsx` so the initial
+ * `document.documentElement.classList` set by the script aligns with React
+ * state and we don't get a flash when the first effect runs.
+ */
+function readInitialResolvedTheme(): "light" | "dark" {
+  if (typeof window === "undefined") return "light";
+  const stored = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
+  const theme = stored || "system";
+  if (theme === "system") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  }
+  return theme;
+}
+
+function ThemeProvider({ children }: { children: React.ReactNode }) {
+  // `theme` is the user's preference ("light" | "dark" | "system"), while
+  // `resolvedTheme` is what we actually apply to the DOM. On the client we
+  // initialize lazily so a user who stored "dark" doesn't see a light flash
+  // between the initial render and the first effect pass.
+  const [theme, setThemeState] = React.useState<Theme>(() => {
+    if (typeof window === "undefined") return "system";
+    return (
+      (localStorage.getItem(THEME_STORAGE_KEY) as Theme | null) || "system"
+    );
+  });
+  const [resolvedTheme, setResolvedTheme] = React.useState<
+    "light" | "dark"
+  >(() => readInitialResolvedTheme());
 
   React.useEffect(() => {
     const root = document.documentElement;
@@ -53,6 +80,7 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
 
     applyTheme(theme);
 
+    // Only subscribe to OS changes while the user's preference is "system".
     if (theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       const handler = () => applyTheme("system");
@@ -63,7 +91,11 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const setTheme = React.useCallback((t: Theme) => {
     setThemeState(t);
-    localStorage.setItem("megooci_theme", t);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, t);
+    } catch {
+      // localStorage can throw in private mode / quota-exceeded; ignore.
+    }
   }, []);
 
   return (
@@ -120,4 +152,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
       </ThemeProvider>
     </QueryClientProvider>
   );
+}
+
+/**
+ * Sonner's <Toaster> needs the app's resolved theme so toast backgrounds
+ * and text render correctly in dark mode. Rendering it here lets it read
+ * from the same ThemeContext Providers set up above.
+ */
+export function ThemedToaster() {
+  const { resolvedTheme } = useTheme();
+  return <Toaster richColors position="bottom-right" theme={resolvedTheme} />;
 }

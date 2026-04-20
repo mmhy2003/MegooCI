@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useAuthStore } from "@/lib/auth";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -61,6 +62,12 @@ export default function SignupPage() {
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-slate-950 dark:via-blue-950/40 dark:to-indigo-950/50 px-4">
       <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-indigo-400/10 blur-3xl" />
+
+      {/* Theme toggle floats in the top-right so pre-login users can match
+          the app to their OS preference without signing in. */}
+      <div className="absolute right-4 top-4 z-20">
+        <ThemeToggle variant="icon" />
+      </div>
 
       <Card className="relative z-10 w-full max-w-md shadow-xl">
         <CardHeader className="text-center">

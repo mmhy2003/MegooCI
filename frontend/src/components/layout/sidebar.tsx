@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  Monitor,
   Moon,
   Sun,
   User,
@@ -57,9 +58,29 @@ interface SidebarProps {
   onCloseMobile: () => void;
 }
 
+const COLLAPSED_STORAGE_KEY = "megooci_sidebar_collapsed";
+
 export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = React.useState(false);
+  // `AppLayout` (and therefore `Sidebar`) mounts per route rather than being
+  // hoisted into a Next.js layout, so component-local state would reset on
+  // every navigation. Persist the desktop collapsed state to localStorage so
+  // it survives page transitions and full reloads.
+  const [collapsed, setCollapsedState] = React.useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(COLLAPSED_STORAGE_KEY) === "1";
+  });
+
+  const setCollapsed = React.useCallback((value: boolean) => {
+    setCollapsedState(value);
+    try {
+      localStorage.setItem(COLLAPSED_STORAGE_KEY, value ? "1" : "0");
+    } catch {
+      // Private mode / quota — non-fatal, the state is still live in memory
+      // for this session.
+    }
+  }, []);
+
   const { user, logout } = useAuthStore();
   const { theme, setTheme } = useTheme();
 
@@ -197,15 +218,32 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
                 <User className="mr-2 h-4 w-4" />
                 Profile
               </DropdownMenuItem>
+              {/* Cycle light -> dark -> system -> light so users can get back
+                  to OS-follow without visiting Settings. The label names the
+                  *next* state to match the icon convention elsewhere. */}
               <DropdownMenuItem
-                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                onClick={() =>
+                  setTheme(
+                    theme === "light"
+                      ? "dark"
+                      : theme === "dark"
+                        ? "system"
+                        : "light",
+                  )
+                }
               >
-                {theme === "dark" ? (
-                  <Sun className="mr-2 h-4 w-4" />
-                ) : (
+                {theme === "light" ? (
                   <Moon className="mr-2 h-4 w-4" />
+                ) : theme === "dark" ? (
+                  <Monitor className="mr-2 h-4 w-4" />
+                ) : (
+                  <Sun className="mr-2 h-4 w-4" />
                 )}
-                {theme === "dark" ? "Light mode" : "Dark mode"}
+                {theme === "light"
+                  ? "Dark mode"
+                  : theme === "dark"
+                    ? "Match system"
+                    : "Light mode"}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={logout}>
