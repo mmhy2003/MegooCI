@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { ProjectIntegrations } from "@/components/project-integrations";
 import {
   projectsApi,
   pipelinesApi,
@@ -39,7 +40,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 
-type Tab = "pipelines" | "settings";
+type Tab = "pipelines" | "integrations" | "settings";
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -193,6 +194,7 @@ export default function ProjectDetailPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "pipelines", label: "Pipelines" },
+    { key: "integrations", label: "Integrations" },
     { key: "settings", label: "Settings" },
   ];
 
@@ -317,6 +319,8 @@ export default function ProjectDetailPage() {
             )}
           </div>
         )}
+
+        {activeTab === "integrations" && <ProjectIntegrations projectId={id} />}
 
         {activeTab === "settings" && (
           <div className="space-y-6">

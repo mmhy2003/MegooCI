@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
-import { pipelinesApi, projectsApi, type Project } from "@/lib/api";
+import {
+  pipelinesApi,
+  projectsApi,
+  projectRepositoriesApi,
+  type Project,
+  type ProjectRepository,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -41,6 +47,8 @@ stages:
 export default function NewPipelinePage() {
   const router = useRouter();
   const [projects, setProjects] = React.useState<Project[]>([]);
+  const [repositories, setRepositories] = React.useState<ProjectRepository[]>([]);
+  const [projectRepositoryId, setProjectRepositoryId] = React.useState<string>("");
   const [name, setName] = React.useState("");
   const [projectId, setProjectId] = React.useState("");
   const [sourceRepo, setSourceRepo] = React.useState("");
@@ -61,6 +69,43 @@ export default function NewPipelinePage() {
       .catch(() => toast.error("Failed to load projects"));
   }, []);
 
+  // Whenever the chosen project changes, load its linked repositories so the
+  // user can pick one instead of typing a URL by hand (PRD §6.16 / F-16.5).
+  React.useEffect(() => {
+    if (!projectId) {
+      setRepositories([]);
+      setProjectRepositoryId("");
+      return;
+    }
+    let cancelled = false;
+    projectRepositoriesApi
+      .list(projectId)
+      .then((data) => {
+        if (cancelled) return;
+        setRepositories(data);
+        // Reset link when switching projects.
+        setProjectRepositoryId("");
+      })
+      .catch(() => {
+        if (!cancelled) setRepositories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // When a linked repo is picked, auto-fill the repo URL + default branch so
+  // the user sees what will be used. They can still override both fields.
+  function onLinkedRepoChange(repoId: string) {
+    setProjectRepositoryId(repoId);
+    if (!repoId) return;
+    const repo = repositories.find((r) => r.id === repoId);
+    if (repo) {
+      setSourceRepo(repo.repo_url);
+      setDefaultBranch(repo.default_branch);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
@@ -76,6 +121,7 @@ export default function NewPipelinePage() {
       const pipeline = await pipelinesApi.create({
         project_id: projectId,
         name,
+        project_repository_id: projectRepositoryId || null,
         source_repo_url: sourceRepo || undefined,
         default_branch: defaultBranch,
         definition_format: definitionFormat,
@@ -140,6 +186,33 @@ export default function NewPipelinePage() {
                 />
               </div>
 
+              {repositories.length > 0 && (
+                <div className="space-y-2">
+                  <label htmlFor="linked-repo" className="text-sm font-medium">
+                    Linked repository{" "}
+                    <span className="text-muted-foreground">(optional)</span>
+                  </label>
+                  <Select
+                    id="linked-repo"
+                    value={projectRepositoryId}
+                    onChange={(e) => onLinkedRepoChange(e.target.value)}
+                    options={[
+                      { value: "", label: "\u2014 None (use URL below) \u2014" },
+                      ...repositories.map((r) => ({
+                        value: r.id,
+                        label: r.display_name
+                          ? `${r.display_name} (${r.repo_url})`
+                          : r.repo_url,
+                      })),
+                    ]}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Picking a linked repository wires webhook-driven builds
+                    and fills the URL / branch fields below.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <label htmlFor="repo" className="text-sm font-medium">
                   Source repository URL{" "}
@@ -150,6 +223,8 @@ export default function NewPipelinePage() {
                   placeholder="https://github.com/org/repo"
                   value={sourceRepo}
                   onChange={(e) => setSourceRepo(e.target.value)}
+                  readOnly={Boolean(projectRepositoryId)}
+                  className={projectRepositoryId ? "bg-muted" : ""}
                 />
               </div>
 

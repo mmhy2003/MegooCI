@@ -18,6 +18,7 @@ import {
   Sun,
   User,
   X,
+  Plug,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
@@ -32,13 +33,22 @@ import {
 import { useAuthStore } from "@/lib/auth";
 import { useTheme } from "@/components/providers";
 
-const navItems = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ElementType;
+  adminOnly?: boolean;
+}
+
+const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pipelines", label: "Pipelines", icon: GitBranch },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/builds", label: "Builds", icon: Hammer },
   { href: "/agents", label: "Agents", icon: Server },
   { href: "/secrets", label: "Secrets", icon: KeyRound },
+  // Admin-only: admin-scoped Git provider connections (PRD §6.16).
+  { href: "/integrations", label: "Integrations", icon: Plug, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -108,6 +118,7 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
         {/* Navigation */}
         <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
           {navItems.map((item) => {
+            if (item.adminOnly && !user?.is_admin) return null;
             const isActive =
               pathname === item.href || pathname.startsWith(item.href + "/");
             return (

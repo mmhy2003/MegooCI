@@ -156,6 +156,7 @@ export const projectsApi = {
 export interface Pipeline {
   id: string;
   project_id: string;
+  project_repository_id: string | null;
   name: string;
   source_repo_url: string | null;
   default_branch: string;
@@ -171,6 +172,7 @@ export interface Pipeline {
 export interface CreatePipelineRequest {
   project_id: string;
   name: string;
+  project_repository_id?: string | null;
   source_repo_url?: string;
   default_branch?: string;
   definition_format?: "yaml" | "python";
@@ -445,6 +447,13 @@ export interface RegistryInfo {
   host: string;
 }
 
+export interface GitIntegrationInfo {
+  github_oauth_configured: boolean;
+  gitlab_oauth_configured: boolean;
+  webhook_delivery_retention: number;
+  webhook_rate_limit_per_minute: number;
+}
+
 export interface SystemInfo {
   version: string;
   public_url: string;
@@ -453,6 +462,7 @@ export interface SystemInfo {
   storage: StorageInfo;
   auth: AuthInfo;
   registry: RegistryInfo;
+  git: GitIntegrationInfo;
 }
 
 export const systemApi = {
@@ -485,4 +495,164 @@ export const agentsApi = {
 
   delete: (id: string) =>
     fetchApi<void>(`/api/v1/agents/${id}`, { method: "DELETE" }),
+};
+
+// ------------------------------------------------------------------
+// Git Provider Integration (PRD §6.16)
+// ------------------------------------------------------------------
+export type GitProviderType = "github" | "gitlab" | "generic";
+export type GitAuthMode = "pat" | "oauth";
+export type GitValidationStatus = "unknown" | "ok" | "failed";
+
+export interface GitConnection {
+  id: string;
+  name: string;
+  provider_type: GitProviderType | string;
+  base_url: string | null;
+  auth_mode: GitAuthMode | string;
+  credential_hint: string | null;
+  validation_status: GitValidationStatus | string;
+  last_validated_at: string | null;
+  validation_error: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface CreateGitConnectionRequest {
+  name: string;
+  provider_type: GitProviderType;
+  base_url?: string | null;
+  auth_mode?: GitAuthMode;
+  credential: string;
+}
+
+export interface UpdateGitConnectionRequest {
+  name?: string;
+  base_url?: string | null;
+  credential?: string;
+}
+
+export interface GitConnectionTestResult {
+  ok: boolean;
+  status: string;
+  detail: string;
+  http_status: number | null;
+  latency_ms: number | null;
+}
+
+export const gitConnectionsApi = {
+  list: () => fetchApi<GitConnection[]>("/api/v1/git/connections/"),
+
+  create: (data: CreateGitConnectionRequest) =>
+    fetchApi<GitConnection>("/api/v1/git/connections/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  get: (id: string) =>
+    fetchApi<GitConnection>(`/api/v1/git/connections/${id}`),
+
+  update: (id: string, data: UpdateGitConnectionRequest) =>
+    fetchApi<GitConnection>(`/api/v1/git/connections/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    fetchApi<void>(`/api/v1/git/connections/${id}`, { method: "DELETE" }),
+
+  test: (id: string) =>
+    fetchApi<GitConnectionTestResult>(
+      `/api/v1/git/connections/${id}/test`,
+      { method: "POST" },
+    ),
+};
+
+export interface ProjectRepository {
+  id: string;
+  project_id: string;
+  connection_id: string;
+  repo_url: string;
+  default_branch: string;
+  display_name: string | null;
+  webhook_slug: string;
+  last_event_at: string | null;
+  last_event_status: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface ProjectRepositoryWithSecret extends ProjectRepository {
+  webhook_secret: string;
+  webhook_url: string;
+}
+
+export interface CreateProjectRepositoryRequest {
+  connection_id: string;
+  repo_url: string;
+  default_branch?: string;
+  display_name?: string | null;
+}
+
+export interface UpdateProjectRepositoryRequest {
+  default_branch?: string;
+  display_name?: string | null;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  project_repository_id: string;
+  provider_delivery_id: string;
+  event_type: string | null;
+  branch: string | null;
+  commit_sha: string | null;
+  author: string | null;
+  signature_valid: boolean;
+  http_status: number;
+  error: string | null;
+  payload_excerpt: string | null;
+  received_at: string;
+  processed_at: string | null;
+}
+
+export const projectRepositoriesApi = {
+  list: (projectId: string) =>
+    fetchApi<ProjectRepository[]>(
+      `/api/v1/projects/${projectId}/repositories/`,
+    ),
+
+  create: (projectId: string, data: CreateProjectRepositoryRequest) =>
+    fetchApi<ProjectRepositoryWithSecret>(
+      `/api/v1/projects/${projectId}/repositories/`,
+      { method: "POST", body: JSON.stringify(data) },
+    ),
+
+  update: (
+    projectId: string,
+    repoId: string,
+    data: UpdateProjectRepositoryRequest,
+  ) =>
+    fetchApi<ProjectRepository>(
+      `/api/v1/projects/${projectId}/repositories/${repoId}`,
+      { method: "PUT", body: JSON.stringify(data) },
+    ),
+
+  delete: (projectId: string, repoId: string) =>
+    fetchApi<void>(
+      `/api/v1/projects/${projectId}/repositories/${repoId}`,
+      { method: "DELETE" },
+    ),
+
+  rotateSecret: (projectId: string, repoId: string) =>
+    fetchApi<ProjectRepositoryWithSecret>(
+      `/api/v1/projects/${projectId}/repositories/${repoId}/rotate-secret`,
+      { method: "POST" },
+    ),
+
+  deliveries: (projectId: string, repoId: string, limit = 50) =>
+    fetchApi<WebhookDelivery[]>(
+      `/api/v1/projects/${projectId}/repositories/${repoId}/deliveries?limit=${limit}`,
+    ),
 };

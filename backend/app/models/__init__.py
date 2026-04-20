@@ -3,6 +3,11 @@ from app.models.artifact import Artifact
 from app.models.audit import AuditLogEntry
 from app.models.base import Base
 from app.models.build import Build, LogChunk, Stage, Step
+from app.models.git_integration import (
+    GitProviderConnection,
+    ProjectRepository,
+    WebhookDelivery,
+)
 from app.models.pipeline import Pipeline
 from app.models.project import Project
 from app.models.secret import EnvVar, Secret
@@ -25,4 +30,7 @@ __all__ = [
     "WebhookEndpoint",
     "Agent",
     "Artifact",
+    "GitProviderConnection",
+    "ProjectRepository",
+    "WebhookDelivery",
 ]

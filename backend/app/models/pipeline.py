@@ -17,6 +17,14 @@ class Pipeline(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id")
     )
+    # Optional link to a project-scoped GitProviderConnection-backed repository
+    # (PRD §6.16). When set, the Pipeline inherits repo_url + default_branch
+    # from the ProjectRepository row. `source_repo_url` stays for back-compat.
+    project_repository_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_repositories.id"),
+        nullable=True,
+    )
     name: Mapped[str] = mapped_column(String(255))
     source_repo_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     default_branch: Mapped[str] = mapped_column(String(255), default="main")

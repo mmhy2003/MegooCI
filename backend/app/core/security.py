@@ -82,3 +82,57 @@ def encrypt_secret(plaintext: str, key: str) -> bytes:
 def decrypt_secret(ciphertext: bytes, key: str) -> str:
     fernet = Fernet(_derive_fernet_key(key))
     return fernet.decrypt(ciphertext).decode()
+
+
+# ----------------------------------------------------------------------------
+# Webhook secret helpers (PRD §6.16)
+# ----------------------------------------------------------------------------
+def generate_webhook_slug(length: int = 24) -> str:
+    """Generate a URL-safe random slug for a webhook endpoint.
+
+    The slug is part of the publicly-visible webhook URL; it is not a
+    credential, but we make it long enough to prevent guessing.
+    """
+    import secrets
+
+    return secrets.token_urlsafe(length)[:length]
+
+
+def generate_webhook_secret(length: int = 32) -> str:
+    """Generate a high-entropy URL-safe token used as the HMAC / shared-secret
+    on inbound webhook deliveries. Returned to the user exactly once.
+    """
+    import secrets
+
+    return secrets.token_urlsafe(length)
+
+
+def encrypt_webhook_secret(secret: str, key: str) -> str:
+    """Encrypt a webhook secret at rest.
+
+    The secret must be recoverable in plaintext at webhook-verification time:
+    GitHub and our generic adapter verify an HMAC of the raw body using the
+    secret as the HMAC key, and GitLab compares the secret to an
+    `X-Gitlab-Token` header. bcrypt (one-way) would break HMAC verification,
+    so we use Fernet symmetric encryption keyed from `MEGOOCI_SECRET_KEY`.
+
+    Returns a Fernet token as a URL-safe base64 string, safely storable in a
+    `String(255)` column.
+    """
+    fernet = Fernet(_derive_fernet_key(key))
+    return fernet.encrypt(secret.encode()).decode("ascii")
+
+
+def decrypt_webhook_secret(token: str, key: str) -> str:
+    """Inverse of `encrypt_webhook_secret`. Raises `InvalidToken` if the
+    stored ciphertext is tampered with or the master key was rotated.
+    """
+    fernet = Fernet(_derive_fernet_key(key))
+    return fernet.decrypt(token.encode("ascii")).decode()
+
+
+def credential_hint(token: str) -> str:
+    """Return the last 4 characters of a credential for UI display."""
+    if not token:
+        return ""
+    return token[-4:] if len(token) > 4 else "*" * len(token)

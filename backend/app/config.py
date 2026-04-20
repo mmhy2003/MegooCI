@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     MEGOOCI_REGISTRY_ENABLED: bool = True
     MEGOOCI_REGISTRY_HOST: str = "localhost"
 
+    # Git provider integration (PRD §6.16)
+    # OAuth client credentials are Phase 2; keep them optional so Phase 1
+    # works without any configuration.
+    MEGOOCI_GITHUB_OAUTH_CLIENT_ID: str = ""
+    MEGOOCI_GITHUB_OAUTH_CLIENT_SECRET: str = ""
+    MEGOOCI_GITLAB_OAUTH_CLIENT_ID: str = ""
+    MEGOOCI_GITLAB_OAUTH_CLIENT_SECRET: str = ""
+    # Max WebhookDelivery rows retained per linked repository.
+    MEGOOCI_WEBHOOK_DELIVERY_RETENTION: int = 200
+    # Per-slug rate limit on the unauthenticated webhook receiver.
+    MEGOOCI_WEBHOOK_RATE_LIMIT_PER_MINUTE: int = 60
+
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 
 

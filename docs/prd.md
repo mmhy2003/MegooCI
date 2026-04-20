@@ -4,13 +4,14 @@
 | --- | --- |
 | **Product Name** | MegooCI |
 | **Tagline** | A simpler, modern open-source alternative to Jenkins |
-| **Document Status** | Draft v1.2 |
+| **Document Status** | Draft v1.3 |
 | **Last Updated** | 2026-04-20 |
 | **Owner** | MegooCI Core Team |
 | **License (planned)** | Apache-2.0 (OSS) |
 
 > **Change log**
 >
+> - **v1.3 (2026-04-20)** — Added §6.16 "Git Provider Integration" (admin-scoped Git connections with PAT auth, per-project repository linking, manual-paste webhook receivers with HMAC verification for GitHub/GitLab/Generic, delivery log, webhook-triggered builds). Added `GitProviderConnection`, `ProjectRepository`, and `WebhookDelivery` to §10. Added OAuth and delivery-retention env vars to §6.14. Marked Phase 1 as delivered in §6.15.
 > - **v1.2 (2026-04-20)** — Added §6.15 "Implementation Status Snapshot" reflecting a full-codebase audit of `backend/` and `frontend/`. No requirement changes; the feature tables above remain the target specification.
 > - **v1.1 (2026-04-19)** — Added embedded OCI registry (§6.13), AI assistant details (§6.12), env-var model.
 
@@ -378,6 +379,11 @@ All operational toggles are driven by environment variables so administrators ca
 | `MEGOOCI_REGISTRY_MAX_UPLOAD_MB` | `2048` | Per-layer upload size limit. |
 | `MEGOOCI_REGISTRY_ALLOW_ANONYMOUS_PULL` | `false` | Allow unauthenticated pulls for projects that opt in (F-13.7). |
 | `MEGOOCI_REGISTRY_GC_CRON` | `0 3 * * *` | Cron expression for the unreferenced-blob garbage collector. |
+| `MEGOOCI_GITHUB_OAUTH_CLIENT_ID` | — | GitHub OAuth app Client ID (used by §6.16 Phase 2). Empty disables OAuth for GitHub. |
+| `MEGOOCI_GITHUB_OAUTH_CLIENT_SECRET` | — | GitHub OAuth app Client Secret (Phase 2). |
+| `MEGOOCI_GITLAB_OAUTH_CLIENT_ID` | — | GitLab OAuth application ID (Phase 2). |
+| `MEGOOCI_GITLAB_OAUTH_CLIENT_SECRET` | — | GitLab OAuth application secret (Phase 2). |
+| `MEGOOCI_WEBHOOK_DELIVERY_RETENTION` | `200` | Max `WebhookDelivery` rows kept per linked repository; older rows pruned on insert. |
 
 ### 6.15 Implementation Status Snapshot (as of 2026-04-20)
 
@@ -419,7 +425,8 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 | Env vars (non-secret) | F-8.4 | ✅ | Separate `EnvVar` model; values stored **plaintext** (consistent with F-8.4). |
 | Reference by name in pipelines (`${{ secrets.X }}`) | F-8.5 | ❌ | No template interpolation; executor never loads secret/env values. |
 | Automatic log masking of secret values | F-8.6 | ❌ | Not implemented. |
-| Incoming Git/generic webhooks (`POST /api/webhooks/{slug}`) | F-2.2, F-11.1 | ❌ | `WebhookEndpoint` table exists; no HTTP route receives or verifies payloads (no HMAC verification, no replay protection). |
+| Incoming Git webhooks (GitHub / GitLab / Generic) with HMAC | F-2.2, F-11.1, F-16.\* | ✅ | `POST /api/v1/webhooks/git/{slug}` in `api/v1/webhooks_git.py`; per-provider verification in `services/git_providers.py`; replay protection via `UNIQUE(project_repository_id, provider_delivery_id)`. Legacy pipeline-scoped `WebhookEndpoint` table remains unused. |
+| Admin-scoped Git provider connections + per-project repo links | F-16.1 – F-16.14 | ✅ | Models `GitProviderConnection`, `ProjectRepository`, `WebhookDelivery` + Alembic `002_git_integration.py`; admin routes `/api/v1/git/connections` and project routes `/api/v1/projects/{id}/repositories`. PAT only; OAuth deferred to Phase 2. |
 | Outgoing webhooks with HMAC + retries | F-11.2 | ❌ | No model, no delivery service. |
 | Cron / scheduled triggers | F-2.3 | ❌ | Celery Beat is wired up (`beat_schedule_filename` set in `celery_app.py`) but `beat_schedule` is empty — no periodic tasks registered. |
 | SCM polling · upstream/downstream · tag/release triggers | F-2.4, F-2.5, F-2.6 | ❌ | None. |
@@ -486,6 +493,43 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 8. **Audit-log writers.** Table exists; no handler records events (F-7.10).
 9. **Observability** — `/metrics` (F-10.2) and structured JSON logging (F-10.3).
 10. **Enterprise auth** — OIDC (F-7.5), SAML/LDAP (F-7.6/7), API tokens (F-7.9), invites (F-7.3), RBAC (F-7.8), and a **durable** signup-disable mechanism that survives restarts (F-7.2/4).
+
+### 6.16 Git Provider Integration
+
+MegooCI lets administrators register **Git provider connections** (GitHub SaaS or Enterprise Server, GitLab SaaS or self-hosted, or any generic Git host) once, and lets project owners **link specific repositories** to their projects using those connections. Each linked repository exposes a **manual-paste webhook** URL + signed secret that the user installs in the provider's UI; pushes to that repository trigger builds for any pipeline in the project that is linked to the same repository.
+
+This section is fully UI-driven: no configuration file edits are required. Phase 1 supports **Personal Access Tokens (PATs)** for provider auth; Phase 2 will add full OAuth redirect flows for GitHub and GitLab.
+
+| ID | Feature | Priority | Description |
+| --- | --- | --- | --- |
+| F-16.1 | Admin-scoped `GitProviderConnection` store | M | Admins create/update/delete/test provider connections from **Settings → Integrations**. Each connection stores provider type, base URL, an encrypted credential, and the most recent validation result. |
+| F-16.2 | PAT authentication (GitHub / GitLab / Generic) | M | The credential is a user-pasted token (or username/token for generic). Stored Fernet-encrypted at rest; never returned from the API. Only a 4-char suffix is shown in list/detail responses. |
+| F-16.3 | OAuth-ready data model | S | `auth_mode` + OAuth columns (`oauth_client_id`, `encrypted_oauth_client_secret`, `encrypted_refresh_token`, `token_expires_at`) ship in Phase 1 but accept only `pat` until Phase 2 lands. |
+| F-16.4 | Connection test | M | `POST /api/v1/git/connections/{id}/test` calls the provider (`GET /user` for GitHub/GitLab, `git ls-remote` for generic) with the current credential and records `validation_status` + `last_validated_at`. |
+| F-16.5 | Per-project `ProjectRepository` link | M | A project owner links a `(connection, repo_url, default_branch, display_name)` tuple to their project. A project may have N linked repositories (monorepo plus helper repos). Pipelines may optionally reference a `project_repository_id` to inherit the repo URL + default branch. |
+| F-16.6 | Manual-paste webhook setup | M | On link, MegooCI generates a 24-char `webhook_slug` and a 32-byte random secret (shown once). The UI renders provider-specific instructions: URL to paste (`{MEGOOCI_PUBLIC_URL}/api/v1/webhooks/git/{slug}`), secret to paste, which events to subscribe to, and content-type guidance. |
+| F-16.7 | Per-provider HMAC verification | M | GitHub: `X-Hub-Signature-256` (HMAC-SHA256 of raw body). GitLab: `X-Gitlab-Token` constant-time compared to secret. Generic: `X-MegooCI-Signature: sha256=...` HMAC-SHA256 of raw body. All comparisons use `hmac.compare_digest`. |
+| F-16.8 | Replay protection | M | Unique `(project_repository_id, provider_delivery_id)` on `WebhookDelivery`; duplicates return 409. GitHub uses `X-GitHub-Delivery`; GitLab `X-Gitlab-Event-UUID`; generic uses `X-MegooCI-Delivery` or a random UUID. |
+| F-16.9 | Webhook delivery log | M | Every inbound request (accepted or rejected) is recorded as a `WebhookDelivery` row with event type, branch, commit sha, signature validity, the HTTP status we returned, an error string when rejected, and a 4 KB payload excerpt. Visible in the UI under **Project → Integrations → Deliveries**. |
+| F-16.10 | Webhook-triggered build enqueue | M | On a verified push, MegooCI finds pipelines in the project whose `project_repository_id` matches the link (or, for back-compat, whose `source_repo_url` matches) and whose branch filter accepts the pushed branch; each match enqueues a `megooci.run_build` Celery task with `trigger_type="webhook"`. |
+| F-16.11 | Rotate webhook secret | M | `POST /api/v1/projects/{project_id}/repositories/{repo_id}/rotate-secret` returns a new plaintext secret exactly once. Old secret is invalidated immediately. |
+| F-16.12 | Rate limiting on webhook endpoint | S | The unauthenticated `POST /api/v1/webhooks/git/{slug}` route is rate-limited per slug via a Redis token bucket (default 60/min) to contain misconfigured or malicious replay floods. |
+| F-16.13 | Provider guards | M | `DELETE /api/v1/git/connections/{id}` returns 409 while any `ProjectRepository` references it. `GET` on `/api/v1/webhooks/git/{slug}` returns 405 to prevent slug discovery via accidental GETs. |
+| F-16.14 | Provider scope (Phase 1) | M | GitHub (SaaS + Enterprise Server), GitLab (SaaS + self-hosted), Generic Git (any HTTPS URL with username/token). Bitbucket and Gitea are deferred (§6.4 F-4.3 / F-4.4). |
+
+#### 6.16.1 Data model additions
+
+See §10 for the canonical list. Summary of the new tables:
+
+- `GitProviderConnection(id, name, provider_type, base_url, auth_mode, encrypted_credential, encrypted_refresh_token, oauth_client_id, encrypted_oauth_client_secret, token_scopes, token_expires_at, validation_status, last_validated_at, validation_error, created_by, created_at, updated_at)`
+- `ProjectRepository(id, project_id, connection_id, repo_url, default_branch, display_name, webhook_slug UNIQUE, webhook_secret_hash, last_event_at, last_event_status, created_by, created_at, updated_at)`
+- `WebhookDelivery(id, project_repository_id, provider_delivery_id, event_type, branch, commit_sha, author, signature_valid, http_status, error, payload_excerpt, received_at, processed_at)` with `UNIQUE(project_repository_id, provider_delivery_id)`
+- `Pipeline` gains an optional nullable `project_repository_id` FK (back-compat — existing pipelines keep using `source_repo_url` unchanged).
+
+#### 6.16.2 Phases
+
+- **Phase 1 (shipped 2026-04-20):** PRD entries above, data model + Alembic migration `002_git_integration.py`, admin connections (PAT only, with `test`), per-project repository links, manual webhook setup UI, deliveries log, webhook receiver with per-provider HMAC verification and build enqueue, rate limiting.
+- **Phase 2 (deferred):** OAuth redirect flows for GitHub and GitLab with refresh-token rotation; commit-status / check writeback to the provider; repo picker (list repos the token can see) replacing the free-form URL field; SCM polling fallback for hosts without webhook support.
 
 ---
 
@@ -681,10 +725,13 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 - **UserRole** `(user_id, role_id, scope_type, scope_id)`
 - **Invite** `(id, email, role_id, token_hash, expires_at, created_by)`
 - **Project / Folder** `(id, parent_id, name, description, created_by, allow_ai_repo_context)`
-- **Pipeline** `(id, project_id, name, source_repo_url, default_branch, definition_path, definition_format [yaml|python], enabled)`
+- **Pipeline** `(id, project_id, project_repository_id_nullable, name, source_repo_url, default_branch, definition_path, definition_format [yaml|python], enabled)`
 - **Trigger** `(id, pipeline_id, type, config_json)`
-- **WebhookEndpoint** `(id, pipeline_id, slug, secret_hash, created_at, last_used_at)`
+- **WebhookEndpoint** `(id, pipeline_id, slug, secret_hash, created_at, last_used_at)` — legacy pipeline-scoped endpoint; superseded by `ProjectRepository` webhooks in §6.16.
 - **OutgoingWebhook** `(id, scope_type, scope_id, url, events[], secret_hash)`
+- **GitProviderConnection** `(id, name, provider_type [github|gitlab|generic], base_url, auth_mode [pat|oauth], encrypted_credential, encrypted_refresh_token, oauth_client_id, encrypted_oauth_client_secret, token_scopes, token_expires_at, validation_status [unknown|ok|failed], last_validated_at, validation_error, created_by, created_at, updated_at)`
+- **ProjectRepository** `(id, project_id, connection_id, repo_url, default_branch, display_name, webhook_slug UNIQUE, webhook_secret_hash, last_event_at, last_event_status, created_by, created_at, updated_at)`
+- **WebhookDelivery** `(id, project_repository_id, provider_delivery_id, event_type, branch, commit_sha, author, signature_valid, http_status, error, payload_excerpt, received_at, processed_at)` with `UNIQUE(project_repository_id, provider_delivery_id)`
 - **Build** `(id, pipeline_id, number, branch, commit_sha, status, started_at, finished_at, triggered_by, trigger_type, params_json)`
 - **Stage** `(id, build_id, name, status, started_at, finished_at)`
 - **Step** `(id, stage_id, name, status, exit_code, started_at, finished_at, agent_id)`

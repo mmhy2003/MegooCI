@@ -47,6 +47,15 @@ class RegistryInfo(BaseModel):
     host: str
 
 
+class GitIntegrationInfo(BaseModel):
+    """Runtime state of the Git provider integration (PRD §6.16)."""
+
+    github_oauth_configured: bool
+    gitlab_oauth_configured: bool
+    webhook_delivery_retention: int
+    webhook_rate_limit_per_minute: int
+
+
 class SystemInfo(BaseModel):
     version: str
     public_url: str
@@ -55,6 +64,7 @@ class SystemInfo(BaseModel):
     storage: StorageInfo
     auth: AuthInfo
     registry: RegistryInfo
+    git: GitIntegrationInfo
 
 
 def _build_ai_info() -> AiInfo:
@@ -134,5 +144,17 @@ async def get_system_info(
         registry=RegistryInfo(
             enabled=settings.MEGOOCI_REGISTRY_ENABLED,
             host=settings.MEGOOCI_REGISTRY_HOST,
+        ),
+        git=GitIntegrationInfo(
+            github_oauth_configured=bool(
+                settings.MEGOOCI_GITHUB_OAUTH_CLIENT_ID
+                and settings.MEGOOCI_GITHUB_OAUTH_CLIENT_SECRET
+            ),
+            gitlab_oauth_configured=bool(
+                settings.MEGOOCI_GITLAB_OAUTH_CLIENT_ID
+                and settings.MEGOOCI_GITLAB_OAUTH_CLIENT_SECRET
+            ),
+            webhook_delivery_retention=settings.MEGOOCI_WEBHOOK_DELIVERY_RETENTION,
+            webhook_rate_limit_per_minute=settings.MEGOOCI_WEBHOOK_RATE_LIMIT_PER_MINUTE,
         ),
     )

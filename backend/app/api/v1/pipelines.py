@@ -43,11 +43,33 @@ async def create_pipeline(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
         )
 
+    # If the pipeline is linked to a ProjectRepository, validate the link
+    # belongs to the same project and inherit repo_url + branch when the
+    # client didn't override them.
+    project_repository_id = body.project_repository_id
+    source_repo_url = body.source_repo_url
+    default_branch = body.default_branch
+
+    if project_repository_id is not None:
+        from app.models.git_integration import ProjectRepository
+
+        linked = await db.get(ProjectRepository, project_repository_id)
+        if linked is None or linked.project_id != body.project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="project_repository_id does not belong to this project",
+            )
+        if not source_repo_url:
+            source_repo_url = linked.repo_url
+        if not default_branch or default_branch == "main":
+            default_branch = linked.default_branch
+
     pipeline = Pipeline(
         project_id=body.project_id,
+        project_repository_id=project_repository_id,
         name=body.name,
-        source_repo_url=body.source_repo_url,
-        default_branch=body.default_branch,
+        source_repo_url=source_repo_url,
+        default_branch=default_branch,
         definition_format=body.definition_format,
         yaml_content=body.yaml_content,
         created_by=current_user.id,
