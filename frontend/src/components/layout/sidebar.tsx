@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuthStore } from "@/lib/auth";
 import { useTheme } from "@/components/providers";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 interface NavItem {
   href: string;
@@ -83,6 +84,23 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
 
   const { user, logout } = useAuthStore();
   const { theme, setTheme } = useTheme();
+  const confirm = useConfirm();
+
+  const handleLogout = React.useCallback(async () => {
+    const ok = await confirm({
+      title: "Log out of MegooCI?",
+      description: (
+        <>
+          You&apos;ll need to sign in again to view builds, trigger pipelines,
+          or access your projects.
+        </>
+      ),
+      confirmText: "Log out",
+      cancelText: "Stay signed in",
+      tone: "warning",
+    });
+    if (ok) logout();
+  }, [confirm, logout]);
 
   // Collapse toggle only makes sense on desktop; on mobile the drawer is always
   // the "expanded" width so users can tap labels.
@@ -182,76 +200,94 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
           </button>
         </div>
 
-        {/* User section */}
+        {/* User section — shows user info + a one-click Log out.
+            Expanded: user info on the left (opens the account dropdown),
+            Log out icon button on the right.
+            Collapsed (desktop only): avatar on top, log out button stacked
+            below it so both remain reachable. */}
         <div className="border-t p-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent",
-                  isCollapsed && "md:justify-center md:px-2",
-                )}
-              >
-                <Avatar
-                  fallback={user?.name || user?.email || "U"}
-                  size="sm"
-                />
-                <div
+          <div
+            className={cn(
+              "flex items-center gap-1",
+              isCollapsed && "md:flex-col md:gap-1",
+            )}
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
                   className={cn(
-                    "flex-1 text-left",
-                    isCollapsed && "md:hidden",
+                    "flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent",
+                    isCollapsed && "md:flex-none md:justify-center md:px-2",
                   )}
                 >
-                  <p className="truncate font-medium text-sm">
-                    {user?.name || "User"}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {user?.email}
-                  </p>
-                </div>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>
-                <User className="mr-2 h-4 w-4" />
-                Profile
-              </DropdownMenuItem>
-              {/* Cycle light -> dark -> system -> light so users can get back
-                  to OS-follow without visiting Settings. The label names the
-                  *next* state to match the icon convention elsewhere. */}
-              <DropdownMenuItem
-                onClick={() =>
-                  setTheme(
-                    theme === "light"
-                      ? "dark"
-                      : theme === "dark"
-                        ? "system"
-                        : "light",
-                  )
-                }
-              >
-                {theme === "light" ? (
-                  <Moon className="mr-2 h-4 w-4" />
-                ) : theme === "dark" ? (
-                  <Monitor className="mr-2 h-4 w-4" />
-                ) : (
-                  <Sun className="mr-2 h-4 w-4" />
-                )}
-                {theme === "light"
-                  ? "Dark mode"
-                  : theme === "dark"
-                    ? "Match system"
-                    : "Light mode"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={logout}>
-                <LogOut className="mr-2 h-4 w-4" />
-                Log out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  <Avatar
+                    fallback={user?.name || user?.email || "U"}
+                    size="sm"
+                  />
+                  <div
+                    className={cn(
+                      "min-w-0 flex-1 text-left",
+                      isCollapsed && "md:hidden",
+                    )}
+                  >
+                    <p className="truncate font-medium text-sm">
+                      {user?.name || "User"}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {user?.email}
+                    </p>
+                  </div>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>My Account</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem>
+                  <User className="mr-2 h-4 w-4" />
+                  Profile
+                </DropdownMenuItem>
+                {/* Cycle light -> dark -> system -> light so users can get
+                    back to OS-follow without visiting Settings. Label names
+                    the *next* state to match the icon convention. */}
+                <DropdownMenuItem
+                  onClick={() =>
+                    setTheme(
+                      theme === "light"
+                        ? "dark"
+                        : theme === "dark"
+                          ? "system"
+                          : "light",
+                    )
+                  }
+                >
+                  {theme === "light" ? (
+                    <Moon className="mr-2 h-4 w-4" />
+                  ) : theme === "dark" ? (
+                    <Monitor className="mr-2 h-4 w-4" />
+                  ) : (
+                    <Sun className="mr-2 h-4 w-4" />
+                  )}
+                  {theme === "light"
+                    ? "Dark mode"
+                    : theme === "dark"
+                      ? "Match system"
+                      : "Light mode"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className={cn(
+                "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              )}
+              title="Log out"
+              aria-label="Log out"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </aside>
     </>
