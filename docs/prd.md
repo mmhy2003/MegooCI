@@ -4,10 +4,15 @@
 | --- | --- |
 | **Product Name** | MegooCI |
 | **Tagline** | A simpler, modern open-source alternative to Jenkins |
-| **Document Status** | Draft v1.1 |
-| **Last Updated** | 2026-04-19 |
+| **Document Status** | Draft v1.2 |
+| **Last Updated** | 2026-04-20 |
 | **Owner** | MegooCI Core Team |
 | **License (planned)** | Apache-2.0 (OSS) |
+
+> **Change log**
+>
+> - **v1.2 (2026-04-20)** — Added §6.15 "Implementation Status Snapshot" reflecting a full-codebase audit of `backend/` and `frontend/`. No requirement changes; the feature tables above remain the target specification.
+> - **v1.1 (2026-04-19)** — Added embedded OCI registry (§6.13), AI assistant details (§6.12), env-var model.
 
 ---
 
@@ -373,6 +378,114 @@ All operational toggles are driven by environment variables so administrators ca
 | `MEGOOCI_REGISTRY_MAX_UPLOAD_MB` | `2048` | Per-layer upload size limit. |
 | `MEGOOCI_REGISTRY_ALLOW_ANONYMOUS_PULL` | `false` | Allow unauthenticated pulls for projects that opt in (F-13.7). |
 | `MEGOOCI_REGISTRY_GC_CRON` | `0 3 * * *` | Cron expression for the unreferenced-blob garbage collector. |
+
+### 6.15 Implementation Status Snapshot (as of 2026-04-20)
+
+This section documents the **actual state of the codebase** at the date above, from a full audit of `backend/` and `frontend/`. It is advisory — the feature tables in §6.1–§6.14 remain the target specification, and §14 (Release Plan) remains the roadmap. When there's a conflict between this snapshot and the requirement tables, the requirement tables win.
+
+Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; key paths missing) · ❌ Missing
+
+#### 6.15.1 Backend (`backend/`)
+
+**Stack** — ✅ FastAPI + SQLAlchemy 2 (async) + Pydantic v2 + Celery (Redis broker) + Alembic + `python-jose` + `bcrypt` + `PyYAML`. Python 3.12. Versions in `pyproject.toml` are mostly unpinned. **No AI SDKs** and **no OCI/registry libraries** are listed as dependencies.
+
+**API routers under `/api/v1/`:** `auth`, `projects`, `pipelines`, `builds`, `secrets-env`, `agents`, `system`, `websocket`. Plus `GET /health` on the root app.
+
+**Data model (`backend/app/models/`):** `User`, `Project`, `Pipeline`, `Trigger`, `WebhookEndpoint`, `Build`, `Stage`, `Step`, `LogChunk`, `Artifact`, `Agent`, `Secret`, `EnvVar`, `AuditLogEntry`. **Missing** vs §10: `Role`, `UserRole`, `Invite`, `OutgoingWebhook`, `ContainerRepository`, `ContainerImage`, `ContainerTag`, `RegistryDeployToken`, `RegistryEvent`, `AiConversation`, `AiMessage`.
+
+| Area | PRD ref | Status | Notes |
+| --- | --- | --- | --- |
+| Local auth (email/password), JWT access + refresh, `/me` | F-7.1 | ✅ | `bcrypt` hashing; `python-jose` JWT. |
+| `MEGOOCI_SIGNUP_ENABLED` runtime gate + first-user becomes admin | F-7.2, F-7.4 | 🟡 | Flag enforced. **Bug:** the "auto-disable signup after first admin" path mutates the in-memory `Settings` object only — not persisted, so signup re-enables on every restart. |
+| OIDC / OAuth2 · SAML · LDAP | F-7.5, F-7.6, F-7.7 | ❌ | Not implemented. |
+| API tokens / PATs per user | F-7.9 | ❌ | Only JWT access + refresh exist. |
+| Admin-initiated invites | F-7.3 | ❌ | No model, no endpoints. |
+| RBAC (Role / UserRole, scoped permissions) | F-7.8 | ❌ | No tables; `User.is_admin` boolean is the only authorization primitive. |
+| Projects / Pipelines / Builds / Stages / Steps CRUD | F-1.\* | ✅ | With `definition_format` (`yaml` / `python`) and `yaml_content`. |
+| YAML pipeline parser, compiler, validator | F-1.1 | 🟡 | `services/pipeline_compiler.py` has `parse_yaml_pipeline`, `compile_to_build_graph`, and `validate_pipeline`. **Validation is not called** on pipeline create/update; it runs implicitly at `POST /builds/{pipeline_id}/trigger`. |
+| Imperative Python pipelines + sandbox | F-1.2 | ❌ | No SDK, no sandboxed subprocess. `MEGOOCI_PYTHON_PIPELINE_TIMEOUT_SECONDS` is defined in config but unused. |
+| Freestyle jobs · Multi-branch · Parameterized · Matrix | F-1.3 – F-1.6 | ❌ | None of these are wired into the trigger or executor. |
+| Parallel stages, conditional `when`, matrix/axis | F-1.6 – F-1.8 | ❌ | Executor runs stages strictly sequentially; `when` is not evaluated; no matrix expansion. |
+| Pipeline env variable scoping & inheritance | F-1.9 | ❌ | Secrets/env vars are not loaded by the executor at build time. |
+| Local executor (shell on controller) | F-3.1 | 🟡 | `services/build_executor.py` invokes `asyncio.create_subprocess_shell(step.command)` inside the Celery worker. Cancellation by polling `build.status`; no Celery task revocation. |
+| Docker / SSH / Kubernetes executors | F-3.2, F-3.3, F-3.5 | ❌ | No executor implementations. |
+| Dedicated agent binary + self-registration | F-3.4 | 🟡 | `POST /agents/` (admin) and `POST /agents/{id}/heartbeat` exist. **Registration token is returned once but never persisted** on the `Agent` row and is never verified on subsequent calls. No controller ↔ agent control channel. |
+| Agent labels · concurrency limits | F-3.6, F-3.7 | 🟡 | Columns exist on `Agent`; scheduler does not consult them. |
+| Live build logs via WebSocket | F-5.1 | 🟡 | `WS /api/v1/ws/builds/{id}/logs` bridges Redis pub/sub channel `build:{id}:logs`. **No auth on the socket.** |
+| Archived log storage on disk | F-5.2 | 🟡 | Logs are written to `LogChunk` rows in Postgres. No flush to `MEGOOCI_STORAGE_ROOT/logs/...` yet. |
+| Artifact upload/download · retention · quotas | F-5.3 – F-5.6 | 🟡 | `Artifact` model + migration exist; no API, no upload/download flow, executor never creates rows. |
+| JUnit / coverage ingestion | F-5.7, F-5.8 | ❌ | Not implemented. |
+| Secret store (Fernet-encrypted, scoped) + types | F-8.1, F-8.2, F-8.3 | ✅ | `core/security.py` uses Fernet keyed from `MEGOOCI_SECRET_KEY`. **Note:** Fernet is AES-128-CBC + HMAC-SHA256, **not AES-256-GCM as specified in F-8.1**. Scoping via `scope_type` / `scope_id`; `secret_type` defaults to `"text"` but is not enum-validated. |
+| Env vars (non-secret) | F-8.4 | ✅ | Separate `EnvVar` model; values stored **plaintext** (consistent with F-8.4). |
+| Reference by name in pipelines (`${{ secrets.X }}`) | F-8.5 | ❌ | No template interpolation; executor never loads secret/env values. |
+| Automatic log masking of secret values | F-8.6 | ❌ | Not implemented. |
+| Incoming Git/generic webhooks (`POST /api/webhooks/{slug}`) | F-2.2, F-11.1 | ❌ | `WebhookEndpoint` table exists; no HTTP route receives or verifies payloads (no HMAC verification, no replay protection). |
+| Outgoing webhooks with HMAC + retries | F-11.2 | ❌ | No model, no delivery service. |
+| Cron / scheduled triggers | F-2.3 | ❌ | Celery Beat is wired up (`beat_schedule_filename` set in `celery_app.py`) but `beat_schedule` is empty — no periodic tasks registered. |
+| SCM polling · upstream/downstream · tag/release triggers | F-2.4, F-2.5, F-2.6 | ❌ | None. |
+| `Trigger` model (storage) | — | 🟡 | Exists; no API and no evaluator. |
+| Notifications (email / Slack / Teams / Discord / generic webhook) | F-6.\* | ❌ | No config, no sender, no templates. |
+| AI provider adapter + streaming chat endpoints | F-12.\* | 🟡 | Env vars defined (`MEGOOCI_AI_*`) and surfaced via `GET /system/info.ai` with derived readiness strings. **No chat/completion endpoints**, no provider clients, no prompt templates. |
+| Embedded OCI/Docker registry (`/v2/...`) | F-13.\* | ❌ | No `/v2/...` routes; no `ContainerRepository` / `ContainerImage` / `ContainerTag` / `RegistryDeployToken` models. `MEGOOCI_REGISTRY_ENABLED` / `MEGOOCI_REGISTRY_HOST` are only reflected in `/system/info` for the UI. |
+| Audit log storage | F-7.10 | 🟡 | `AuditLogEntry` table exists; **no writer code** anywhere in the request pipeline. |
+| System info (config snapshot) | — | ✅ | `GET /api/v1/system/info` returns `SystemInfo` with AI / storage / auth / registry blocks. |
+| Prometheus `/metrics` | F-10.2 | ❌ | No metrics endpoint. |
+| Structured JSON logging | F-10.3 | ❌ | Standard uvicorn logging. `MEGOOCI_LOG_LEVEL` is exposed but not applied to logger config. |
+| Backup / restore tooling | F-10.5 | ❌ | Not present. |
+| Alembic migrations | — | ✅ | Revision `001_initial_schema.py` present. **Redundancy:** `database.init_db()` also calls `Base.metadata.create_all()` on startup, overlapping with migrations. |
+
+#### 6.15.2 Frontend (`frontend/`)
+
+**Stack** — ✅ Next.js 15 (App Router) + React 19 + TypeScript + Tailwind 3 + TanStack Query 5 + Zustand 5 + `sonner` + `lucide-react` + custom UI primitives. **No Monaco editor**, **no charting library**, **no `cmdk` command palette**, **no Radix UI packages** (UI primitives are hand-rolled to match the shadcn look).
+
+**Pages implemented:** `/`, `/login`, `/signup`, `/dashboard`, `/pipelines`, `/pipelines/new`, `/pipelines/[id]`, `/projects`, `/projects/[id]`, `/builds`, `/builds/[id]`, `/agents`, `/secrets`, `/settings`.
+
+**UI primitives (`src/components/ui/`):** `avatar`, `badge`, `button`, `card`, `confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `scroll-area`, `select`, `separator`, `skeleton`, `textarea`.
+
+| Area | PRD ref | Status | Notes |
+| --- | --- | --- | --- |
+| App shell — collapsible desktop sidebar + off-canvas mobile drawer | F-9.7 | ✅ | Breakpoints via `sm:` / `md:` / `lg:`; route change closes drawer; body scroll locked while open. |
+| Dashboard — stat cards + recent builds table | F-9.1 | ✅ | Cards: total pipelines, total builds, success rate, active agents. Table columns hide progressively on smaller viewports. |
+| Pipeline listing, detail, creation, edit | F-1.1 | ✅ | Detail has Overview / Builds / Configuration tabs; trigger build; delete with in-app confirm. |
+| YAML / Python pipeline editor | F-1.1, F-1.2 | 🟡 | Plain `<textarea>`, not Monaco. Radio toggle YAML / Python on **create** only; both formats persist into the single `yaml_content` field, and the detail editor does not change UX by format. |
+| Builds list + detail with stage graph + live logs + re-run / cancel | F-9.2, F-5.1 | ✅ | `StageGraph` + `BuildLogViewer` (follow/search/fullscreen/copy); WebSocket via `useWebSocket` hook. **WS URL is hardcoded to `ws://<hostname>:8000/ws/...`** instead of using the Next.js rewrite proxy. |
+| Projects listing / detail with secrets + env vars tabs | F-9.3 | ✅ | Scoped secrets + env vars CRUD in project settings tab. |
+| Agents listing + admin-only registration + one-time token card | F-3.4 | ✅ | 15-second polling; destructive actions use `useConfirm`. |
+| Secrets / env vars global page | F-8.\* | ✅ | `/secrets` aggregates per project with add + delete. `envVarsApi.update` exists but has **no UI** surface (values can only be deleted + re-created). |
+| Settings page mirror of `GET /system/info` (profile, AI, auth, storage, registry) | — | ✅ | Read-only; registry block is purely informational. |
+| In-app confirmation dialogs (replaces `window.confirm`) | UX principle 9 | ✅ | `ConfirmProvider` + `useConfirm` in `components/ui/confirm-dialog.tsx`; zero remaining `window.confirm` calls in `frontend/src`. |
+| Signup page gated by `signup_enabled` | F-7.2 | 🟡 | Backend flag is **displayed** on Settings but not used to hide `/signup` or the "Create one" link on `/login`. |
+| Dark mode toggle | F-9.5 | 🟡 | Provider supports `light` / `dark` / `system`; UI toggle only swaps light ↔ dark ("system" option not user-selectable). |
+| Global search / `⌘K` palette | F-9.4, F-9.6 | ❌ | Header search is decorative: input is `readOnly` and the icon button has no handler. No command palette library is installed. |
+| Notifications UI | F-6.4 | ❌ | Header bell icon has no dropdown; no notification center, no Slack/email config UI. |
+| "New Build" header quick action | — | ❌ | Button exists but has no `onClick`. |
+| AI chat panel / "Generate with AI" / fix-it suggestions | F-12.\* | ❌ | No AI UI at all; Settings only reflects backend readiness. |
+| Container registry UI (image browser, tags, pull snippets) | F-13.12 | ❌ | Only read-only status in Settings. |
+| Artifact browser / downloads | F-5.3 | ❌ | No UI. |
+| JUnit / coverage results view | F-5.7, F-5.8 | ❌ | No UI. |
+| Visual pipeline editor (drag-and-drop) | F-1.11 | ❌ | Deferred (PRD priority S). |
+| Compare builds diff view | F-9.8 | ❌ | Deferred (PRD priority S). |
+
+#### 6.15.3 End-to-end capability today
+
+- ✅ A user can sign up, log in, create a project, create a YAML pipeline, trigger a build, and watch live logs stream from a shell-executed build.
+- ✅ An admin can register an agent and copy a registration token (the token is **not** usable yet — see 6.15.1).
+- ✅ Operators can view current backend configuration (AI, auth, storage, registry) via the Settings page.
+- 🟡 Cancellation, retry, and live log streaming all work, but only because the executor polls `build.status`; there is no task revocation and no auth on the log WebSocket.
+- ❌ Nothing outside the controller process actually runs builds yet — there is no agent control plane, no Docker/SSH/K8s executor, no artifact flow, no notifications, and no registry.
+
+#### 6.15.4 Largest gaps vs. the specification (priority-ordered for upcoming work)
+
+1. **Agent control plane + remote execution.** Prerequisite for every executor other than "local shell on controller" — unblocks F-3.2 (Docker), F-3.3 (SSH), F-3.5 (K8s), F-3.6 (labels), F-3.7 (concurrency limits), and the whole scaling story.
+2. **Pipeline runtime fidelity.** Parallel stages (F-1.7), conditional `when` (F-1.8), matrix (F-1.6), parameters (F-1.5), and **secret/env injection** into `build_executor` (F-8.5, F-1.9). Today's executor is much simpler than the compiler implies.
+3. **Webhooks — incoming + outgoing** (F-2.2, F-11.1, F-11.2). The `WebhookEndpoint` model is in place; the HTTP layer is missing.
+4. **Scheduled triggers** via Celery Beat (F-2.3). Beat is wired up; the schedule is empty.
+5. **Artifacts + test results** (F-5.3 – F-5.8). No endpoints, no on-disk layout, no UI.
+6. **Embedded OCI/Docker registry** (F-13.\*). Entirely unbuilt and the largest net-new feature in the PRD.
+7. **AI assistant** (F-12.\*). Config-only today; needs provider adapter, streaming chat endpoint, and the "Generate with AI" UI flow.
+8. **Audit-log writers.** Table exists; no handler records events (F-7.10).
+9. **Observability** — `/metrics` (F-10.2) and structured JSON logging (F-10.3).
+10. **Enterprise auth** — OIDC (F-7.5), SAML/LDAP (F-7.6/7), API tokens (F-7.9), invites (F-7.3), RBAC (F-7.8), and a **durable** signup-disable mechanism that survives restarts (F-7.2/4).
 
 ---
 
