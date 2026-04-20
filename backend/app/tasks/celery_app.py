@@ -34,4 +34,4 @@ celery_app.conf.update(
     beat_schedule_filename=str(_beat_dir / "celerybeat-schedule"),
 )
 
-celery_app.autodiscover_tasks(["app.tasks"])
+celery_app.autodiscover_tasks(["app.tasks"], related_name="build_tasks")

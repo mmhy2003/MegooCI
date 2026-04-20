@@ -70,6 +70,7 @@ async def trigger_build(
         params_json=body.params,
     )
     db.add(build)
+    await db.flush()
 
     if pipeline.yaml_content:
         pipeline_def = parse_yaml_pipeline(pipeline.yaml_content)
@@ -195,10 +196,10 @@ async def retry_build(
             status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
         )
 
-    if original_build.status not in ("failed", "cancelled"):
+    if original_build.status not in ("pending", "failed", "cancelled"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Can only retry failed or cancelled builds",
+            detail="Can only retry pending, failed, or cancelled builds",
         )
 
     max_number = await db.scalar(
