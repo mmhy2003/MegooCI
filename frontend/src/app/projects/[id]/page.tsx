@@ -87,6 +87,87 @@ export default function ProjectDetailPage() {
     load();
   }, [id]);
 
+  async function handleDeleteProject() {
+    // First attempt: plain delete. The backend returns 409 with a human-
+    // readable detail listing exactly what still references the project.
+    // We catch that, surface the detail, and offer a cascade ("Delete
+    // everything") option that retries with ?force=true.
+    const ok = await confirm({
+      title: `Delete project '${project?.name ?? ""}'?`,
+      description: (
+        <>
+          The project will be removed. Pipelines, linked repositories,
+          secrets, and environment variables scoped to this project must
+          already be empty. This action cannot be undone.
+        </>
+      ),
+      confirmText: "Delete project",
+      cancelText: "Keep",
+      tone: "destructive",
+    });
+    if (!ok) return;
+
+    try {
+      await projectsApi.delete(id);
+      toast.success("Project deleted");
+      router.push("/projects");
+      return;
+    } catch (err: unknown) {
+      // Walk our ApiError body for the FastAPI `detail` string.
+      const body = (err as { body?: { detail?: string } } | undefined)?.body;
+      const detail = body?.detail;
+
+      // If the delete was refused because dependents still exist, offer the
+      // user a force-cascade path. Anything else (403, 404, 500) we just
+      // surface as a toast.
+      const isDependentsConflict =
+        typeof detail === "string" &&
+        detail.toLowerCase().includes("cannot delete project");
+
+      if (!isDependentsConflict) {
+        toast.error(
+          detail ||
+            (err instanceof Error ? err.message : "Failed to delete project"),
+        );
+        return;
+      }
+
+      const forceOk = await confirm({
+        title: "Delete everything in this project?",
+        description: (
+          <>
+            <p>{detail}</p>
+            <p className="mt-2 text-sm">
+              Proceeding will permanently remove{" "}
+              <span className="font-medium text-foreground">
+                all pipelines, linked repositories, webhook history, secrets,
+                and environment variables
+              </span>{" "}
+              that belong to this project, then delete the project itself.
+            </p>
+          </>
+        ),
+        confirmText: "Delete everything",
+        cancelText: "Cancel",
+        tone: "destructive",
+      });
+      if (!forceOk) return;
+
+      try {
+        await projectsApi.delete(id, { force: true });
+        toast.success("Project and its contents deleted");
+        router.push("/projects");
+      } catch (err2: unknown) {
+        const body2 = (err2 as { body?: { detail?: string } } | undefined)
+          ?.body;
+        toast.error(
+          body2?.detail ||
+            (err2 instanceof Error ? err2.message : "Failed to delete project"),
+        );
+      }
+    }
+  }
+
   async function handleAddSecret(e: React.FormEvent) {
     e.preventDefault();
     if (!newSecretName.trim() || !newSecretValue.trim()) {
@@ -242,18 +323,29 @@ export default function ProjectDetailPage() {
           Projects
         </Button>
 
-        <div>
-          <h1 className="break-all text-xl font-bold sm:text-2xl">
-            {project.name}
-          </h1>
-          {project.description && (
-            <p className="mt-1 text-sm text-muted-foreground sm:text-base">
-              {project.description}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="break-all text-xl font-bold sm:text-2xl">
+              {project.name}
+            </h1>
+            {project.description && (
+              <p className="mt-1 text-sm text-muted-foreground sm:text-base">
+                {project.description}
+              </p>
+            )}
+            <p className="mt-1 break-all font-mono text-xs text-muted-foreground sm:text-sm">
+              {project.slug}
             </p>
-          )}
-          <p className="mt-1 break-all font-mono text-xs text-muted-foreground sm:text-sm">
-            {project.slug}
-          </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={handleDeleteProject}
+          >
+            <Trash2 className="mr-1.5 h-4 w-4" />
+            Delete project
+          </Button>
         </div>
 
         <div className="-mx-4 flex gap-1 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0">

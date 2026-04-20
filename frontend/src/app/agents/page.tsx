@@ -46,6 +46,66 @@ function agentStatusVariant(
   return "pending";
 }
 
+// SnippetBlock renders a labeled `<pre>` with its own "Copy" button so users
+// can grab the exact invocation for whichever runtime (binary / Docker /
+// Makefile) matches their deployment.
+function SnippetBlock({
+  title,
+  description,
+  snippet,
+}: {
+  title: string;
+  description?: React.ReactNode;
+  snippet: string;
+}) {
+  const [copied, setCopied] = React.useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Clipboard access denied");
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {title}
+          </div>
+          {description && (
+            <div className="text-xs text-muted-foreground">{description}</div>
+          )}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={copy}
+          className="shrink-0"
+        >
+          {copied ? (
+            <>
+              <Check className="mr-1.5 h-3.5 w-3.5 text-emerald-500" /> Copied
+            </>
+          ) : (
+            <>
+              <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
+            </>
+          )}
+        </Button>
+      </div>
+      <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs leading-5">
+        <code>{snippet}</code>
+      </pre>
+    </div>
+  );
+}
+
 export default function AgentsPage() {
   const { user } = useAuthStore();
   const confirm = useConfirm();
@@ -306,55 +366,130 @@ export default function AgentsPage() {
         </div>
 
         {/* Registration token (shown once) */}
-        {justRegistered && (
-          <Card className="border-primary/50 bg-primary/5">
-            <CardHeader>
-              <CardTitle className="text-base">
-                Agent token for {justRegistered.name}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Copy this token now — it will not be shown again. Run the
-                agent binary with this token to connect it to MegooCI.
-                Previous tokens (if any) are invalidated immediately.
-              </p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs">
-                  {justRegistered.registration_token}
-                </code>
-                <Button size="sm" variant="outline" onClick={copyToken}>
-                  {tokenCopied ? (
-                    <>
-                      <Check className="mr-1.5 h-4 w-4" /> Copied
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="mr-1.5 h-4 w-4" /> Copy
-                    </>
-                  )}
-                </Button>
-              </div>
-              <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
-                <code>
-                  {`megooci-agent run \\
-  --controller ${typeof window !== "undefined" ? window.location.origin : "https://megooci.example.com"} \\
+        {justRegistered && (() => {
+          // Prefer the browser's current origin as a safe default controller
+          // URL — that's the URL the admin is already using to reach the
+          // dashboard, so the agent will be able to reach it the same way.
+          const controller =
+            typeof window !== "undefined"
+              ? window.location.origin
+              : "https://megooci.example.com";
+
+          const binarySnippet = `megooci-agent run \\
+  --controller ${controller} \\
   --agent-id ${justRegistered.id} \\
-  --token ${justRegistered.registration_token}`}
-                </code>
-              </pre>
-              <div className="flex justify-end">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setJustRegistered(null)}
-                >
-                  Dismiss
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+  --token ${justRegistered.registration_token}`;
+
+          // `docker run` with CLI flags mirrors `make agent-up` and keeps
+          // the token out of env vars and `docker inspect` of other
+          // containers. `--network megooci_default` works when the agent
+          // runs on the same host as the Compose stack; override for
+          // remote hosts.
+          const dockerSnippet = `docker run -d --name megooci-agent \\
+  --restart unless-stopped \\
+  --network megooci_default \\
+  megooci/agent:latest \\
+  run \\
+    --controller ${controller} \\
+    --agent-id ${justRegistered.id} \\
+    --token ${justRegistered.registration_token}`;
+
+          const makeSnippet = `make agent-up \\
+  ID=${justRegistered.id} \\
+  TOKEN=${justRegistered.registration_token}`;
+
+          return (
+            <Card className="border-primary/50 bg-primary/5">
+              <CardHeader>
+                <CardTitle className="text-base">
+                  Agent token for {justRegistered.name}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <p className="text-sm text-muted-foreground">
+                  Copy this token now — it will not be shown again. Pick one
+                  of the examples below to connect the agent. Previous
+                  tokens (if any) are invalidated immediately.
+                </p>
+
+                {/* Token itself, with its own copy button. */}
+                <div className="space-y-1.5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Token
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs">
+                      {justRegistered.registration_token}
+                    </code>
+                    <Button size="sm" variant="outline" onClick={copyToken}>
+                      {tokenCopied ? (
+                        <>
+                          <Check className="mr-1.5 h-4 w-4 text-emerald-500" />{" "}
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="mr-1.5 h-4 w-4" /> Copy
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Three ready-to-run invocations, each copyable. */}
+                <SnippetBlock
+                  title="Run the binary"
+                  description="Single Go binary on any Linux / macOS / Windows host. Requires no container runtime."
+                  snippet={binarySnippet}
+                />
+
+                <SnippetBlock
+                  title="Run via Docker"
+                  description={
+                    <>
+                      Uses the prebuilt{" "}
+                      <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                        megooci/agent:latest
+                      </code>{" "}
+                      image. Keep{" "}
+                      <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                        --network megooci_default
+                      </code>{" "}
+                      when running on the Compose host; drop it for
+                      remote hosts.
+                    </>
+                  }
+                  snippet={dockerSnippet}
+                />
+
+                <SnippetBlock
+                  title="Using the stack Makefile"
+                  description={
+                    <>
+                      Shortest path if you run MegooCI via{" "}
+                      <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+                        make up
+                      </code>
+                      . Builds the image if needed and runs the container
+                      on the Compose network.
+                    </>
+                  }
+                  snippet={makeSnippet}
+                />
+
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setJustRegistered(null)}
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* Agents grid */}
         {loading ? (

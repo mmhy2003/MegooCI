@@ -227,8 +227,11 @@ export const projectsApi = {
       body: JSON.stringify(data),
     }),
 
-  delete: (id: string) =>
-    fetchApi<void>(`/api/v1/projects/${id}`, { method: "DELETE" }),
+  delete: (id: string, opts?: { force?: boolean }) =>
+    fetchApi<void>(
+      `/api/v1/projects/${id}${opts?.force ? "?force=true" : ""}`,
+      { method: "DELETE" },
+    ),
 };
 
 // ------------------------------------------------------------------
