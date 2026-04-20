@@ -10,12 +10,15 @@ import {
   CheckCircle2,
   Clipboard,
   ClipboardCheck,
+  ExternalLink,
   GitBranch,
   Globe,
   KeyRound,
   Link2,
+  Lock,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -25,6 +28,7 @@ import {
   type GitConnection,
   type ProjectRepository,
   type ProjectRepositoryWithSecret,
+  type ProviderRepositoryInfo,
   type WebhookDelivery,
 } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -507,6 +511,22 @@ export function ProjectIntegrations({ projectId }: { projectId: string }) {
     display_name: "",
   });
 
+  // Browse-repositories picker state. When the selected connection supports
+  // listing (github / gitlab), we fetch repos the PAT can see so the user
+  // picks from a list instead of typing a URL by hand.
+  const [providerRepos, setProviderRepos] = React.useState<
+    ProviderRepositoryInfo[]
+  >([]);
+  const [providerReposLoading, setProviderReposLoading] = React.useState(false);
+  const [providerReposError, setProviderReposError] = React.useState<
+    string | null
+  >(null);
+  const [providerSearch, setProviderSearch] = React.useState("");
+  const [pickedRepoFullName, setPickedRepoFullName] = React.useState<
+    string | null
+  >(null);
+  const [manualMode, setManualMode] = React.useState(false);
+
   // Webhook setup drawer state
   const [webhookRepo, setWebhookRepo] = React.useState<ProjectRepository | null>(
     null,
@@ -561,7 +581,77 @@ export function ProjectIntegrations({ projectId }: { projectId: string }) {
       default_branch: "main",
       display_name: "",
     });
+    setPickedRepoFullName(null);
+    setProviderSearch("");
+    setManualMode(false);
+    setProviderReposError(null);
+    setProviderRepos([]);
     setLinkOpen(true);
+  }
+
+  // Fetch the repository list from the selected connection whenever the
+  // dialog is open and the connection changes. Generic connections have no
+  // list API, so we flip to manual mode automatically.
+  React.useEffect(() => {
+    if (!linkOpen) return;
+    const conn = connections.find((c) => c.id === linkForm.connection_id);
+    if (!conn) {
+      setProviderRepos([]);
+      setProviderReposError(null);
+      return;
+    }
+    if (conn.provider_type === "generic") {
+      setManualMode(true);
+      setProviderRepos([]);
+      setProviderReposError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setProviderReposLoading(true);
+    setProviderReposError(null);
+    setProviderRepos([]);
+    setPickedRepoFullName(null);
+    setManualMode(false);
+
+    gitConnectionsApi
+      .repositories(conn.id, 100)
+      .then((res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          setProviderReposError(res.detail);
+          setProviderRepos([]);
+        } else {
+          setProviderRepos(res.repositories);
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const msg =
+          err instanceof Error
+            ? err.message
+            : "Failed to list repositories";
+        setProviderReposError(msg);
+      })
+      .finally(() => {
+        if (!cancelled) setProviderReposLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [linkOpen, linkForm.connection_id, connections]);
+
+  function pickProviderRepo(repo: ProviderRepositoryInfo) {
+    setPickedRepoFullName(repo.full_name);
+    setLinkForm((p) => ({
+      ...p,
+      repo_url: repo.clone_url,
+      default_branch: repo.default_branch || "main",
+      // Prefer the short "owner/name" as the display name when we have it,
+      // but only overwrite if the user hasn't typed anything custom.
+      display_name: p.display_name || repo.full_name,
+    }));
   }
 
   async function handleLink(e: React.FormEvent) {
@@ -665,13 +755,12 @@ export function ProjectIntegrations({ projectId }: { projectId: string }) {
             >
               <Plus className="mr-1.5 h-4 w-4" /> Link repository
             </Button>
-            <DialogContent>
+            <DialogContent className="max-w-2xl">
               <DialogHeader>
                 <DialogTitle>Link a repository</DialogTitle>
                 <DialogDescription>
-                  Pick an admin-registered Git connection and enter the
-                  repository URL. You&apos;ll get a webhook URL + secret to
-                  paste into the provider.
+                  Pick a Git connection and choose a repository. You&apos;ll
+                  get a webhook URL + secret to paste into the provider.
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleLink} className="space-y-4">
@@ -692,20 +781,213 @@ export function ProjectIntegrations({ projectId }: { projectId: string }) {
                     placeholder="Pick a connection"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Repository URL</label>
-                  <Input
-                    placeholder="https://github.com/acme/web"
-                    value={linkForm.repo_url}
-                    onChange={(e) =>
-                      setLinkForm((p) => ({
-                        ...p,
-                        repo_url: e.target.value,
-                      }))
-                    }
-                    autoFocus
-                  />
-                </div>
+
+                {/* Repository picker — list available repos when supported,
+                    otherwise fall back to free-form URL input. */}
+                {!manualMode ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-sm font-medium">
+                        Repository
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualMode(true);
+                          setPickedRepoFullName(null);
+                        }}
+                        className="text-xs text-muted-foreground underline hover:text-foreground"
+                      >
+                        Can&apos;t find it? Paste URL manually
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        placeholder="Search repositories\u2026"
+                        value={providerSearch}
+                        onChange={(e) => setProviderSearch(e.target.value)}
+                        className="pl-9"
+                        disabled={
+                          !linkForm.connection_id ||
+                          providerReposLoading ||
+                          providerRepos.length === 0
+                        }
+                      />
+                    </div>
+                    <div className="max-h-72 overflow-y-auto rounded-md border">
+                      {providerReposLoading ? (
+                        <div className="space-y-1 p-2">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <Skeleton key={i} className="h-10 w-full" />
+                          ))}
+                        </div>
+                      ) : providerReposError ? (
+                        <div className="p-4 text-sm">
+                          <div className="flex items-start gap-2 text-amber-700 dark:text-amber-400">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                            <div>
+                              <div className="font-medium">
+                                Couldn&apos;t list repositories
+                              </div>
+                              <div className="text-xs">
+                                {providerReposError}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setManualMode(true)}
+                                className="mt-1 text-xs underline"
+                              >
+                                Paste URL manually instead
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : providerRepos.length === 0 ? (
+                        <div className="p-6 text-center text-sm text-muted-foreground">
+                          Select a connection to browse repositories.
+                        </div>
+                      ) : (
+                        (() => {
+                          const q = providerSearch.trim().toLowerCase();
+                          const filtered = q
+                            ? providerRepos.filter(
+                                (r) =>
+                                  r.full_name.toLowerCase().includes(q) ||
+                                  (r.description || "")
+                                    .toLowerCase()
+                                    .includes(q),
+                              )
+                            : providerRepos;
+                          if (filtered.length === 0) {
+                            return (
+                              <div className="p-4 text-center text-sm text-muted-foreground">
+                                No repositories match &ldquo;{providerSearch}
+                                &rdquo;.
+                              </div>
+                            );
+                          }
+                          return (
+                            <ul className="divide-y">
+                              {filtered.map((r) => {
+                                const isSelected =
+                                  pickedRepoFullName === r.full_name;
+                                return (
+                                  <li key={r.full_name}>
+                                    <button
+                                      type="button"
+                                      onClick={() => pickProviderRepo(r)}
+                                      className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-accent/50 ${
+                                        isSelected ? "bg-primary/10" : ""
+                                      }`}
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="truncate font-medium">
+                                            {r.full_name}
+                                          </span>
+                                          {r.private && (
+                                            <Lock
+                                              className="h-3 w-3 shrink-0 text-muted-foreground"
+                                              aria-label="private"
+                                            />
+                                          )}
+                                          {isSelected && (
+                                            <CheckCircle2
+                                              className="h-3.5 w-3.5 shrink-0 text-primary"
+                                              aria-label="selected"
+                                            />
+                                          )}
+                                        </div>
+                                        {r.description && (
+                                          <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+                                            {r.description}
+                                          </div>
+                                        )}
+                                        <div className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
+                                          <span className="inline-flex items-center gap-1">
+                                            <GitBranch className="h-3 w-3" />
+                                            {r.default_branch}
+                                          </span>
+                                          {r.updated_at && (
+                                            <span>
+                                              updated{" "}
+                                              {formatDistanceToNow(
+                                                new Date(r.updated_at),
+                                                { addSuffix: true },
+                                              )}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {r.html_url && (
+                                        <a
+                                          href={r.html_url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                                          title="Open on provider"
+                                        >
+                                          <ExternalLink className="h-3.5 w-3.5" />
+                                        </a>
+                                      )}
+                                    </button>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          );
+                        })()
+                      )}
+                    </div>
+                    {pickedRepoFullName && (
+                      <p className="text-xs text-muted-foreground">
+                        Will link{" "}
+                        <span className="font-mono text-foreground">
+                          {pickedRepoFullName}
+                        </span>{" "}
+                        <span className="break-all">
+                          ({linkForm.repo_url})
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-sm font-medium">
+                        Repository URL
+                      </label>
+                      {linkForm.connection_id &&
+                        connectionFor(linkForm.connection_id)
+                          ?.provider_type !== "generic" && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualMode(false);
+                              setProviderReposError(null);
+                            }}
+                            className="text-xs text-muted-foreground underline hover:text-foreground"
+                          >
+                            Browse repositories instead
+                          </button>
+                        )}
+                    </div>
+                    <Input
+                      placeholder="https://github.com/acme/web"
+                      value={linkForm.repo_url}
+                      onChange={(e) =>
+                        setLinkForm((p) => ({
+                          ...p,
+                          repo_url: e.target.value,
+                        }))
+                      }
+                      autoFocus
+                    />
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Default branch</label>
                   <Input

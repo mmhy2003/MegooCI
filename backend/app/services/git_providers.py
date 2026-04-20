@@ -48,6 +48,29 @@ class ValidationResult:
     latency_ms: int | None = None
 
 
+@dataclass
+class ProviderRepository:
+    """Normalized shape of a remote repository returned by a provider's
+    list-repositories API. Used by the "Browse repositories" picker when a
+    user is linking a new repo (PRD §6.16 Phase 2 feature, ported forward)."""
+
+    full_name: str            # e.g. "acme/web"
+    clone_url: str            # HTTPS clone URL we'll persist as repo_url
+    default_branch: str
+    private: bool
+    description: str | None
+    html_url: str | None      # human-readable URL for the "view on provider" link
+    updated_at: str | None    # ISO timestamp; used to sort most-recent-first
+
+
+@dataclass
+class RepositoryListResult:
+    ok: bool
+    status: str               # "ok" | "failed" | "unsupported"
+    detail: str
+    repositories: list[ProviderRepository]
+
+
 # ----------------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------------
@@ -142,6 +165,83 @@ class GitHubAdapter:
         }
         return await _http_test(url, headers)
 
+    @staticmethod
+    async def list_repositories(
+        base_url: str | None, token: str, limit: int = 100
+    ) -> RepositoryListResult:
+        """List repositories the PAT can see, across pages, up to `limit`.
+
+        Uses the authenticated-user endpoint `/user/repos` which returns both
+        user-owned and organization repositories the token has access to.
+        """
+        api = (base_url or "https://api.github.com").rstrip("/")
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "MegooCI",
+        }
+        per_page = min(100, limit)
+        repos: list[ProviderRepository] = []
+        try:
+            async with httpx.AsyncClient(
+                timeout=15.0, follow_redirects=True
+            ) as client:
+                page = 1
+                while len(repos) < limit:
+                    r = await client.get(
+                        f"{api}/user/repos",
+                        headers=headers,
+                        params={
+                            "per_page": per_page,
+                            "page": page,
+                            "sort": "updated",
+                            "direction": "desc",
+                            "affiliation": "owner,collaborator,organization_member",
+                        },
+                    )
+                    if r.status_code >= 400:
+                        return RepositoryListResult(
+                            ok=False,
+                            status="failed",
+                            detail=f"GitHub returned HTTP {r.status_code}",
+                            repositories=[],
+                        )
+                    data = r.json()
+                    if not isinstance(data, list) or not data:
+                        break
+                    for item in data:
+                        repos.append(
+                            ProviderRepository(
+                                full_name=item.get("full_name") or "",
+                                clone_url=item.get("clone_url") or "",
+                                default_branch=item.get("default_branch") or "main",
+                                private=bool(item.get("private")),
+                                description=item.get("description"),
+                                html_url=item.get("html_url"),
+                                updated_at=item.get("updated_at"),
+                            )
+                        )
+                        if len(repos) >= limit:
+                            break
+                    if len(data) < per_page:
+                        break
+                    page += 1
+        except httpx.HTTPError as exc:
+            return RepositoryListResult(
+                ok=False,
+                status="failed",
+                detail=f"HTTP error: {exc}",
+                repositories=[],
+            )
+
+        return RepositoryListResult(
+            ok=True,
+            status="ok",
+            detail=f"Listed {len(repos)} repositories",
+            repositories=repos,
+        )
+
 
 # ----------------------------------------------------------------------------
 # GitLab
@@ -201,6 +301,82 @@ class GitLabAdapter:
             "User-Agent": "MegooCI",
         }
         return await _http_test(url, headers)
+
+    @staticmethod
+    async def list_repositories(
+        base_url: str | None, token: str, limit: int = 100
+    ) -> RepositoryListResult:
+        """List projects (GitLab's name for repositories) the token can see.
+
+        Uses `/api/v4/projects?membership=true` which returns every project
+        the authenticated user is a member of, across groups and subgroups.
+        """
+        base = (base_url or "https://gitlab.com").rstrip("/")
+        headers = {
+            "PRIVATE-TOKEN": token,
+            "User-Agent": "MegooCI",
+        }
+        per_page = min(100, limit)
+        repos: list[ProviderRepository] = []
+        try:
+            async with httpx.AsyncClient(
+                timeout=15.0, follow_redirects=True
+            ) as client:
+                page = 1
+                while len(repos) < limit:
+                    r = await client.get(
+                        f"{base}/api/v4/projects",
+                        headers=headers,
+                        params={
+                            "membership": "true",
+                            "per_page": per_page,
+                            "page": page,
+                            "order_by": "last_activity_at",
+                            "sort": "desc",
+                            "simple": "true",
+                        },
+                    )
+                    if r.status_code >= 400:
+                        return RepositoryListResult(
+                            ok=False,
+                            status="failed",
+                            detail=f"GitLab returned HTTP {r.status_code}",
+                            repositories=[],
+                        )
+                    data = r.json()
+                    if not isinstance(data, list) or not data:
+                        break
+                    for item in data:
+                        repos.append(
+                            ProviderRepository(
+                                full_name=item.get("path_with_namespace") or "",
+                                clone_url=item.get("http_url_to_repo") or "",
+                                default_branch=item.get("default_branch") or "main",
+                                private=(item.get("visibility") != "public"),
+                                description=item.get("description"),
+                                html_url=item.get("web_url"),
+                                updated_at=item.get("last_activity_at"),
+                            )
+                        )
+                        if len(repos) >= limit:
+                            break
+                    if len(data) < per_page:
+                        break
+                    page += 1
+        except httpx.HTTPError as exc:
+            return RepositoryListResult(
+                ok=False,
+                status="failed",
+                detail=f"HTTP error: {exc}",
+                repositories=[],
+            )
+
+        return RepositoryListResult(
+            ok=True,
+            status="ok",
+            detail=f"Listed {len(repos)} repositories",
+            repositories=repos,
+        )
 
 
 # ----------------------------------------------------------------------------
@@ -325,6 +501,24 @@ class GenericGitAdapter:
                 status="failed",
                 detail=f"ls-remote failed: {exc}",
             )
+
+    @staticmethod
+    async def list_repositories(
+        base_url: str | None, token: str, limit: int = 100
+    ) -> RepositoryListResult:
+        """Generic Git hosts have no standard 'list my repositories' API, so
+        this is intentionally unsupported. The UI falls back to a free-form
+        URL input for generic connections.
+        """
+        return RepositoryListResult(
+            ok=False,
+            status="unsupported",
+            detail=(
+                "Listing repositories is not supported for generic Git "
+                "connections. Paste the repository URL directly."
+            ),
+            repositories=[],
+        )
 
 
 # ----------------------------------------------------------------------------

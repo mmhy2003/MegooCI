@@ -622,6 +622,23 @@ export interface GitConnectionTestResult {
   latency_ms: number | null;
 }
 
+export interface ProviderRepositoryInfo {
+  full_name: string;
+  clone_url: string;
+  default_branch: string;
+  private: boolean;
+  description: string | null;
+  html_url: string | null;
+  updated_at: string | null;
+}
+
+export interface ProviderRepositoryList {
+  ok: boolean;
+  status: string;       // "ok" | "failed" | "unsupported"
+  detail: string;
+  repositories: ProviderRepositoryInfo[];
+}
+
 export const gitConnectionsApi = {
   list: () => fetchApi<GitConnection[]>("/api/v1/git/connections/"),
 
@@ -647,6 +664,11 @@ export const gitConnectionsApi = {
     fetchApi<GitConnectionTestResult>(
       `/api/v1/git/connections/${id}/test`,
       { method: "POST" },
+    ),
+
+  repositories: (id: string, limit = 100) =>
+    fetchApi<ProviderRepositoryList>(
+      `/api/v1/git/connections/${id}/repositories?limit=${limit}`,
     ),
 };
 

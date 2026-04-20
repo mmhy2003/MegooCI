@@ -9,12 +9,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import get_current_admin_user
+from app.core.deps import get_current_active_user, get_current_admin_user
 from app.core.security import credential_hint, decrypt_secret, encrypt_secret
 from app.database import get_db
 from app.models.git_integration import GitProviderConnection, ProjectRepository
@@ -24,6 +24,8 @@ from app.schemas.git_integration import (
     ConnectionResponse,
     ConnectionTestResult,
     ConnectionUpdate,
+    ProviderRepositoryInfo,
+    ProviderRepositoryList,
 )
 from app.services.git_providers import ValidationResult, get_adapter
 
@@ -236,4 +238,63 @@ async def test_connection(
         detail=result.detail,
         http_status=result.http_status,
         latency_ms=result.latency_ms,
+    )
+
+
+@router.get(
+    "/{connection_id}/repositories", response_model=ProviderRepositoryList
+)
+async def list_provider_repositories(
+    connection_id: uuid.UUID,
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_active_user),
+) -> ProviderRepositoryList:
+    """List repositories visible to this connection's PAT.
+
+    Open to any authenticated user (not just admins) so project owners can
+    browse and pick a repo when linking it to their project. The credential
+    itself is never returned - only the resulting repository list.
+    """
+    connection = await db.get(GitProviderConnection, connection_id)
+    if connection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found"
+        )
+
+    try:
+        adapter = get_adapter(connection.provider_type)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+
+    settings = get_settings()
+    try:
+        token = decrypt_secret(
+            connection.encrypted_credential, settings.MEGOOCI_SECRET_KEY
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to decrypt stored credential: {exc}",
+        )
+
+    result = await adapter.list_repositories(connection.base_url, token, limit)
+    return ProviderRepositoryList(
+        ok=result.ok,
+        status=result.status,
+        detail=result.detail,
+        repositories=[
+            ProviderRepositoryInfo(
+                full_name=r.full_name,
+                clone_url=r.clone_url,
+                default_branch=r.default_branch,
+                private=r.private,
+                description=r.description,
+                html_url=r.html_url,
+                updated_at=r.updated_at,
+            )
+            for r in result.repositories
+        ],
     )

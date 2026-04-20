@@ -59,6 +59,26 @@ class ConnectionTestResult(BaseModel):
     latency_ms: int | None = None
 
 
+class ProviderRepositoryInfo(BaseModel):
+    """A repository that the connection's PAT can access. Returned by the
+    repository picker used when linking a new repo to a project (PRD §6.16)."""
+
+    full_name: str
+    clone_url: str
+    default_branch: str
+    private: bool
+    description: str | None = None
+    html_url: str | None = None
+    updated_at: str | None = None
+
+
+class ProviderRepositoryList(BaseModel):
+    ok: bool
+    status: str           # "ok" | "failed" | "unsupported"
+    detail: str
+    repositories: list[ProviderRepositoryInfo]
+
+
 # ----------------------------------------------------------------------------
 # ProjectRepository
 # ----------------------------------------------------------------------------
