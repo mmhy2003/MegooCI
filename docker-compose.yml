@@ -43,7 +43,6 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       target: production
-    image: megooci-backend:latest
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -58,7 +57,10 @@ services:
         condition: service_healthy
 
   celery-worker:
-    image: megooci-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
     restart: unless-stopped
     env_file:
       - .env
@@ -74,7 +76,10 @@ services:
     command: celery -A app.tasks.celery_app worker --loglevel=info
 
   celery-beat:
-    image: megooci-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
     restart: unless-stopped
     env_file:
       - .env

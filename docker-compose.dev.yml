@@ -32,7 +32,6 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       target: dev
-    image: megooci-backend:dev
     restart: "no"
     volumes:
       - ./backend:/app
@@ -40,7 +39,10 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   celery-worker:
-    image: megooci-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: dev
     restart: "no"
     volumes:
       - ./backend:/app
@@ -48,7 +50,10 @@ services:
     command: celery -A app.tasks.celery_app worker --loglevel=info
 
   celery-beat:
-    image: megooci-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: dev
     restart: "no"
     volumes:
       - ./backend:/app
@@ -59,7 +64,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
-    image: megooci-frontend:dev
     restart: "no"
     volumes:
       - ./frontend:/app
