@@ -208,10 +208,10 @@ async def retry_build(
             status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
         )
 
-    if original_build.status not in ("pending", "failed", "cancelled"):
+    if original_build.status not in ("pending", "failed", "cancelled", "success"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Can only retry pending, failed, or cancelled builds",
+            detail="Cannot re-run a build that is currently running",
         )
 
     max_number = await db.scalar(

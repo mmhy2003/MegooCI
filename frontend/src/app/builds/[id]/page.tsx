@@ -84,9 +84,17 @@ export default function BuildDetailPage() {
 
   const isRunning = build?.status === "running" || build?.status === "queued";
 
-  const wsUrl = isRunning
-    ? `ws://${typeof window !== "undefined" ? window.location.hostname : "localhost"}:8000/ws/builds/${id}/logs`
-    : null;
+  const wsUrl = React.useMemo(() => {
+    if (!isRunning || typeof window === "undefined") return null;
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
+    if (apiBase) {
+      const url = new URL(apiBase);
+      const wsProto = url.protocol === "https:" ? "wss:" : "ws:";
+      return `${wsProto}//${url.host}/api/v1/ws/builds/${id}/logs`;
+    }
+    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${wsProto}//${window.location.host}/api/v1/ws/builds/${id}/logs`;
+  }, [isRunning, id]);
   const { messages } = useWebSocket(wsUrl);
 
   const [logLines, setLogLines] = React.useState<LogLine[]>([]);
