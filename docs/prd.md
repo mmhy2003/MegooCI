@@ -4,13 +4,14 @@
 | --- | --- |
 | **Product Name** | MegooCI |
 | **Tagline** | A simpler, modern open-source alternative to Jenkins |
-| **Document Status** | Draft v1.4 |
-| **Last Updated** | 2026-04-20 |
+| **Document Status** | Draft v1.5 |
+| **Last Updated** | 2026-04-21 |
 | **Owner** | MegooCI Core Team |
 | **License (planned)** | Apache-2.0 (OSS) |
 
 > **Change log**
 >
+> - **v1.5 (2026-04-21)** — Global search delivered (§6.17). Meilisearch added as an infrastructure dependency; backend indexes projects, pipelines, and builds on startup and incrementally on CRUD. New `GET /api/v1/search` endpoint with multi-index query. Frontend ships a fully-functional `Cmd/Ctrl+K` command palette with debounced search, keyboard navigation, and grouped results by entity type. Build log viewer gains in-log search (`Ctrl/Cmd+F`). UI/UX overhaul: cyberpunk-inspired color theme with neon-cyan/magenta palette, three-way theme toggle (Light / Dark / System) with OS-level tracking and flash-free SSR, custom hand-rolled UI primitives (badge variants, promise-based confirm dialog, dialog system, avatar with initials fallback), visual stage graph, terminal-style build log viewer with auto-scroll/follow/fullscreen/copy, collapsible sidebar with mobile drawer, dynamic breadcrumbs, and PWA support (service worker + web manifest). Updated §6.9, §6.14, §6.15, §9.1, §9.2.
 > - **v1.4 (2026-04-20)** — Agent control plane delivered (F-3.4, F-3.7). New `agent/` Go module ships the `megooci-agent` binary (Cobra CLI, gorilla/websocket client, subprocess executor, heartbeat, reconnect, capacity semaphore, cancellation). Backend gains `/api/v1/ws/agents/{id}/connect` with bcrypt-hashed token auth, a Redis-queue dispatcher, `/rotate-token` endpoint, and a try-agent-first / fall-back-to-local execution strategy. Alembic migration `003_agent_tokens.py`. §6.15 status updated accordingly.
 > - **v1.3 (2026-04-20)** — Added §6.16 "Git Provider Integration" (admin-scoped Git connections with PAT auth, per-project repository linking, manual-paste webhook receivers with HMAC verification for GitHub/GitLab/Generic, delivery log, webhook-triggered builds). Added `GitProviderConnection`, `ProjectRepository`, and `WebhookDelivery` to §10. Added OAuth and delivery-retention env vars to §6.14. Marked Phase 1 as delivered in §6.15.
 > - **v1.2 (2026-04-20)** — Added §6.15 "Implementation Status Snapshot" reflecting a full-codebase audit of `backend/` and `frontend/`. No requirement changes; the feature tables above remain the target specification.
@@ -380,23 +381,25 @@ All operational toggles are driven by environment variables so administrators ca
 | `MEGOOCI_REGISTRY_MAX_UPLOAD_MB` | `2048` | Per-layer upload size limit. |
 | `MEGOOCI_REGISTRY_ALLOW_ANONYMOUS_PULL` | `false` | Allow unauthenticated pulls for projects that opt in (F-13.7). |
 | `MEGOOCI_REGISTRY_GC_CRON` | `0 3 * * *` | Cron expression for the unreferenced-blob garbage collector. |
+| `MEGOOCI_MEILISEARCH_URL` | `http://localhost:7700` | Meilisearch instance URL. The backend connects on startup to sync indexes. If unreachable, search is degraded but the server starts normally. |
+| `MEGOOCI_MEILISEARCH_API_KEY` | `megooci-meili-master-key` | Meilisearch API key. Must match the `MEILI_MASTER_KEY` configured on the Meilisearch service. |
 | `MEGOOCI_GITHUB_OAUTH_CLIENT_ID` | — | GitHub OAuth app Client ID (used by §6.16 Phase 2). Empty disables OAuth for GitHub. |
 | `MEGOOCI_GITHUB_OAUTH_CLIENT_SECRET` | — | GitHub OAuth app Client Secret (Phase 2). |
 | `MEGOOCI_GITLAB_OAUTH_CLIENT_ID` | — | GitLab OAuth application ID (Phase 2). |
 | `MEGOOCI_GITLAB_OAUTH_CLIENT_SECRET` | — | GitLab OAuth application secret (Phase 2). |
 | `MEGOOCI_WEBHOOK_DELIVERY_RETENTION` | `200` | Max `WebhookDelivery` rows kept per linked repository; older rows pruned on insert. |
 
-### 6.15 Implementation Status Snapshot (as of 2026-04-20)
+### 6.15 Implementation Status Snapshot (as of 2026-04-21)
 
-This section documents the **actual state of the codebase** at the date above, from a full audit of `backend/` and `frontend/`. It is advisory — the feature tables in §6.1–§6.14 remain the target specification, and §14 (Release Plan) remains the roadmap. When there's a conflict between this snapshot and the requirement tables, the requirement tables win.
+This section documents the **actual state of the codebase** at the date above, from a full audit of `backend/` and `frontend/`. It is advisory — the feature tables in §6.1–§6.18 remain the target specification, and §14 (Release Plan) remains the roadmap. When there's a conflict between this snapshot and the requirement tables, the requirement tables win.
 
 Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; key paths missing) · ❌ Missing
 
 #### 6.15.1 Backend (`backend/`)
 
-**Stack** — ✅ FastAPI + SQLAlchemy 2 (async) + Pydantic v2 + Celery (Redis broker) + Alembic + `python-jose` + `bcrypt` + `PyYAML`. Python 3.12. Versions in `pyproject.toml` are mostly unpinned. **No AI SDKs** and **no OCI/registry libraries** are listed as dependencies.
+**Stack** — ✅ FastAPI + SQLAlchemy 2 (async) + Pydantic v2 + Celery (Redis broker) + Alembic + `python-jose` + `bcrypt` + `PyYAML` + `meilisearch-python-sdk`. Python 3.12. Versions in `pyproject.toml` are mostly unpinned. **No AI SDKs** and **no OCI/registry libraries** are listed as dependencies.
 
-**API routers under `/api/v1/`:** `auth`, `projects`, `pipelines`, `builds`, `secrets-env`, `agents`, `system`, `websocket`. Plus `GET /health` on the root app.
+**API routers under `/api/v1/`:** `auth`, `projects`, `pipelines`, `builds`, `secrets-env`, `agents`, `system`, `websocket`, `search`. Plus `GET /health` on the root app.
 
 **Data model (`backend/app/models/`):** `User`, `Project`, `Pipeline`, `Trigger`, `WebhookEndpoint`, `Build`, `Stage`, `Step`, `LogChunk`, `Artifact`, `Agent`, `Secret`, `EnvVar`, `AuditLogEntry`. **Missing** vs §10: `Role`, `UserRole`, `Invite`, `OutgoingWebhook`, `ContainerRepository`, `ContainerImage`, `ContainerTag`, `RegistryDeployToken`, `RegistryEvent`, `AiConversation`, `AiMessage`.
 
@@ -438,6 +441,7 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 | Embedded OCI/Docker registry (`/v2/...`) | F-13.\* | ❌ | No `/v2/...` routes; no `ContainerRepository` / `ContainerImage` / `ContainerTag` / `RegistryDeployToken` models. `MEGOOCI_REGISTRY_ENABLED` / `MEGOOCI_REGISTRY_HOST` are only reflected in `/system/info` for the UI. |
 | Audit log storage | F-7.10 | 🟡 | `AuditLogEntry` table exists; **no writer code** anywhere in the request pipeline. |
 | System info (config snapshot) | — | ✅ | `GET /api/v1/system/info` returns `SystemInfo` with AI / storage / auth / registry blocks. |
+| **Global search (Meilisearch)** | F-9.4, F-17.\* | ✅ | `meilisearch-python-sdk` async client. Three indexes (`projects`, `pipelines`, `builds`) with per-index searchable/filterable/sortable attributes. Bulk sync on startup (up to 500 recent builds); incremental `index_*` / `remove_*` helpers called from CRUD paths (fire-and-forget). `GET /api/v1/search?q=&limit=` multi-index endpoint. Graceful degradation: if Meilisearch is down at startup, search is unavailable but the server runs. |
 | Prometheus `/metrics` | F-10.2 | ❌ | No metrics endpoint. |
 | Structured JSON logging | F-10.3 | ❌ | Standard uvicorn logging. `MEGOOCI_LOG_LEVEL` is exposed but not applied to logger config. |
 | Backup / restore tooling | F-10.5 | ❌ | Not present. |
@@ -445,7 +449,7 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 
 #### 6.15.2 Frontend (`frontend/`)
 
-**Stack** — ✅ Next.js 15 (App Router) + React 19 + TypeScript + Tailwind 3 + TanStack Query 5 + Zustand 5 + `sonner` + `lucide-react` + custom UI primitives. **No Monaco editor**, **no charting library**, **no `cmdk` command palette**, **no Radix UI packages** (UI primitives are hand-rolled to match the shadcn look).
+**Stack** — ✅ Next.js 15 (App Router) + React 19 + TypeScript + Tailwind 3 + TanStack Query 5 + Zustand 5 + `sonner` + `lucide-react` + `class-variance-authority` + custom UI primitives. **No Monaco editor**, **no charting library**, **no Radix UI packages** (UI primitives are hand-rolled to match the shadcn look). Custom `CommandPalette` replaces any need for `cmdk`.
 
 **Pages implemented:** `/`, `/login`, `/signup`, `/dashboard`, `/pipelines`, `/pipelines/new`, `/pipelines/[id]`, `/projects`, `/projects/[id]`, `/builds`, `/builds/[id]`, `/agents`, `/secrets`, `/settings`.
 
@@ -453,25 +457,30 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 
 | Area | PRD ref | Status | Notes |
 | --- | --- | --- | --- |
-| App shell — collapsible desktop sidebar + off-canvas mobile drawer | F-9.7 | ✅ | Breakpoints via `sm:` / `md:` / `lg:`; route change closes drawer; body scroll locked while open. |
+| **App shell — collapsible sidebar + mobile drawer** | F-9.7, F-18.7, F-18.8 | ✅ | Desktop: collapsible sidebar with state persisted to `localStorage`. Mobile: full-width off-canvas drawer with dark backdrop overlay and body scroll lock. 8 nav items (Dashboard, Pipelines, Projects, Builds, Agents, Secrets, Integrations [admin-only], Settings). User section at bottom with avatar dropdown (profile, theme cycle) and one-click logout with confirmation. Route change closes drawer. Dynamic breadcrumbs in header (full trail on desktop, page title + hamburger on mobile). |
 | Dashboard — stat cards + recent builds table | F-9.1 | ✅ | Cards: total pipelines, total builds, success rate, active agents. Table columns hide progressively on smaller viewports. |
 | Pipeline listing, detail, creation, edit | F-1.1 | ✅ | Detail has Overview / Builds / Configuration tabs; trigger build; delete with in-app confirm. |
 | YAML / Python pipeline editor | F-1.1, F-1.2 | 🟡 | Plain `<textarea>`, not Monaco. Radio toggle YAML / Python on **create** only; both formats persist into the single `yaml_content` field, and the detail editor does not change UX by format. |
-| Builds list + detail with stage graph + live logs + re-run / cancel | F-9.2, F-5.1 | ✅ | `StageGraph` + `BuildLogViewer` (follow/search/fullscreen/copy); WebSocket via `useWebSocket` hook. **WS URL is hardcoded to `ws://<hostname>:8000/ws/...`** instead of using the Next.js rewrite proxy. |
+| Builds list + detail with stage graph + live logs + re-run / cancel | F-9.2, F-5.1, F-18.5, F-18.6 | ✅ | `StageGraph` (status-aware colored buttons with arrow connectors, clickable with ring highlight, spin animation on running stages) + `BuildLogViewer` (terminal-dark theme `#0d1117`, line numbers, timestamps, stderr red coloring, auto-scroll/follow, fullscreen toggle, copy-all, **in-log search `Ctrl/Cmd+F`** with yellow `<mark>` highlighting); WebSocket via `useWebSocket` hook with auto-reconnect every 3 s. **WS URL is hardcoded to `ws://<hostname>:8000/ws/...`** instead of using the Next.js rewrite proxy. |
 | Projects listing / detail with secrets + env vars tabs | F-9.3 | ✅ | Scoped secrets + env vars CRUD in project settings tab. |
 | Agents listing + admin-only registration + one-time token card | F-3.4 | ✅ | 15-second polling; destructive actions use `useConfirm`. |
 | Secrets / env vars global page | F-8.\* | ✅ | `/secrets` aggregates per project with add + delete. `envVarsApi.update` exists but has **no UI** surface (values can only be deleted + re-created). |
 | Settings page mirror of `GET /system/info` (profile, AI, auth, storage, registry) | — | ✅ | Read-only; registry block is purely informational. |
-| In-app confirmation dialogs (replaces `window.confirm`) | UX principle 9 | ✅ | `ConfirmProvider` + `useConfirm` in `components/ui/confirm-dialog.tsx`; zero remaining `window.confirm` calls in `frontend/src`. |
-| Signup page gated by `signup_enabled` | F-7.2 | 🟡 | Backend flag is **displayed** on Settings but not used to hide `/signup` or the "Create one" link on `/login`. |
-| Dark mode toggle | F-9.5 | 🟡 | Provider supports `light` / `dark` / `system`; UI toggle only swaps light ↔ dark ("system" option not user-selectable). |
-| Global search / `⌘K` palette | F-9.4, F-9.6 | ❌ | Header search is decorative: input is `readOnly` and the icon button has no handler. No command palette library is installed. |
+| **Promise-based confirmation dialogs** (replaces `window.confirm`) | UX principle 9, F-18.4 | ✅ | `ConfirmProvider` + `useConfirm` hook. 4 tones: `default`, `destructive`, `warning`, `success`, each with distinct icon, icon background color, and button variant. Backdrop blur, scale/translate entry animation, body scroll lock, keyboard handling (Esc/Enter), auto-focus on confirm button. Zero remaining `window.confirm` calls. |
+| Signup page gated by `signup_enabled` | F-7.2 | 🟡 | Backend flag is **displayed** on Settings but not yet used to conditionally hide `/signup` or the "Create one" link on `/login`. |
+| **Cyberpunk design system** | F-18.1 | ✅ | Full cyberpunk-inspired color theme. Light: lavender surfaces, teal-cyan primary, magenta accents. Dark: deep violet-black surfaces, neon cyan primary, hot magenta destructive. Custom CSS variables for all semantic tokens in `globals.css`. |
+| **Three-way theme toggle (Light / Dark / System)** | F-9.5, F-18.2 | ✅ | Custom `ThemeProvider` (not `next-themes`) persists to `localStorage` under `megooci_theme`. System mode tracks `prefers-color-scheme` and auto-updates. Two variants: `segmented` (settings pages) and `icon` (header). Flash-free SSR via inline script in `layout.tsx`. |
+| **Global search / `⌘K` command palette** | F-9.4, F-9.6, F-17.6 | ✅ | `CommandPalette` component triggered by `Cmd/Ctrl+K` or header search bar click. 200 ms debounced Meilisearch query via `GET /api/v1/search`. Results grouped by type (Project/Pipeline/Build) with type-specific icons and colors. Full keyboard navigation (↑↓ to move, Enter to open, Esc to close). Desktop header shows a styled search input with "Cmd+K" hint; mobile shows a compact icon button. |
 | Notifications UI | F-6.4 | ❌ | Header bell icon has no dropdown; no notification center, no Slack/email config UI. |
 | "New Build" header quick action | — | ❌ | Button exists but has no `onClick`. |
 | AI chat panel / "Generate with AI" / fix-it suggestions | F-12.\* | ❌ | No AI UI at all; Settings only reflects backend readiness. |
 | Container registry UI (image browser, tags, pull snippets) | F-13.12 | ❌ | Only read-only status in Settings. |
 | Artifact browser / downloads | F-5.3 | ❌ | No UI. |
 | JUnit / coverage results view | F-5.7, F-5.8 | ❌ | No UI. |
+| **Semantic badge variants** | F-18.3 | ✅ | `class-variance-authority`-driven badges: `success`, `failed`, `running` (`animate-pulse-slow`), `pending`, `cancelled`, `default`, `secondary`, `destructive`, `outline`. |
+| **Custom dialog system** | F-18.9 | ✅ | Fully custom (no Radix). Controlled/uncontrolled modes. Mobile-first bottom-sheet on small screens, centered on SM+. Escape key + backdrop click to close. |
+| **Avatar with initials fallback** | F-18.10 | ✅ | Generates initials from name/email. `sm`/`md`/`lg` sizes with image error fallback. |
+| **PWA support** | F-18.11 | ✅ | Service worker registration in production. Web manifest, Apple web app config, theme colors, viewport fit cover, app icons in multiple sizes. |
 | Visual pipeline editor (drag-and-drop) | F-1.11 | ❌ | Deferred (PRD priority S). |
 | Compare builds diff view | F-9.8 | ❌ | Deferred (PRD priority S). |
 
@@ -480,6 +489,8 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 - ✅ A user can sign up, log in, create a project, create a YAML pipeline, trigger a build, and watch live logs stream from a shell-executed build.
 - ✅ An admin can register an agent, copy its registration token, and run the `megooci-agent` Go binary on a build host. Subsequent builds are dispatched to that agent (WebSocket control channel + bcrypt-hashed tokens + Redis dispatch queue); if no agent is online the controller falls back to running steps in-process.
 - ✅ Operators can view current backend configuration (AI, auth, storage, registry) via the Settings page.
+- ✅ **Global search** works end-to-end: Meilisearch indexes are synced on startup, `Cmd/Ctrl+K` opens the command palette, and users can search across projects, pipelines, and builds with instant, typo-tolerant results and keyboard navigation.
+- ✅ **Design system** is cohesive: cyberpunk theme with Light / Dark / System modes, semantic badges, promise-based confirm dialogs, visual stage graph, terminal-style build log viewer with in-log search, collapsible sidebar with mobile drawer, dynamic breadcrumbs, and PWA support.
 - 🟡 Cancellation, retry, and live log streaming all work. A cancel on a running build now also signals any agent executing a step; the build log WebSocket to the browser remains unauthenticated.
 - ❌ Docker / SSH / K8s executors, artifact flow, notifications, and registry are still unbuilt.
 
@@ -488,14 +499,17 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 1. **Pipeline runtime fidelity.** Parallel stages (F-1.7), conditional `when` (F-1.8), matrix (F-1.6), parameters (F-1.5), and **secret/env injection** into the executor (F-8.5, F-1.9). The agent side is ready to receive richer step descriptors; the controller's compiler output needs to catch up.
 2. **Alternative executors on the agent** — Docker (F-3.2), SSH (F-3.3), Kubernetes (F-3.5). The agent exposes an `executor.Executor` interface; only `Local` ships today.
 3. **Label-based agent scheduling** (F-3.6). Labels are persisted and displayed; the dispatcher currently ignores them when selecting an online agent.
-3. **Webhooks — incoming + outgoing** (F-2.2, F-11.1, F-11.2). The `WebhookEndpoint` model is in place; the HTTP layer is missing.
-4. **Scheduled triggers** via Celery Beat (F-2.3). Beat is wired up; the schedule is empty.
-5. **Artifacts + test results** (F-5.3 – F-5.8). No endpoints, no on-disk layout, no UI.
-6. **Embedded OCI/Docker registry** (F-13.\*). Entirely unbuilt and the largest net-new feature in the PRD.
-7. **AI assistant** (F-12.\*). Config-only today; needs provider adapter, streaming chat endpoint, and the "Generate with AI" UI flow.
-8. **Audit-log writers.** Table exists; no handler records events (F-7.10).
-9. **Observability** — `/metrics` (F-10.2) and structured JSON logging (F-10.3).
-10. **Enterprise auth** — OIDC (F-7.5), SAML/LDAP (F-7.6/7), API tokens (F-7.9), invites (F-7.3), RBAC (F-7.8), and a **durable** signup-disable mechanism that survives restarts (F-7.2/4).
+4. **Outgoing webhooks** (F-11.2). Incoming Git webhooks are implemented (§6.16); outgoing webhooks with HMAC + retries are not.
+5. **Scheduled triggers** via Celery Beat (F-2.3). Beat is wired up; the schedule is empty.
+6. **Artifacts + test results** (F-5.3 – F-5.8). No endpoints, no on-disk layout, no UI.
+7. **Embedded OCI/Docker registry** (F-13.\*). Entirely unbuilt and the largest net-new feature in the PRD.
+8. **AI assistant** (F-12.\*). Config-only today; needs provider adapter, streaming chat endpoint, and the "Generate with AI" UI flow.
+9. **Audit-log writers.** Table exists; no handler records events (F-7.10).
+10. **Notifications** (F-6.\*). No config, no sender, no templates, no notification center UI. Header bell icon has no dropdown.
+11. **Observability** — `/metrics` (F-10.2) and structured JSON logging (F-10.3).
+12. **Enterprise auth** — OIDC (F-7.5), SAML/LDAP (F-7.6/7), API tokens (F-7.9), invites (F-7.3), RBAC (F-7.8), and a **durable** signup-disable mechanism that survives restarts (F-7.2/4).
+
+> **Closed since last snapshot:** Global search / command palette (F-9.4) is now fully functional (§6.17). Dark mode has been upgraded to a three-way theme toggle (F-9.5, F-18.2). All `window.confirm` calls replaced with promise-based dialogs (F-18.4). PWA support shipped (F-18.11).
 
 ### 6.16 Git Provider Integration
 
@@ -529,10 +543,43 @@ See §10 for the canonical list. Summary of the new tables:
 - `WebhookDelivery(id, project_repository_id, provider_delivery_id, event_type, branch, commit_sha, author, signature_valid, http_status, error, payload_excerpt, received_at, processed_at)` with `UNIQUE(project_repository_id, provider_delivery_id)`
 - `Pipeline` gains an optional nullable `project_repository_id` FK (back-compat — existing pipelines keep using `source_repo_url` unchanged).
 
-#### 6.16.2 Phases
+#### 6.16.2 Phases (Git Provider Integration)
 
 - **Phase 1 (shipped 2026-04-20):** PRD entries above, data model + Alembic migration `002_git_integration.py`, admin connections (PAT only, with `test`), per-project repository links, manual webhook setup UI, deliveries log, webhook receiver with per-provider HMAC verification and build enqueue, rate limiting.
 - **Phase 2 (deferred):** OAuth redirect flows for GitHub and GitLab with refresh-token rotation; commit-status / check writeback to the provider; repo picker (list repos the token can see) replacing the free-form URL field; SCM polling fallback for hosts without webhook support.
+
+### 6.17 Global Search (Meilisearch)
+
+MegooCI ships a **global search** feature backed by **Meilisearch**, providing instant, typo-tolerant, full-text search across all first-class entities. The backend maintains Meilisearch indexes that are bulk-synced on startup and incrementally updated on every create/update/delete. The frontend exposes this via a **command palette** (`Cmd/Ctrl+K`) and the header search bar.
+
+| ID | Feature | Priority | Description |
+| --- | --- | --- | --- |
+| F-17.1 | **Meilisearch infrastructure** | M | Meilisearch v1.12 is added as a required service in `docker-compose.yml` (production) and `docker-compose.dev.yml` (development). Configured via `MEGOOCI_MEILISEARCH_URL` and `MEGOOCI_MEILISEARCH_API_KEY` env vars. |
+| F-17.2 | **Project, pipeline, and build indexes** | M | Three Meilisearch indexes (`projects`, `pipelines`, `builds`) with per-index searchable attributes (e.g. name, slug, description for projects; branch, commit_sha, status for builds), filterable and sortable fields. |
+| F-17.3 | **Full startup sync** | M | On backend startup, all existing projects, pipelines, and recent builds (capped at 500) are bulk-synced into Meilisearch. If Meilisearch is unavailable, the backend logs a warning and starts without search rather than crashing. |
+| F-17.4 | **Incremental indexing on CRUD** | M | Every project/pipeline/build create, update, or delete fires a corresponding `index_*` / `remove_*` call to Meilisearch. Indexing failures are logged but never block the primary API response (fire-and-forget). |
+| F-17.5 | **Multi-index search API** | M | `GET /api/v1/search?q=<query>&limit=<n>` (authenticated) runs a single multi-index query across projects, pipelines, and builds. Returns `SearchResponse` with grouped, typed `SearchHit` results (id, type, title, subtitle, url, extra metadata). |
+| F-17.6 | **Command palette UI** | M | Frontend ships a `CommandPalette` component triggered by `Cmd/Ctrl+K` (global keyboard shortcut) or clicking the header search bar. Modal overlay with backdrop blur, text input with 200 ms debounce, grouped results by entity type (Project → Pipeline → Build), type-specific icons and colors, full keyboard navigation (arrow up/down, Enter to open, Esc to close), and a footer with shortcut hints. |
+| F-17.7 | **Header search bar** | M | Desktop: a styled read-only input in the header with a search icon and "Search… Cmd+K" placeholder that opens the command palette on click. Mobile/tablet: a compact search icon button. |
+| F-17.8 | **Build log in-viewer search** | M | The `BuildLogViewer` supports `Ctrl/Cmd+F` in-log search: filters log lines by text match, highlights matching terms with a yellow marker (`<mark>` tags), and scrolls to results. |
+
+### 6.18 UI/UX Overhaul & Design System
+
+MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired design system, replacing decorative-only elements with fully functional components. All UI primitives are **hand-rolled** (no Radix dependency) to match the shadcn aesthetic while keeping the dependency tree minimal.
+
+| ID | Feature | Priority | Description |
+| --- | --- | --- | --- |
+| F-18.1 | **Cyberpunk color theme** | M | Light mode: pale lavender surfaces, deep violet text, teal-cyan primary (`hsl(176, 100%, 30%)`), magenta accents. Dark mode: deep violet-black surfaces (`hsl(264, 90%, 4%)`), neon cyan primary (`hsl(176, 100%, 50%)`), hot magenta destructive, electric neon accents. Custom semantic tokens: `--success`, `--warning`, `--destructive`. |
+| F-18.2 | **Three-way theme toggle** | M | Supports **Light / Dark / System** modes. Two variants: `segmented` (pill-shaped radio group for settings pages) and `icon` (cycling icon button for headers). System mode tracks `prefers-color-scheme` and auto-updates when the OS theme changes. Custom `ThemeProvider` (not `next-themes`) persists preference to `localStorage` under `megooci_theme`. Flash-free: an inline script in `layout.tsx` applies the `dark` class before React hydrates. |
+| F-18.3 | **Semantic badge variants** | M | `class-variance-authority`-driven badges with 7 variants: `success`, `failed`, `running` (with `animate-pulse-slow`), `pending`, `cancelled`, plus standard `default`/`secondary`/`destructive`/`outline`. |
+| F-18.4 | **Promise-based confirm dialog** | M | Custom `ConfirmProvider` + `useConfirm()` hook. Supports 4 tones: `default`, `destructive`, `warning`, `success`, each with a distinct icon, icon background color, and button variant. Backdrop blur, scale/translate entry animation, body scroll lock, keyboard handling (Esc/Enter), auto-focus on confirm button. Zero remaining `window.confirm` calls. |
+| F-18.5 | **Visual stage graph** | M | Pipeline stage visualization showing stages as colored, bordered buttons connected by arrow icons. Status-aware: each status (pending/running/success/failed/cancelled) has its own icon, text color, background tint, and border color. Running stages get `animate-spin` on the loader icon. Clickable with a ring highlight on the selected stage. |
+| F-18.6 | **Terminal-style build log viewer** | M | Dark-themed (`#0d1117`) log viewer with line numbers, timestamp display, stderr coloring (red), auto-scroll/follow mode, fullscreen toggle, copy-all-to-clipboard, and in-log search with highlighting. |
+| F-18.7 | **Collapsible sidebar + mobile drawer** | M | Desktop: collapsible sidebar with state persisted to `localStorage`. Mobile: full-width off-canvas drawer with dark backdrop overlay and body scroll lock. 8 navigation items including admin-only Integrations link. User section at the bottom with avatar dropdown (Profile, theme cycle) and one-click logout with confirmation dialog. |
+| F-18.8 | **Dynamic breadcrumbs** | M | Header generates breadcrumbs from the current pathname. Desktop: full breadcrumb trail. Mobile: current page title + hamburger menu. |
+| F-18.9 | **Custom dialog system** | M | Fully custom dialog (no Radix dependency) with controlled/uncontrolled modes. Mobile-first: `items-end` (bottom sheet) on small screens, `items-center` on SM+. Escape key handling, backdrop click to close. |
+| F-18.10 | **Avatar with initials fallback** | M | Generates initials from name/email, supports `sm`/`md`/`lg` sizes, with image error fallback to initials. |
+| F-18.11 | **PWA support** | S | Service worker registration in production. Full PWA metadata: web manifest, Apple web app config, theme colors, viewport fit cover, app icons in multiple sizes. |
 
 ---
 
@@ -553,7 +600,8 @@ See §10 for the canonical list. Summary of the new tables:
 | Generic incoming/outgoing webhooks | Plugin-based | ✅ Built-in |
 | Cron triggers | ✅ | ✅ (Celery Beat) |
 | **Plugin ecosystem** | ✅ (1.8k+ plugins) | ❌ **Intentionally not supported.** Extensibility via shell/container steps + REST API. |
-| Modern UI | Blue Ocean add-on | ✅ Default UI |
+| Global search (⌘K command palette) | Plugin-based | ✅ Built-in, Meilisearch-powered |
+| Modern UI | Blue Ocean add-on | ✅ Default UI (cyberpunk design system, dark/light/system themes) |
 | RBAC | Plugin-based | ✅ Built-in |
 | Audit log | Plugin-based | ✅ Built-in |
 | Credentials store | ✅ | ✅ |
@@ -589,6 +637,7 @@ See §10 for the canonical list. Summary of the new tables:
                      ┌────────────────────────────┐
                      │   Next.js Frontend (SPA)   │
                      │   React 19 / App Router    │
+                     │   Command Palette (⌘K)     │
                      │   AI Assistant UI          │
                      └────────────┬───────────────┘
                                   │ HTTPS + WebSocket
@@ -600,24 +649,25 @@ See §10 for the canonical list. Summary of the new tables:
                      │   (YAML + Python → graph)  │
                      │   AI provider adapter      │
                      │   OCI Registry (/v2/...)   │
-                     └─┬───────────┬────────────┬─┘
-                       │           │            │
-             ┌─────────▼─┐     ┌───▼───┐    ┌───▼─────────────┐
-             │ PostgreSQL│     │ Redis │    │ Local Filesystem│
-             │ (metadata)│     │(broker│    │ MEGOOCI_STORAGE │
-             │           │     │ + pub │    │   _ROOT         │
-             │           │     │ /sub) │    │ artifacts/ logs │
-             │           │     │       │    │ registry/       │
-             └───────────┘     └───┬───┘    └─────────────────┘
-                                   │                ▲
-                       ┌───────────▼────────────┐   │
-                       │   Celery Workers       │───┘ read/write
-                       │   + Celery Beat (cron) │
-                       │   Orchestrate builds   │
-                       └───────────┬────────────┘
-                                   │ dispatch
-                 ┌─────────────────┼─────────────────┐
-                 ▼                 ▼                 ▼
+                     └─┬───────┬──┬────────────┬──┘
+                       │       │  │            │
+             ┌─────────▼─┐  ┌─▼──▼──┐    ┌────▼────────────┐
+             │ PostgreSQL│  │ Redis │    │ Local Filesystem│
+             │ (metadata)│  │(broker│    │ MEGOOCI_STORAGE │
+             │           │  │ + pub │    │   _ROOT         │
+             │           │  │ /sub) │    │ artifacts/ logs │
+             │           │  │       │    │ registry/       │
+             └───────────┘  └───┬───┘    └─────────────────┘
+                                │                ▲
+             ┌──────────┐   ┌───▼───────────────┐│
+             │Meilisearch│  │   Celery Workers  ├┘ read/write
+             │ (search)  │  │ + Celery Beat     │
+             │ projects, │  │   Orchestrate     │
+             │ pipelines,│  │   builds          │
+             │ builds    │  └──────┬────────────┘
+             └──────────┘         │ dispatch
+                 ┌────────────────┼─────────────────┐
+                 ▼                ▼                  ▼
           ┌────────────┐    ┌────────────┐    ┌────────────┐
           │ Local Exec │    │ Docker Exec│    │ SSH / K8s  │
           │            │    │            │    │ Agents     │
@@ -636,13 +686,16 @@ See §10 for the canonical list. Summary of the new tables:
 
 **Frontend — Next.js (latest, App Router, React 19, TypeScript)**
 - Server Components for fast initial loads; Client Components for interactive views.
-- Tailwind CSS + shadcn/ui for the component library.
+- Tailwind CSS + hand-rolled UI primitives (shadcn-style, no Radix dependency) + `class-variance-authority` for variant-driven components.
+- Cyberpunk-inspired design system with CSS-variable-based semantic tokens; three-way theme toggle (Light / Dark / System) via custom `ThemeProvider` with flash-free SSR.
 - TanStack Query for data fetching / caching.
-- Zustand (or React context) for local UI state.
-- WebSocket client for live log streaming and build status.
-- Auth via custom JWT integration with the FastAPI backend.
-- AI chat panel for pipeline generation/editing, streaming tokens from the backend.
-- Monaco-based editor for `megooci.yaml` and `megooci.py`, with schema + type hints.
+- Zustand for auth state; React context for theme and confirmation dialogs.
+- WebSocket client for live log streaming and build status (auto-reconnect).
+- Command palette (`Cmd/Ctrl+K`) powered by Meilisearch for instant cross-entity search.
+- Auth via custom JWT integration with the FastAPI backend; single-flight token refresh to avoid race conditions.
+- AI chat panel for pipeline generation/editing, streaming tokens from the backend (planned).
+- Plain `<textarea>` editor for `megooci.yaml` and `megooci.py` (Monaco upgrade planned).
+- PWA support: service worker, web manifest, Apple web app metadata.
 
 **Backend — FastAPI (Python 3.12+)**
 - REST API (OpenAPI 3.1 auto-generated).
@@ -676,6 +729,7 @@ See §10 for the canonical list. Summary of the new tables:
 **Data Stores**
 - **PostgreSQL 16+**: users, projects, pipelines, builds, steps, artifacts metadata, audit log, credentials + env vars (encrypted column), AI conversation history.
 - **Redis 7+**: Celery broker, pub/sub for live events, rate limiting, short-lived caches.
+- **Meilisearch v1.12**: full-text search engine for projects, pipelines, and builds. Indexes are synced on backend startup and updated incrementally on CRUD. Deployed as a Docker service alongside Postgres and Redis.
 - **Local filesystem** at `MEGOOCI_STORAGE_ROOT`:
   - `artifacts/<pipeline_id>/<build_id>/...` — build artifacts.
   - `logs/<pipeline_id>/<build_id>/<step_id>.log` — archived build logs (live logs are streamed via Redis and written through to disk).
@@ -687,9 +741,9 @@ See §10 for the canonical list. Summary of the new tables:
 
 ### 9.3 Deployment Topologies
 
-- **All-in-one (dev / small):** single Docker Compose — controller, Postgres, Redis, one worker, one agent. Artifacts & logs live on a mounted host volume (e.g., `./data:/var/lib/megooci`).
+- **All-in-one (dev / small):** single Docker Compose — controller, Postgres, Redis, Meilisearch, one worker, one agent. Artifacts & logs live on a mounted host volume (e.g., `./data:/var/lib/megooci`).
 - **Single-node production:** same Compose stack on a dedicated VM with backed-up volumes; suitable for teams up to ~100 engineers.
-- **Clustered (production):** Kubernetes Helm chart — HA controller (n≥2), Postgres (managed), Redis (managed), N workers, dynamic K8s agents. A single **ReadWriteMany** persistent volume (NFS, CephFS, EFS, etc.) backs `MEGOOCI_STORAGE_ROOT` and is mounted by all controller and worker pods.
+- **Clustered (production):** Kubernetes Helm chart — HA controller (n≥2), Postgres (managed), Redis (managed), Meilisearch, N workers, dynamic K8s agents. A single **ReadWriteMany** persistent volume (NFS, CephFS, EFS, etc.) backs `MEGOOCI_STORAGE_ROOT` and is mounted by all controller and worker pods.
 
 ### 9.4 Security Architecture
 
