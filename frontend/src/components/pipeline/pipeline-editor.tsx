@@ -17,6 +17,7 @@ interface PipelineEditorProps {
   minHeight?: string;
   className?: string;
   placeholder?: string;
+  projectId?: string | null;
 }
 
 export function PipelineEditor({
@@ -26,6 +27,7 @@ export function PipelineEditor({
   minHeight = "400px",
   className,
   placeholder,
+  projectId,
 }: PipelineEditorProps) {
   const [sidePanel, setSidePanel] = React.useState<SidePanel>(null);
 
@@ -108,6 +110,7 @@ export function PipelineEditor({
                 <AiAssistantPanel
                   currentYaml={value}
                   onApplyYaml={handleApplyYaml}
+                  projectId={projectId}
                 />
               )}
             </div>
@@ -133,6 +136,7 @@ export function PipelineEditor({
               <AiAssistantPanel
                 currentYaml={value}
                 onApplyYaml={handleApplyYaml}
+                projectId={projectId}
               />
             )}
           </div>

@@ -242,6 +242,7 @@ export default function NewPipelinePage() {
                 onChange={setYamlContent}
                 minHeight="320px"
                 placeholder="Enter your YAML pipeline definition..."
+                projectId={projectId || null}
               />
 
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">

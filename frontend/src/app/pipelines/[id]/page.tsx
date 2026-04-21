@@ -454,6 +454,7 @@ export default function PipelineDetailPage() {
                 readOnly={!editing}
                 minHeight="400px"
                 placeholder="No definition yet."
+                projectId={pipeline.project_id}
               />
             </CardContent>
           </Card>

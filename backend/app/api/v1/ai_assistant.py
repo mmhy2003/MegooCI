@@ -9,14 +9,18 @@ Ollama, vLLM, etc.) by setting MEGOOCI_AI_BASE_URL.
 
 from __future__ import annotations
 
+import uuid
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.deps import get_current_active_user
 from app.database import get_db
+from app.models.secret import EnvVar, Secret
 from app.models.user import User
 
 router = APIRouter()
@@ -154,14 +158,74 @@ short YAML example.
 """
 
 
+class ChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
 class AssistantRequest(BaseModel):
     prompt: str
     current_yaml: str | None = None
+    project_id: str | None = None
+    history: list[ChatMessage] | None = None
 
 
 class AssistantResponse(BaseModel):
     reply: str
     yaml: str | None = None
+
+
+async def _build_project_context(
+    db: AsyncSession, project_id: str,
+) -> str | None:
+    """Fetch secret names and env var names/values for a project and return
+    a context block the LLM can reference."""
+    try:
+        pid = uuid.UUID(project_id)
+    except ValueError:
+        return None
+
+    secrets_q = (
+        select(Secret.name)
+        .where(Secret.scope_type == "project", Secret.scope_id == pid)
+        .order_by(Secret.name)
+    )
+    env_vars_q = (
+        select(EnvVar.name, EnvVar.value, EnvVar.is_secret_ref)
+        .where(EnvVar.scope_type == "project", EnvVar.scope_id == pid)
+        .order_by(EnvVar.name)
+    )
+
+    secrets_result = await db.execute(secrets_q)
+    env_vars_result = await db.execute(env_vars_q)
+
+    secret_names = [row[0] for row in secrets_result.all()]
+    env_vars = env_vars_result.all()
+
+    if not secret_names and not env_vars:
+        return None
+
+    parts: list[str] = []
+
+    if secret_names:
+        names_list = ", ".join(f"`{n}`" for n in secret_names)
+        parts.append(
+            f"Available project secrets (use via ${{{{ secrets.NAME }}}}): {names_list}"
+        )
+
+    if env_vars:
+        var_lines = []
+        for name, value, is_ref in env_vars:
+            if is_ref:
+                var_lines.append(f"  - `{name}` (references a secret)")
+            else:
+                var_lines.append(f"  - `{name}` = `{value}`")
+        parts.append(
+            "Available project environment variables (use via ${{ env.NAME }}):\n"
+            + "\n".join(var_lines)
+        )
+
+    return "\n\n".join(parts)
 
 
 @router.post("/assistant", response_model=AssistantResponse)
@@ -183,7 +247,22 @@ async def pipeline_assistant(
             detail="AI API key is not configured",
         )
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    system_content = SYSTEM_PROMPT
+
+    if body.project_id:
+        project_ctx = await _build_project_context(db, body.project_id)
+        if project_ctx:
+            system_content += (
+                "\n\n## Project Context\n"
+                "The user's project has the following secrets and variables "
+                "configured. Use these exact names in the generated YAML "
+                "instead of generic placeholders.\n\n"
+                + project_ctx
+            )
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_content},
+    ]
 
     if body.current_yaml:
         messages.append({
@@ -194,6 +273,11 @@ async def pipeline_assistant(
             "role": "assistant",
             "content": "I can see your current pipeline. What would you like me to do with it?",
         })
+
+    if body.history:
+        for msg in body.history:
+            if msg.role in ("user", "assistant"):
+                messages.append({"role": msg.role, "content": msg.content})
 
     messages.append({"role": "user", "content": body.prompt})
 

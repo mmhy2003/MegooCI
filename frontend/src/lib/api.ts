@@ -1017,9 +1017,16 @@ export const invitesApi = {
 // ------------------------------------------------------------------
 // AI Pipeline Assistant
 // ------------------------------------------------------------------
+export interface AiChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface AiAssistantRequest {
   prompt: string;
   current_yaml?: string | null;
+  project_id?: string | null;
+  history?: AiChatMessage[];
 }
 
 export interface AiAssistantResponse {

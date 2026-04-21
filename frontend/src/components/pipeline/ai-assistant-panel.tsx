@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { aiAssistantApi } from "@/lib/api";
+import { aiAssistantApi, type AiChatMessage } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Sparkles,
@@ -29,6 +29,7 @@ interface AiAssistantPanelProps {
   className?: string;
   currentYaml: string;
   onApplyYaml?: (yaml: string) => void;
+  projectId?: string | null;
 }
 
 const QUICK_PROMPTS = [
@@ -94,6 +95,7 @@ export function AiAssistantPanel({
   className,
   currentYaml,
   onApplyYaml,
+  projectId,
 }: AiAssistantPanelProps) {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [input, setInput] = React.useState("");
@@ -120,9 +122,16 @@ export function AiAssistantPanel({
     setLoading(true);
 
     try {
+      const history: AiChatMessage[] = messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
       const resp = await aiAssistantApi.ask({
         prompt: prompt.trim(),
         current_yaml: currentYaml || null,
+        project_id: projectId || null,
+        history: history.length > 0 ? history : undefined,
       });
 
       const assistantMsg: Message = {
