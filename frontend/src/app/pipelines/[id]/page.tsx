@@ -25,7 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { YamlEditor } from "@/components/ui/yaml-editor";
+import { PipelineEditor } from "@/components/pipeline/pipeline-editor";
 
 function statusVariant(
   s: BuildStatus,
@@ -439,7 +439,7 @@ export default function PipelineDetailPage() {
               )}
             </CardHeader>
             <CardContent>
-              <YamlEditor
+              <PipelineEditor
                 value={editing ? editContent : (pipeline.yaml_content || "")}
                 onChange={editing ? setEditContent : undefined}
                 readOnly={!editing}

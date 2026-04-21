@@ -1,14 +1,20 @@
 """
 Build execution service.
 
-Runs a build by iterating through its stages and steps, executing shell commands
-via subprocess, streaming output to Redis pub/sub, and persisting LogChunks.
+Runs a build by iterating through its stages and steps, dispatching each step
+to the correct action handler (shell, docker, git, ssh, wait, …), streaming
+output to Redis pub/sub, and persisting LogChunks.
+
+Steps that the handler registry doesn't know about (or steps with a plain
+``command`` field on agents) fall back to the legacy local shell execution
+for backward compatibility.
 """
 
 import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 import redis.asyncio as aioredis
 from sqlalchemy import select
@@ -20,6 +26,14 @@ from app.models.build import Build, LogChunk, Stage, Step
 from app.services.agent_dispatcher import (
     dispatch_step_to_agent,
     pick_online_agent,
+)
+from app.services.step_actions import get_handler
+from app.services.step_actions.base import LogLine, StepContext, StepResult
+from app.services.step_actions.interpolation import (
+    interpolate_value,
+    load_env_vars_for_scope,
+    load_secrets_for_scope,
+    mask_secrets_in_log,
 )
 
 
@@ -56,6 +70,8 @@ async def execute_build(
             "build_id": str(build_id),
         })
 
+        secrets, env_vars = await _load_scope_context(db, build)
+
         build_failed = False
 
         for stage in sorted(build.stages, key=lambda s: s.sort_order):
@@ -86,36 +102,24 @@ async def execute_build(
                     "event": "step_started",
                     "step_id": str(step.id),
                     "step_name": step.name,
+                    "step_type": step.step_type,
                 })
 
-                if step.command:
-                    # Try to dispatch to a connected agent first. If no agent
-                    # is online, or if the agent times out / disconnects, fall
-                    # back to running the command locally in the Celery worker
-                    # (the pre-agent behaviour).
-                    agent_result = await _try_dispatch_to_agent(
-                        step, stage.name, build.id, db
-                    )
-                    if agent_result is not None:
-                        # The agent's WS handler has already persisted
-                        # step.status, step.started_at, step.finished_at, and
-                        # exit_code, and has streamed log lines into the same
-                        # build pubsub channel. Refresh the ORM instance so
-                        # the downstream status comparisons are accurate.
-                        await db.refresh(step)
-                    else:
-                        exit_code = await _run_command(
-                            step, db, redis_client, channel
-                        )
-                        step.exit_code = exit_code
-                        step.status = "success" if exit_code == 0 else "failed"
-                        step.finished_at = datetime.now(timezone.utc)
-                        await db.commit()
-                else:
-                    step.status = "success"
-                    step.exit_code = 0
-                    step.finished_at = datetime.now(timezone.utc)
-                    await db.commit()
+                step_result = await _execute_step(
+                    step=step,
+                    stage=stage,
+                    build=build,
+                    secrets=secrets,
+                    env_vars=env_vars,
+                    db=db,
+                    redis_client=redis_client,
+                    channel=channel,
+                )
+
+                step.exit_code = step_result.exit_code
+                step.status = step_result.status
+                step.finished_at = datetime.now(timezone.utc)
+                await db.commit()
 
                 await _publish(redis_client, channel, {
                     "event": "step_finished",
@@ -163,13 +167,160 @@ async def execute_build(
     await redis_client.aclose()
 
 
-async def _run_command(
+async def _execute_step(
+    step: Step,
+    stage: Stage,
+    build: Build,
+    secrets: dict[str, str],
+    env_vars: dict[str, str],
+    db: AsyncSession,
+    redis_client: aioredis.Redis,
+    channel: str,
+) -> StepResult:
+    """Dispatch a step to the correct handler.
+
+    Priority:
+    1. Look up a registered handler for ``step.step_type``.
+    2. If ``step.step_type == "run"`` and an agent is online, dispatch to agent.
+    3. Fall back to legacy local shell execution for ``run`` steps.
+    """
+    handler = get_handler(step.step_type)
+
+    step_config = dict(step.config_json or {})
+    if step.step_type == "run" and not step_config.get("command") and step.command:
+        step_config["command"] = step.command
+
+    step_config = interpolate_value(step_config, secrets, env_vars)
+    merged_env = {**env_vars}
+    merged_env = interpolate_value(merged_env, secrets, env_vars)
+
+    if step.step_type == "run":
+        agent_result = await _try_dispatch_to_agent(
+            step, stage.name, build.id, db
+        )
+        if agent_result is not None:
+            await db.refresh(step)
+            return StepResult(
+                exit_code=step.exit_code or 0,
+                status=step.status,
+            )
+
+    if handler is None:
+        if step.command:
+            exit_code = await _run_command_legacy(step, db, redis_client, channel, secrets)
+            return StepResult(
+                exit_code=exit_code,
+                status="success" if exit_code == 0 else "failed",
+            )
+        return StepResult(
+            exit_code=1,
+            status="failed",
+            error=f"No handler for step type '{step.step_type}'",
+        )
+
+    ctx = StepContext(
+        build_id=build.id,
+        step_id=step.id,
+        step_name=step.name,
+        stage_name=stage.name,
+        pipeline_id=build.pipeline_id,
+        project_id=build.pipeline_id,
+        branch=build.branch,
+        commit_sha=build.commit_sha,
+        env=merged_env,
+        secrets=secrets,
+    )
+
+    return await _run_handler(handler, step_config, ctx, step, db, redis_client, channel, secrets)
+
+
+async def _run_handler(
+    handler,
+    config: dict[str, Any],
+    ctx: StepContext,
     step: Step,
     db: AsyncSession,
     redis_client: aioredis.Redis,
     channel: str,
+    secrets: dict[str, str],
+) -> StepResult:
+    """Execute a handler's async generator and persist log lines."""
+    seq = 0
+    final_result = StepResult(exit_code=1, status="failed", error="Handler produced no result")
+
+    try:
+        async for item in handler.execute(config, ctx, db):
+            if isinstance(item, StepResult):
+                final_result = item
+            elif isinstance(item, LogLine):
+                seq += 1
+                now = datetime.now(timezone.utc)
+                content = mask_secrets_in_log(item.content, secrets)
+
+                log_chunk = LogChunk(
+                    step_id=step.id,
+                    seq=seq,
+                    timestamp=now,
+                    stream=item.stream,
+                    content=content,
+                )
+                db.add(log_chunk)
+
+                await _publish(redis_client, channel, {
+                    "event": "log",
+                    "step_id": str(step.id),
+                    "stream": item.stream,
+                    "seq": seq,
+                    "content": content,
+                })
+
+        await db.commit()
+    except Exception as exc:
+        seq += 1
+        log_chunk = LogChunk(
+            step_id=step.id,
+            seq=seq,
+            timestamp=datetime.now(timezone.utc),
+            stream="stderr",
+            content=f"Handler error: {exc}\n",
+        )
+        db.add(log_chunk)
+        await db.commit()
+
+        await _publish(redis_client, channel, {
+            "event": "log",
+            "step_id": str(step.id),
+            "stream": "stderr",
+            "seq": seq,
+            "content": f"Handler error: {exc}\n",
+        })
+        final_result = StepResult(exit_code=1, status="failed", error=str(exc))
+
+    return final_result
+
+
+async def _load_scope_context(
+    db: AsyncSession, build: Build
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Load secrets and env vars scoped to this build's pipeline/project."""
+    from app.models.pipeline import Pipeline
+
+    pipeline = await db.get(Pipeline, build.pipeline_id)
+    project_id = pipeline.project_id if pipeline else build.pipeline_id
+
+    secrets = await load_secrets_for_scope(db, project_id, build.pipeline_id)
+    env_vars = await load_env_vars_for_scope(db, project_id, build.pipeline_id)
+    return secrets, env_vars
+
+
+async def _run_command_legacy(
+    step: Step,
+    db: AsyncSession,
+    redis_client: aioredis.Redis,
+    channel: str,
+    secrets: dict[str, str],
 ) -> int:
-    """Execute a shell command, stream output, and persist log chunks."""
+    """Legacy local shell execution (backward compatibility fallback)."""
     seq = 0
 
     try:
@@ -185,6 +336,7 @@ async def _run_command(
             nonlocal seq
             async for line_bytes in stream:
                 line = line_bytes.decode(errors="replace")
+                line = mask_secrets_in_log(line, secrets)
                 seq += 1
                 now = datetime.now(timezone.utc)
 

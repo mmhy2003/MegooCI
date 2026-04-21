@@ -308,7 +308,9 @@ export interface BuildStep {
   id: string;
   stage_id: string;
   name: string;
+  step_type: string;
   command: string | null;
+  config_json: Record<string, unknown> | null;
   status: string;
   exit_code: number | null;
   sort_order: number;
@@ -798,4 +800,25 @@ export const projectRepositoriesApi = {
     fetchApi<WebhookDelivery[]>(
       `/api/v1/projects/${projectId}/repositories/${repoId}/deliveries?limit=${limit}`,
     ),
+};
+
+// ------------------------------------------------------------------
+// AI Pipeline Assistant
+// ------------------------------------------------------------------
+export interface AiAssistantRequest {
+  prompt: string;
+  current_yaml?: string | null;
+}
+
+export interface AiAssistantResponse {
+  reply: string;
+  yaml: string | null;
+}
+
+export const aiAssistantApi = {
+  ask: (data: AiAssistantRequest) =>
+    fetchApi<AiAssistantResponse>("/api/v1/ai/assistant", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };

@@ -3,8 +3,10 @@ from fastapi import APIRouter
 from app.api.v1 import (
     agents,
     agents_ws,
+    ai_assistant,
     auth,
     builds,
+    gates,
     git_connections,
     pipelines,
     project_repositories,
@@ -34,6 +36,8 @@ api_v1_router.include_router(
     tags=["git-integration"],
 )
 api_v1_router.include_router(search.router, prefix="/search", tags=["search"])
+api_v1_router.include_router(gates.router, prefix="/gates", tags=["gates"])
+api_v1_router.include_router(ai_assistant.router, prefix="/ai", tags=["ai"])
 api_v1_router.include_router(webhooks_git.router, tags=["git-integration"])
 api_v1_router.include_router(websocket.router, tags=["websocket"])
 api_v1_router.include_router(agents_ws.router, tags=["agents"])

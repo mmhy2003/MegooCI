@@ -15,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { YamlEditor } from "@/components/ui/yaml-editor";
+import { PipelineEditor } from "@/components/pipeline/pipeline-editor";
 import {
   Card,
   CardContent,
@@ -135,7 +135,7 @@ export default function NewPipelinePage() {
 
   return (
     <AppLayout>
-      <div className="mx-auto max-w-3xl space-y-6">
+      <div className="mx-auto max-w-5xl space-y-6">
         <Button
           variant="ghost"
           size="sm"
@@ -237,17 +237,12 @@ export default function NewPipelinePage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  Pipeline definition
-                </label>
-                <YamlEditor
-                  value={yamlContent}
-                  onChange={setYamlContent}
-                  minHeight="320px"
-                  placeholder="Enter your YAML pipeline definition..."
-                />
-              </div>
+              <PipelineEditor
+                value={yamlContent}
+                onChange={setYamlContent}
+                minHeight="320px"
+                placeholder="Enter your YAML pipeline definition..."
+              />
 
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">
                 <Button

@@ -89,10 +89,16 @@ async def trigger_build(
             await db.flush()
 
             for step_order, step_def in enumerate(stage_def.get("steps", [])):
+                step_type = step_def.get("step_type", "run")
+                config = step_def.get("config", {})
+                command = config.get("command") if step_type == "run" else None
+
                 step = Step(
                     stage_id=stage.id,
                     name=step_def.get("name", f"step-{step_order}"),
-                    command=step_def.get("run"),
+                    step_type=step_type,
+                    command=command,
+                    config_json=config if config else None,
                     status="pending",
                     sort_order=step_order,
                 )
@@ -243,7 +249,9 @@ async def retry_build(
             new_step = Step(
                 stage_id=new_stage.id,
                 name=step.name,
+                step_type=step.step_type,
                 command=step.command,
+                config_json=step.config_json,
                 status="pending",
                 sort_order=step.sort_order,
             )

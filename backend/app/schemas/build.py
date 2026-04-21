@@ -46,7 +46,9 @@ class StepResponse(BaseModel):
     id: uuid.UUID
     stage_id: uuid.UUID
     name: str
-    command: str | None
+    step_type: str = "run"
+    command: str | None = None
+    config_json: dict | None = None
     status: str
     exit_code: int | None
     sort_order: int

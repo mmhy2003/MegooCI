@@ -101,14 +101,16 @@ async def dispatch_step_to_agent(
         settings.MEGOOCI_REDIS_URL, decode_responses=True
     )
 
-    payload = {
+    payload: dict[str, Any] = {
         "type": "run_step",
         "assignment_id": str(uuid.uuid4()),
         "build_id": str(build_id),
         "stage_name": stage_name,
         "step_id": str(step.id),
         "step_name": step.name,
+        "step_type": step.step_type or "run",
         "command": step.command or "",
+        "config": step.config_json or {},
     }
 
     result_channel = step_result_channel(step.id)

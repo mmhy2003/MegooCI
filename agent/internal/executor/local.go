@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/megooci/megooci-agent/internal/protocol"
@@ -78,10 +79,13 @@ func (l *Local) Run(ctx context.Context, step Step, logs chan<- LogLine) Result 
 		defer cleanup()
 	}
 
-	// Build the command. Portability: Windows uses cmd.exe /C, POSIX uses
-	// /bin/sh -c. Matches the controller's local executor so behaviour is
-	// identical across modes.
-	cmd := buildCommand(ctx, step.Command)
+	// Resolve the command to execute based on step type.
+	command := resolveCommand(step)
+	if command == "" {
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: fmt.Errorf("empty command for step type %q", step.StepType)}
+	}
+
+	cmd := buildCommand(ctx, command)
 	cmd.Dir = workdir
 	cmd.Env = mergeEnv(os.Environ(), step.Env)
 
@@ -133,6 +137,234 @@ func (l *Local) Run(ctx context.Context, step Step, logs chan<- LogLine) Result 
 		status = protocol.StatusFailed
 	}
 	return Result{ExitCode: exitCode, Status: status}
+}
+
+// resolveCommand turns a Step into a single shell command string.
+// For "run" steps the command is used as-is. For typed steps (docker_build,
+// etc.) we synthesize the appropriate CLI invocation from the config map.
+func resolveCommand(step Step) string {
+	st := step.StepType
+	if st == "" || st == "run" {
+		if step.Command != "" {
+			return step.Command
+		}
+		if cmd, ok := step.Config["command"].(string); ok {
+			return cmd
+		}
+		return ""
+	}
+
+	switch st {
+	case "docker_build":
+		return buildDockerBuildCmd(step.Config)
+	case "docker_push":
+		return buildDockerPushCmd(step.Config)
+	case "docker_login":
+		return buildDockerLoginCmd(step.Config)
+	case "git_clone":
+		return buildGitCloneCmd(step.Config)
+	case "git_pull":
+		return buildGitPullCmd(step.Config)
+	case "git_push":
+		return buildGitPushCmd(step.Config)
+	case "ssh_exec":
+		return buildSSHExecCmd(step.Config)
+	default:
+		if step.Command != "" {
+			return step.Command
+		}
+		return ""
+	}
+}
+
+func configStr(cfg map[string]interface{}, key string) string {
+	if v, ok := cfg[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func configStrList(cfg map[string]interface{}, key string) []string {
+	items, ok := cfg[key].([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func configBool(cfg map[string]interface{}, key string) bool {
+	if v, ok := cfg[key].(bool); ok {
+		return v
+	}
+	return false
+}
+
+func configStrMap(cfg map[string]interface{}, key string) map[string]string {
+	m, ok := cfg[key].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
+func buildDockerBuildCmd(cfg map[string]interface{}) string {
+	args := "docker build"
+	for _, tag := range configStrList(cfg, "tags") {
+		args += " -t " + shellQuote(tag)
+	}
+	if df := configStr(cfg, "dockerfile"); df != "" {
+		args += " -f " + shellQuote(df)
+	}
+	if target := configStr(cfg, "target"); target != "" {
+		args += " --target " + shellQuote(target)
+	}
+	if configBool(cfg, "no_cache") {
+		args += " --no-cache"
+	}
+	if platform := configStr(cfg, "platform"); platform != "" {
+		args += " --platform " + shellQuote(platform)
+	}
+	for k, v := range configStrMap(cfg, "build_args") {
+		args += " --build-arg " + shellQuote(k+"="+v)
+	}
+	context := configStr(cfg, "context")
+	if context == "" {
+		context = "."
+	}
+	args += " " + shellQuote(context)
+	return args
+}
+
+func buildDockerPushCmd(cfg map[string]interface{}) string {
+	tags := configStrList(cfg, "tags")
+	if len(tags) == 0 {
+		if img := configStr(cfg, "image"); img != "" {
+			tags = []string{img}
+		}
+	}
+	if len(tags) == 0 {
+		return ""
+	}
+	parts := make([]string, len(tags))
+	for i, tag := range tags {
+		parts[i] = "docker push " + shellQuote(tag)
+	}
+	result := parts[0]
+	for _, p := range parts[1:] {
+		result += " && " + p
+	}
+	return result
+}
+
+func buildDockerLoginCmd(cfg map[string]interface{}) string {
+	args := "docker login"
+	if user := configStr(cfg, "username"); user != "" {
+		args += " -u " + shellQuote(user)
+	}
+	args += " --password-stdin"
+	if reg := configStr(cfg, "registry"); reg != "" {
+		args += " " + shellQuote(reg)
+	}
+	if pw := configStr(cfg, "password"); pw != "" {
+		args = "echo " + shellQuote(pw) + " | " + args
+	}
+	return args
+}
+
+func buildGitCloneCmd(cfg map[string]interface{}) string {
+	repo := configStr(cfg, "repo")
+	if repo == "" {
+		return ""
+	}
+	args := "git clone"
+	if branch := configStr(cfg, "branch"); branch != "" {
+		args += " -b " + shellQuote(branch)
+	}
+	if depth := configStr(cfg, "depth"); depth != "" {
+		args += " --depth " + depth
+	}
+	args += " " + shellQuote(repo)
+	if path := configStr(cfg, "path"); path != "" {
+		args += " " + shellQuote(path)
+	}
+	return args
+}
+
+func buildGitPullCmd(cfg map[string]interface{}) string {
+	remote := configStr(cfg, "remote")
+	if remote == "" {
+		remote = "origin"
+	}
+	args := "git pull " + shellQuote(remote)
+	if branch := configStr(cfg, "branch"); branch != "" {
+		args += " " + shellQuote(branch)
+	}
+	return args
+}
+
+func buildGitPushCmd(cfg map[string]interface{}) string {
+	remote := configStr(cfg, "remote")
+	if remote == "" {
+		remote = "origin"
+	}
+	args := "git push"
+	if configBool(cfg, "force") {
+		args += " --force"
+	}
+	args += " " + shellQuote(remote)
+	if branch := configStr(cfg, "branch"); branch != "" {
+		args += " " + shellQuote(branch)
+	}
+	return args
+}
+
+func buildSSHExecCmd(cfg map[string]interface{}) string {
+	host := configStr(cfg, "host")
+	if host == "" {
+		return ""
+	}
+	user := configStr(cfg, "user")
+	port := configStr(cfg, "port")
+	if port == "" {
+		port = "22"
+	}
+	commands := configStrList(cfg, "commands")
+	if len(commands) == 0 {
+		return ""
+	}
+
+	target := host
+	if user != "" {
+		target = user + "@" + host
+	}
+
+	remoteScript := commands[0]
+	for _, c := range commands[1:] {
+		remoteScript += " && " + c
+	}
+
+	args := "ssh -o StrictHostKeyChecking=no -o BatchMode=yes"
+	args += " -p " + port
+	args += " " + target
+	args += " " + shellQuote(remoteScript)
+	return args
+}
+
+func shellQuote(s string) string {
+	// Single-quote with inner-quote escaping.
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 // ---- helpers ----

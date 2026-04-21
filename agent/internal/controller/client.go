@@ -226,8 +226,12 @@ func (c *Client) handleFrame(ctx context.Context, f protocol.Frame) {
 // logs, and send step_started / step_finished frames. Runs in its own
 // goroutine so concurrent steps don't block each other.
 func (c *Client) runStep(parent context.Context, f protocol.Frame) {
-	if f.StepID == "" || f.Command == "" {
-		c.logger.Warn("run_step frame missing step_id/command; dropping")
+	if f.StepID == "" {
+		c.logger.Warn("run_step frame missing step_id; dropping")
+		return
+	}
+	if f.Command == "" && len(f.Config) == 0 {
+		c.logger.Warn("run_step frame missing command and config; dropping", "step_id", f.StepID)
 		return
 	}
 
@@ -263,12 +267,14 @@ func (c *Client) runStep(parent context.Context, f protocol.Frame) {
 	}()
 
 	result := c.opts.Executor.Run(stepCtx, executor.Step{
-		BuildID: f.BuildID,
-		StepID:  f.StepID,
-		Name:    f.StepName,
-		Command: f.Command,
-		Env:     f.Env,
-		Workdir: f.Workdir,
+		BuildID:  f.BuildID,
+		StepID:   f.StepID,
+		Name:     f.StepName,
+		StepType: f.StepType,
+		Command:  f.Command,
+		Config:   f.Config,
+		Env:      f.Env,
+		Workdir:  f.Workdir,
 	}, logs)
 
 	// Wait for the log-forwarder to drain the closed channel.

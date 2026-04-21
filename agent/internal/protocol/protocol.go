@@ -33,14 +33,16 @@ const (
 type Frame struct {
 	Type string `json:"type"`
 	// Controller -> Agent (run_step)
-	AssignmentID string            `json:"assignment_id,omitempty"`
-	BuildID      string            `json:"build_id,omitempty"`
-	StageName    string            `json:"stage_name,omitempty"`
-	StepID       string            `json:"step_id,omitempty"`
-	StepName     string            `json:"step_name,omitempty"`
-	Command      string            `json:"command,omitempty"`
-	Env          map[string]string `json:"env,omitempty"`
-	Workdir      string            `json:"workdir,omitempty"`
+	AssignmentID string                 `json:"assignment_id,omitempty"`
+	BuildID      string                 `json:"build_id,omitempty"`
+	StageName    string                 `json:"stage_name,omitempty"`
+	StepID       string                 `json:"step_id,omitempty"`
+	StepName     string                 `json:"step_name,omitempty"`
+	StepType     string                 `json:"step_type,omitempty"`
+	Command      string                 `json:"command,omitempty"`
+	Config       map[string]interface{} `json:"config,omitempty"`
+	Env          map[string]string      `json:"env,omitempty"`
+	Workdir      string                 `json:"workdir,omitempty"`
 }
 
 // Hello is the first frame the agent sends after connect.
