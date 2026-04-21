@@ -83,9 +83,10 @@ export default function BuildDetailPage() {
   const [selectedStageId, setSelectedStageId] = React.useState<string>("");
 
   const isRunning = build?.status === "running" || build?.status === "queued";
+  const isActive = isRunning || build?.status === "pending";
 
   const wsUrl = React.useMemo(() => {
-    if (!isRunning || typeof window === "undefined") return null;
+    if (!isActive || typeof window === "undefined") return null;
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
     if (apiBase) {
       const url = new URL(apiBase);
@@ -94,7 +95,7 @@ export default function BuildDetailPage() {
     }
     const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
     return `${wsProto}//${window.location.host}/api/v1/ws/builds/${id}/logs`;
-  }, [isRunning, id]);
+  }, [isActive, id]);
   const { messages } = useWebSocket(wsUrl);
 
   const [logLines, setLogLines] = React.useState<LogLine[]>([]);
@@ -113,21 +114,101 @@ export default function BuildDetailPage() {
   }, [id]);
 
   React.useEffect(() => {
-    const newLines = messages.map(
-      (msg): LogLine => {
-        try {
-          const parsed = JSON.parse(msg);
-          return {
+    const newLogLines: LogLine[] = [];
+
+    for (const msg of messages) {
+      try {
+        const parsed = JSON.parse(msg);
+        const event = parsed.event as string | undefined;
+
+        if (event === "build_started") {
+          setBuild((prev) =>
+            prev ? { ...prev, status: "running", started_at: new Date().toISOString() } : prev,
+          );
+        } else if (event === "build_finished") {
+          setBuild((prev) =>
+            prev
+              ? { ...prev, status: parsed.status, finished_at: new Date().toISOString() }
+              : prev,
+          );
+        } else if (event === "stage_started") {
+          setBuild((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              stages: prev.stages.map((s) =>
+                s.id === parsed.stage_id
+                  ? { ...s, status: "running", started_at: new Date().toISOString() }
+                  : s,
+              ),
+            };
+          });
+        } else if (event === "stage_finished") {
+          setBuild((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              stages: prev.stages.map((s) =>
+                s.id === parsed.stage_id
+                  ? { ...s, status: parsed.status, finished_at: new Date().toISOString() }
+                  : s,
+              ),
+            };
+          });
+        } else if (event === "step_started") {
+          setBuild((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              stages: prev.stages.map((stage) => ({
+                ...stage,
+                steps: stage.steps.map((step) =>
+                  step.id === parsed.step_id
+                    ? { ...step, status: "running", started_at: new Date().toISOString() }
+                    : step,
+                ),
+              })),
+            };
+          });
+        } else if (event === "step_finished") {
+          setBuild((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              stages: prev.stages.map((stage) => ({
+                ...stage,
+                steps: stage.steps.map((step) =>
+                  step.id === parsed.step_id
+                    ? {
+                        ...step,
+                        status: parsed.status,
+                        exit_code: parsed.exit_code ?? step.exit_code,
+                        finished_at: new Date().toISOString(),
+                      }
+                    : step,
+                ),
+              })),
+            };
+          });
+        } else if (event === "log") {
+          newLogLines.push({
+            text: parsed.content || "",
+            timestamp: parsed.timestamp,
+            stream: parsed.stream || "stdout",
+          });
+        } else {
+          newLogLines.push({
             text: parsed.text || parsed.content || msg,
             timestamp: parsed.timestamp,
             stream: parsed.stream || "stdout",
-          };
-        } catch {
-          return { text: msg, stream: "stdout" };
+          });
         }
-      },
-    );
-    setLogLines(newLines);
+      } catch {
+        newLogLines.push({ text: msg, stream: "stdout" });
+      }
+    }
+
+    setLogLines(newLogLines);
   }, [messages]);
 
   async function handleRetry() {
