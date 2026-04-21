@@ -6,6 +6,7 @@ import { Search, Bell, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 function getBreadcrumbs(pathname: string) {
   const segments = pathname.split("/").filter(Boolean);
@@ -105,6 +106,8 @@ export function Header({ onOpenMobile }: HeaderProps) {
         >
           <Bell className="h-4 w-4" />
         </Button>
+
+        <ThemeToggle variant="icon" className="h-8 w-8 border-0 shadow-none" />
       </div>
     </header>
   );
