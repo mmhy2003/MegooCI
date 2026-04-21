@@ -6,6 +6,15 @@ import { authApi, type User, type AuthTokens } from "./api";
 const TOKEN_KEY = "megooci_access_token";
 const REFRESH_KEY = "megooci_refresh_token";
 
+function setTokenCookie(name: string, value: string | null) {
+  if (typeof document === "undefined") return;
+  if (value) {
+    document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+  } else {
+    document.cookie = `${name}=; path=/; max-age=0`;
+  }
+}
+
 interface AuthState {
   user: User | null;
   accessToken: string | null;
@@ -34,6 +43,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (get().hasHydrated) return;
     const accessToken = localStorage.getItem(TOKEN_KEY);
     const refreshToken = localStorage.getItem(REFRESH_KEY);
+    if (accessToken) {
+      setTokenCookie(TOKEN_KEY, accessToken);
+    }
     set({ accessToken, refreshToken, hasHydrated: true });
   },
 
@@ -42,6 +54,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.setItem(TOKEN_KEY, tokens.access_token);
       localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
     }
+    setTokenCookie(TOKEN_KEY, tokens.access_token);
     set({
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
@@ -67,6 +80,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(REFRESH_KEY);
     }
+    setTokenCookie(TOKEN_KEY, null);
     set({ user: null, accessToken: null, refreshToken: null });
     if (typeof window !== "undefined") {
       window.location.href = "/login";
