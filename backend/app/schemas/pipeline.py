@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -14,7 +15,7 @@ class PipelineCreate(BaseModel):
     project_repository_id: uuid.UUID | None = None
     source_repo_url: str | None = None
     default_branch: str = "main"
-    definition_format: str = "yaml"
+    definition_format: Literal["yaml"] = "yaml"
     yaml_content: str | None = None
 
 

@@ -11,6 +11,7 @@
 
 > **Change log**
 >
+> - **v1.6 (2026-04-21)** — **Python pipeline format removed; YAML is now the sole authoring format.** Imperative Python pipelines (F-1.2) and the `megooci-sdk` are dropped from scope; all pipeline authoring is declarative YAML (`megooci.yaml`). The frontend pipeline editor now ships with **CodeMirror 6 YAML syntax highlighting** (replacing the plain `<textarea>`), with a custom cyberpunk theme matching the app design system. The YAML/Python format toggle is removed from the pipeline creation UI. Backend schema enforces `definition_format = "yaml"` via `Literal["yaml"]`. AI pipeline assistant (F-12.*) will generate and edit YAML pipelines exclusively via a chat-based interface. Updated §6.1, §6.12, §6.15, §7, §9.2, §11.
 > - **v1.5 (2026-04-21)** — Global search delivered (§6.17). Meilisearch added as an infrastructure dependency; backend indexes projects, pipelines, and builds on startup and incrementally on CRUD. New `GET /api/v1/search` endpoint with multi-index query. Frontend ships a fully-functional `Cmd/Ctrl+K` command palette with debounced search, keyboard navigation, and grouped results by entity type. Build log viewer gains in-log search (`Ctrl/Cmd+F`). UI/UX overhaul: cyberpunk-inspired color theme with neon-cyan/magenta palette, three-way theme toggle (Light / Dark / System) with OS-level tracking and flash-free SSR, custom hand-rolled UI primitives (badge variants, promise-based confirm dialog, dialog system, avatar with initials fallback), visual stage graph, terminal-style build log viewer with auto-scroll/follow/fullscreen/copy, collapsible sidebar with mobile drawer, dynamic breadcrumbs, and PWA support (service worker + web manifest). Updated §6.9, §6.14, §6.15, §9.1, §9.2.
 > - **v1.4 (2026-04-20)** — Agent control plane delivered (F-3.4, F-3.7). New `agent/` Go module ships the `megooci-agent` binary (Cobra CLI, gorilla/websocket client, subprocess executor, heartbeat, reconnect, capacity semaphore, cancellation). Backend gains `/api/v1/ws/agents/{id}/connect` with bcrypt-hashed token auth, a Redis-queue dispatcher, `/rotate-token` endpoint, and a try-agent-first / fall-back-to-local execution strategy. Alembic migration `003_agent_tokens.py`. §6.15 status updated accordingly.
 > - **v1.3 (2026-04-20)** — Added §6.16 "Git Provider Integration" (admin-scoped Git connections with PAT auth, per-project repository linking, manual-paste webhook receivers with HMAC verification for GitHub/GitLab/Generic, delivery log, webhook-triggered builds). Added `GitProviderConnection`, `ProjectRepository`, and `WebhookDelivery` to §10. Added OAuth and delivery-retention env vars to §6.14. Marked Phase 1 as delivered in §6.15.
@@ -23,7 +24,7 @@
 
 MegooCI is an **open-source CI/CD automation server** that aims for **feature parity with Jenkins' most-used capabilities** while delivering a **dramatically simpler UI, configuration experience, and developer workflow**. It targets teams that love Jenkins' power but are frustrated by its dated interface, Groovy-heavy configuration, plugin sprawl, and steep learning curve.
 
-MegooCI is explicitly **not a plugin platform**. Instead, it ships a curated, batteries-included feature set with two first-class ways to author pipelines: **declarative YAML** and **imperative Python**. An integrated **AI pipeline generator** turns natural-language descriptions into ready-to-run YAML or Python pipelines.
+MegooCI is explicitly **not a plugin platform**. Instead, it ships a curated, batteries-included feature set with a single first-class way to author pipelines: **declarative YAML** (`megooci.yaml`). An integrated **AI pipeline assistant** lets users generate and refine YAML pipelines through a **chat-based interface**, turning natural-language descriptions into ready-to-run pipeline definitions.
 
 The product is built on a modern stack — **Next.js (frontend)**, **FastAPI (backend API)**, and **Celery (distributed task execution & scheduling)** — with PostgreSQL and Redis as core infrastructure, and the **local filesystem** as the default artifact and log store.
 
@@ -40,7 +41,7 @@ Jenkins is the most widely deployed self-hosted CI/CD server, but users consiste
 5. **Poor developer ergonomics.** Writing and debugging `Jenkinsfile` pipelines locally is painful; feedback loops are slow.
 6. **Weak observability.** Build logs, metrics, and history are hard to navigate at scale.
 
-**MegooCI's thesis:** most teams use ~20% of Jenkins' surface area. By re-implementing that 20% with a modern stack, opinionated defaults, a clean UI, first-class YAML *and* Python pipelines, and an AI assistant to author them, we can deliver 80%+ of the value with a fraction of the complexity — and without a plugin ecosystem to maintain.
+**MegooCI's thesis:** most teams use ~20% of Jenkins' surface area. By re-implementing that 20% with a modern stack, opinionated defaults, a clean UI, first-class YAML pipelines with a syntax-highlighted editor, and a chat-based AI assistant to author them, we can deliver 80%+ of the value with a fraction of the complexity — and without a plugin ecosystem to maintain.
 
 ---
 
@@ -50,8 +51,8 @@ Jenkins is the most widely deployed self-hosted CI/CD server, but users consiste
 
 - **G1.** Deliver Jenkins-equivalent functionality for the most common CI/CD workloads: build, test, package, deploy.
 - **G2.** Offer a **clean, modern, fast UI** built with Next.js and a cohesive design system.
-- **G3.** Provide **two first-class pipeline authoring formats**: declarative **YAML** and imperative **Python**.
-- **G4.** Ship an **AI pipeline generator** that produces YAML or Python pipelines from natural-language prompts and repo context.
+- **G3.** Provide a **single, clean pipeline authoring format**: declarative **YAML** (`megooci.yaml`) with syntax-highlighted editing in the UI.
+- **G4.** Ship an **AI pipeline assistant** with a **chat-based interface** that generates and refines YAML pipelines from natural-language prompts and repo context.
 - **G5.** Support **distributed build execution** across multiple agents/runners (Docker, Kubernetes, SSH, local).
 - **G6.** Be **trivially installable** via a single Docker Compose file or Helm chart, with **local filesystem storage** working out of the box.
 - **G7.** Be **configurable at runtime via environment variables** for key operational toggles (signup, auth providers, storage paths, AI providers, etc.).
@@ -102,9 +103,9 @@ Jenkins is the most widely deployed self-hosted CI/CD server, but users consiste
 - As **Priya**, I can define roles and permissions that map to SSO groups.
 - As **Sam**, I can install MegooCI locally with `docker compose up` and see the UI at `localhost:8080`.
 - As **Alex**, I can view an immutable audit log of every configuration change and every secret access.
-- As a **pipeline author**, I can define stages, parallel steps, matrix builds, and conditional steps in a single YAML file **or** a Python file, whichever I prefer.
+- As a **pipeline author**, I can define stages, parallel steps, matrix builds, and conditional steps in a single YAML file with syntax highlighting in the UI editor.
 - As a **pipeline author**, I can store secrets and environment variables once and reference them by name, never by value.
-- As a **pipeline author**, I can describe what I want in plain English and have the AI assistant generate a working YAML or Python pipeline I can review, edit, and commit.
+- As a **pipeline author**, I can describe what I want in plain English in a **chat interface** and have the AI assistant generate a working YAML pipeline I can review, edit, and commit.
 - As an **administrator**, I can set `MEGOOCI_SIGNUP_ENABLED=false` in my environment and have the public signup page/API immediately disabled without restarting (or with a single restart), so I can lock down my instance at any time.
 - As an **administrator**, I can configure the artifact storage root (e.g. `/var/lib/megooci/artifacts`) via an env variable and rely on simple filesystem backups — no object store required.
 
@@ -118,8 +119,8 @@ Features are grouped into **Must-Have (M)** for v1.0, **Should-Have (S)** for v1
 
 | ID | Feature | Priority | Description |
 | --- | --- | --- | --- |
-| F-1.1 | Declarative **YAML** pipelines | M | Single `megooci.yaml` file, schema-validated, with stages, steps, matrix, parallel, when-conditions. |
-| F-1.2 | Imperative **Python** pipelines | M | Single `megooci.py` file using the MegooCI Python SDK (`from megooci import pipeline, stage, step, …`). Executed in a sandboxed interpreter to produce the same internal build graph as YAML. |
+| F-1.1 | Declarative **YAML** pipelines | M | Single `megooci.yaml` file, schema-validated, with stages, steps, matrix, parallel, when-conditions. Edited in the UI with **CodeMirror 6 syntax highlighting**. |
+| ~~F-1.2~~ | ~~Imperative Python pipelines~~ | — | **Removed.** Python pipeline support has been dropped. YAML is the sole authoring format. |
 | F-1.3 | Freestyle jobs | M | UI-driven single-command jobs for trivial cases. |
 | F-1.4 | Multi-branch pipelines | M | Auto-discover branches and PRs from a Git repo; one pipeline config per branch. |
 | F-1.5 | Parameterized builds | M | String, choice, boolean, password, file, and Git-ref parameters. |
@@ -127,10 +128,10 @@ Features are grouped into **Must-Have (M)** for v1.0, **Should-Have (S)** for v1
 | F-1.7 | Parallel stages | M | Run independent stages concurrently within a pipeline. |
 | F-1.8 | Conditional steps (`when`) | M | Run steps based on branch, tag, changed files, prior step status, env vars. |
 | F-1.9 | Pipeline env variables | M | Define env vars at pipeline, stage, or step scope; support inheritance and overrides. |
-| F-1.10 | Reusable pipeline templates | S | Shared includes / "starter" templates for both YAML and Python formats. |
-| F-1.11 | Visual pipeline editor | S | Drag-and-drop UI that round-trips to YAML (Python is read-only in the visual editor). |
-| F-1.12 | Pipeline-as-code validation CLI | M | `megooci lint path/to/file` validates both YAML and Python pipelines locally. |
-| F-1.13 | YAML ↔ Python conversion | S | One-click "convert this pipeline to YAML/Python" in the UI, using the shared internal build-graph representation. |
+| F-1.10 | Reusable pipeline templates | S | Shared includes / "starter" templates for YAML pipelines. |
+| F-1.11 | Visual pipeline editor | S | Drag-and-drop UI that round-trips to YAML. |
+| F-1.12 | Pipeline-as-code validation CLI | M | `megooci lint path/to/file` validates YAML pipelines locally. |
+| ~~F-1.13~~ | ~~YAML ↔ Python conversion~~ | — | **Removed.** No longer applicable with YAML-only pipelines. |
 
 ### 6.2 Build Triggers
 
@@ -256,16 +257,16 @@ Features are grouped into **Must-Have (M)** for v1.0, **Should-Have (S)** for v1
 | F-11.2 | **Outgoing webhooks** — configurable per pipeline/project for build lifecycle events (`started`, `succeeded`, `failed`, `cancelled`) | M | Payload is JSON; target URL is signed with HMAC; retries with exponential backoff. |
 | F-11.3 | Public REST API + OpenAPI 3.1 docs | M | Covers every UI action; stable and versioned. |
 | F-11.4 | CLI (`megooci`) for all common operations | M | Login, trigger builds, tail logs, lint pipelines, manage secrets/env, download artifacts. |
-| F-11.5 | Python SDK used by Python pipelines **and** by external automation scripts | M | Shipped on PyPI as `megooci-sdk`. |
+| F-11.5 | Python SDK for external automation scripts | M | Shipped on PyPI as `megooci-sdk`. Provides programmatic access to the MegooCI API for triggering builds, managing secrets, and downloading artifacts. |
 
 ### 6.12 AI Pipeline Assistance
 
 | ID | Feature | Priority | Description |
 | --- | --- | --- | --- |
-| F-12.1 | **AI-generated pipelines from natural language** | M | "Generate" button in the UI: user describes the project and goal (e.g., "Python FastAPI app, run pytest, build a Docker image, push to registry on `main`"); MegooCI produces a ready-to-run pipeline in the user's chosen format (YAML or Python). |
+| F-12.1 | **AI-generated YAML pipelines from natural language** | M | Chat-based interface in the UI: user describes the project and goal in plain English (e.g., "Python FastAPI app, run pytest, build a Docker image, push to registry on `main`"); MegooCI produces a ready-to-run YAML pipeline streamed into the editor with syntax highlighting. |
 | F-12.2 | **Repository-aware generation** | M | When a Git repo is connected, the AI inspects the repo (package manifests, Dockerfile, test framework, languages) to produce an accurate starter pipeline. |
-| F-12.3 | **Explain & edit in chat** | M | Conversational UI to iterate on the generated pipeline ("also add a nightly cron", "run tests in parallel across Python 3.11 and 3.12"). |
-| F-12.4 | **Convert YAML ↔ Python via AI** | M | One-click conversion between the two authoring formats, using the AI to preserve comments and intent. |
+| F-12.3 | **Chat-based pipeline editing** | M | Conversational chat panel adjacent to the YAML editor to iteratively refine the pipeline ("also add a nightly cron", "run tests in parallel across Python 3.11 and 3.12"). AI responses stream diffs that apply directly to the editor. |
+| ~~F-12.4~~ | ~~Convert YAML ↔ Python via AI~~ | — | **Removed.** No longer applicable with YAML-only pipelines. |
 | F-12.5 | **Fix-it suggestions on failed builds** | S | On failure, the AI reads recent log lines and suggests a concrete pipeline or code change; the user can apply with one click. |
 | F-12.6 | **Pluggable AI provider via env vars** | M | `MEGOOCI_AI_PROVIDER` (`openai`, `anthropic`, `ollama`, `azure_openai`, `disabled`), plus provider-specific keys and model names. Self-hosted Ollama is a supported path for air-gapped environments. |
 | F-12.7 | **AI feature kill-switch** | M | `MEGOOCI_AI_ENABLED=false` fully hides AI UI and disables AI endpoints. |
@@ -322,22 +323,6 @@ YAML (`megooci.yaml`):
           - "${{ megooci.registry }}/${{ project.slug }}/web:latest"
 ```
 
-Python (`megooci.py`):
-
-```python
-from megooci import Step, registry
-
-image = f"{registry.host}/{project.slug}/web"
-pipeline.add(Stage("package", steps=[
-    Step.docker_build(
-        context=".",
-        file="Dockerfile",
-        tags=[f"{image}:{build.commit_short}", f"{image}:latest"],
-    ),
-    Step.docker_push(tags=[f"{image}:{build.commit_short}", f"{image}:latest"]),
-]))
-```
-
 From an external server (e.g., production host):
 
 ```bash
@@ -370,7 +355,7 @@ All operational toggles are driven by environment variables so administrators ca
 | `MEGOOCI_AI_API_KEY` | — | Provider API key (unused for `ollama`). |
 | `MEGOOCI_AI_MODEL` | provider default | Model identifier. |
 | `MEGOOCI_AI_BASE_URL` | — | Custom base URL (e.g., for Ollama, Azure). |
-| `MEGOOCI_PYTHON_PIPELINE_TIMEOUT_SECONDS` | `10` | Max time a Python pipeline definition is allowed to run during graph construction. |
+| ~~`MEGOOCI_PYTHON_PIPELINE_TIMEOUT_SECONDS`~~ | ~~`10`~~ | ~~Max time a Python pipeline definition is allowed to run during graph construction.~~ **Removed** — Python pipelines are no longer supported. |
 | `MEGOOCI_LOG_LEVEL` | `INFO` | Global log level. |
 | `MEGOOCI_PUBLIC_URL` | — | Externally reachable base URL (used for webhooks, emails). |
 | `MEGOOCI_WEBHOOK_SIGNATURE_HEADER` | `X-MegooCI-Signature` | Header name for outgoing webhook HMAC. |
@@ -411,9 +396,9 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 | API tokens / PATs per user | F-7.9 | ❌ | Only JWT access + refresh exist. |
 | Admin-initiated invites | F-7.3 | ❌ | No model, no endpoints. |
 | RBAC (Role / UserRole, scoped permissions) | F-7.8 | ❌ | No tables; `User.is_admin` boolean is the only authorization primitive. |
-| Projects / Pipelines / Builds / Stages / Steps CRUD | F-1.\* | ✅ | With `definition_format` (`yaml` / `python`) and `yaml_content`. |
+| Projects / Pipelines / Builds / Stages / Steps CRUD | F-1.\* | ✅ | With `definition_format` (enforced `"yaml"` via `Literal["yaml"]`) and `yaml_content`. |
 | YAML pipeline parser, compiler, validator | F-1.1 | 🟡 | `services/pipeline_compiler.py` has `parse_yaml_pipeline`, `compile_to_build_graph`, and `validate_pipeline`. **Validation is not called** on pipeline create/update; it runs implicitly at `POST /builds/{pipeline_id}/trigger`. |
-| Imperative Python pipelines + sandbox | F-1.2 | ❌ | No SDK, no sandboxed subprocess. `MEGOOCI_PYTHON_PIPELINE_TIMEOUT_SECONDS` is defined in config but unused. |
+| ~~Imperative Python pipelines + sandbox~~ | ~~F-1.2~~ | — | **Removed from scope.** YAML is the sole pipeline format. |
 | Freestyle jobs · Multi-branch · Parameterized · Matrix | F-1.3 – F-1.6 | ❌ | None of these are wired into the trigger or executor. |
 | Parallel stages, conditional `when`, matrix/axis | F-1.6 – F-1.8 | ❌ | Executor runs stages strictly sequentially; `when` is not evaluated; no matrix expansion. |
 | Pipeline env variable scoping & inheritance | F-1.9 | ❌ | Secrets/env vars are not loaded by the executor at build time. |
@@ -449,7 +434,7 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 
 #### 6.15.2 Frontend (`frontend/`)
 
-**Stack** — ✅ Next.js 15 (App Router) + React 19 + TypeScript + Tailwind 3 + TanStack Query 5 + Zustand 5 + `sonner` + `lucide-react` + `class-variance-authority` + custom UI primitives. **No Monaco editor**, **no charting library**, **no Radix UI packages** (UI primitives are hand-rolled to match the shadcn look). Custom `CommandPalette` replaces any need for `cmdk`.
+**Stack** — ✅ Next.js 15 (App Router) + React 19 + TypeScript + Tailwind 3 + TanStack Query 5 + Zustand 5 + `sonner` + `lucide-react` + `class-variance-authority` + **CodeMirror 6** (`@uiw/react-codemirror` + `@codemirror/lang-yaml`) + custom UI primitives. **No charting library**, **no Radix UI packages** (UI primitives are hand-rolled to match the shadcn look). Custom `CommandPalette` replaces any need for `cmdk`.
 
 **Pages implemented:** `/`, `/login`, `/signup`, `/dashboard`, `/pipelines`, `/pipelines/new`, `/pipelines/[id]`, `/projects`, `/projects/[id]`, `/builds`, `/builds/[id]`, `/agents`, `/secrets`, `/settings`.
 
@@ -460,7 +445,7 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 | **App shell — collapsible sidebar + mobile drawer** | F-9.7, F-18.7, F-18.8 | ✅ | Desktop: collapsible sidebar with state persisted to `localStorage`. Mobile: full-width off-canvas drawer with dark backdrop overlay and body scroll lock. 8 nav items (Dashboard, Pipelines, Projects, Builds, Agents, Secrets, Integrations [admin-only], Settings). User section at bottom with avatar dropdown (profile, theme cycle) and one-click logout with confirmation. Route change closes drawer. Dynamic breadcrumbs in header (full trail on desktop, page title + hamburger on mobile). |
 | Dashboard — stat cards + recent builds table | F-9.1 | ✅ | Cards: total pipelines, total builds, success rate, active agents. Table columns hide progressively on smaller viewports. |
 | Pipeline listing, detail, creation, edit | F-1.1 | ✅ | Detail has Overview / Builds / Configuration tabs; trigger build; delete with in-app confirm. |
-| YAML / Python pipeline editor | F-1.1, F-1.2 | 🟡 | Plain `<textarea>`, not Monaco. Radio toggle YAML / Python on **create** only; both formats persist into the single `yaml_content` field, and the detail editor does not change UX by format. |
+| YAML pipeline editor with syntax highlighting | F-1.1 | ✅ | **CodeMirror 6** with custom cyberpunk light/dark themes, YAML language mode, line numbers, code folding, bracket matching. Used on both the create and detail (edit/read-only) pages. Python format toggle removed; YAML is the sole format. |
 | Builds list + detail with stage graph + live logs + re-run / cancel | F-9.2, F-5.1, F-18.5, F-18.6 | ✅ | `StageGraph` (status-aware colored buttons with arrow connectors, clickable with ring highlight, spin animation on running stages) + `BuildLogViewer` (terminal-dark theme `#0d1117`, line numbers, timestamps, stderr red coloring, auto-scroll/follow, fullscreen toggle, copy-all, **in-log search `Ctrl/Cmd+F`** with yellow `<mark>` highlighting); WebSocket via `useWebSocket` hook with auto-reconnect every 3 s. **WS URL is hardcoded to `ws://<hostname>:8000/ws/...`** instead of using the Next.js rewrite proxy. |
 | Projects listing / detail with secrets + env vars tabs | F-9.3 | ✅ | Scoped secrets + env vars CRUD in project settings tab. |
 | Agents listing + admin-only registration + one-time token card | F-3.4 | ✅ | 15-second polling; destructive actions use `useConfirm`. |
@@ -491,6 +476,7 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 - ✅ Operators can view current backend configuration (AI, auth, storage, registry) via the Settings page.
 - ✅ **Global search** works end-to-end: Meilisearch indexes are synced on startup, `Cmd/Ctrl+K` opens the command palette, and users can search across projects, pipelines, and builds with instant, typo-tolerant results and keyboard navigation.
 - ✅ **Design system** is cohesive: cyberpunk theme with Light / Dark / System modes, semantic badges, promise-based confirm dialogs, visual stage graph, terminal-style build log viewer with in-log search, collapsible sidebar with mobile drawer, dynamic breadcrumbs, and PWA support.
+- ✅ **YAML editor** ships with CodeMirror 6 syntax highlighting on pipeline create and detail pages, matching the cyberpunk design system in both light and dark modes.
 - 🟡 Cancellation, retry, and live log streaming all work. A cancel on a running build now also signals any agent executing a step; the build log WebSocket to the browser remains unauthenticated.
 - ❌ Docker / SSH / K8s executors, artifact flow, notifications, and registry are still unbuilt.
 
@@ -509,7 +495,7 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 11. **Observability** — `/metrics` (F-10.2) and structured JSON logging (F-10.3).
 12. **Enterprise auth** — OIDC (F-7.5), SAML/LDAP (F-7.6/7), API tokens (F-7.9), invites (F-7.3), RBAC (F-7.8), and a **durable** signup-disable mechanism that survives restarts (F-7.2/4).
 
-> **Closed since last snapshot:** Global search / command palette (F-9.4) is now fully functional (§6.17). Dark mode has been upgraded to a three-way theme toggle (F-9.5, F-18.2). All `window.confirm` calls replaced with promise-based dialogs (F-18.4). PWA support shipped (F-18.11).
+> **Closed since last snapshot:** Global search / command palette (F-9.4) is now fully functional (§6.17). Dark mode has been upgraded to a three-way theme toggle (F-9.5, F-18.2). All `window.confirm` calls replaced with promise-based dialogs (F-18.4). PWA support shipped (F-18.11). **YAML syntax-highlighted editor** now ships on pipeline create and detail pages (CodeMirror 6 with cyberpunk theme). Python pipeline format (F-1.2) removed from scope — YAML is the sole format.
 
 ### 6.16 Git Provider Integration
 
@@ -587,9 +573,9 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 
 | Capability | Jenkins | MegooCI v1 |
 | --- | --- | --- |
-| Declarative pipelines | Jenkinsfile (Groovy) | **YAML** (`megooci.yaml`) |
-| Scripted pipelines | Groovy | **Python** (`megooci.py`, via Python SDK) |
-| AI-assisted pipeline authoring | ❌ | ✅ Built-in, YAML + Python |
+| Declarative pipelines | Jenkinsfile (Groovy) | **YAML** (`megooci.yaml`) with syntax-highlighted editor |
+| Scripted pipelines | Groovy | ❌ Not supported (YAML-only by design for simplicity) |
+| AI-assisted pipeline authoring | ❌ | ✅ Built-in chat-based AI assistant for YAML generation |
 | Freestyle jobs | ✅ | ✅ |
 | Multi-branch pipelines | ✅ | ✅ |
 | Parameterized builds | ✅ | ✅ |
@@ -618,9 +604,9 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 ## 8. User Experience Principles
 
 1. **Progressive disclosure.** Simple jobs are configured in under 60 seconds; advanced config is available but never required upfront.
-2. **Config-as-code, UI-assisted.** The source of truth is always a `megooci.yaml` or `megooci.py` file in the repo. The UI is a fast, friendly editor and AI collaborator on top of it.
-3. **Two ways, same result.** YAML and Python pipelines compile to the same internal build graph. Every feature works in both.
-4. **AI is a helper, not the author.** AI output is always a reviewable diff; nothing is saved or committed without explicit user approval.
+2. **Config-as-code, UI-assisted.** The source of truth is always a `megooci.yaml` file in the repo. The UI provides a syntax-highlighted YAML editor with an adjacent AI chat panel for pipeline generation and refinement.
+3. **One format, zero friction.** YAML is the single pipeline format — no choice paralysis, consistent documentation, and a single path through the AI assistant.
+4. **AI is a helper, not the author.** AI output is always a reviewable diff in the YAML editor; nothing is saved or committed without explicit user approval.
 5. **Fast feedback.** Live-streamed logs, optimistic UI updates, sub-200ms navigation on common pages.
 6. **Readable defaults.** Clear typography, generous whitespace, consistent iconography, and no more than 2 primary actions per screen.
 7. **Explain errors in plain English.** Every error includes: what happened, why, and the next action.
@@ -646,7 +632,7 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
                      │   FastAPI Backend (ASGI)   │
                      │   REST + WS + OpenAPI      │
                      │   Pipeline compiler        │
-                     │   (YAML + Python → graph)  │
+                     │   (YAML → build graph)     │
                      │   AI provider adapter      │
                      │   OCI Registry (/v2/...)   │
                      └─┬───────┬──┬────────────┬──┘
@@ -694,7 +680,7 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 - Command palette (`Cmd/Ctrl+K`) powered by Meilisearch for instant cross-entity search.
 - Auth via custom JWT integration with the FastAPI backend; single-flight token refresh to avoid race conditions.
 - AI chat panel for pipeline generation/editing, streaming tokens from the backend (planned).
-- Plain `<textarea>` editor for `megooci.yaml` and `megooci.py` (Monaco upgrade planned).
+- **CodeMirror 6 YAML editor** with custom cyberpunk syntax highlighting theme for `megooci.yaml` pipeline definitions. Supports read-only and edit modes, line numbers, code folding, and bracket matching.
 - PWA support: service worker, web manifest, Apple web app metadata.
 
 **Backend — FastAPI (Python 3.12+)**
@@ -703,10 +689,9 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 - Auth: JWT access tokens + refresh tokens; OIDC/OAuth via Authlib; signup endpoint gated by `MEGOOCI_SIGNUP_ENABLED`.
 - ORM: SQLAlchemy 2.x + Alembic migrations.
 - Validation: Pydantic v2.
-- **Pipeline compiler** that converts both YAML and Python pipeline definitions into a shared internal **build graph** (DAG of stages and steps).
-  - YAML → parsed with Pydantic schemas.
-  - Python → executed in a restricted subprocess with a resource/time budget (`MEGOOCI_PYTHON_PIPELINE_TIMEOUT_SECONDS`) and a whitelisted SDK (`megooci-sdk`). Standard library I/O and network are blocked during graph construction.
-- **AI adapter layer** — provider-agnostic interface with concrete implementations for OpenAI, Anthropic, Azure OpenAI, and Ollama. Handles prompt templating, repo-context assembly, token streaming, and diff generation.
+- **Pipeline compiler** that converts YAML pipeline definitions into an internal **build graph** (DAG of stages and steps).
+  - YAML → parsed and validated with Pydantic schemas.
+- **AI adapter layer** — provider-agnostic interface with concrete implementations for OpenAI, Anthropic, Azure OpenAI, and Ollama. Handles prompt templating, repo-context assembly, token streaming, and YAML diff generation for the chat-based pipeline assistant.
 - **Embedded OCI/Docker registry** — the `/v2/…` endpoint tree is mounted directly on the FastAPI app (can also be bound to a separate port). Implements the OCI Distribution Spec v1.1 over the local filesystem, with Postgres for metadata (repos, tags, image↔build provenance) and Redis for upload session tracking and push/pull rate limiting. Auth is unified with MegooCI auth: Docker `login` uses a user's API token or a project deploy token.
 - Dispatches build jobs onto Celery queues.
 - Emits events to Redis pub/sub for frontend push updates.
@@ -753,7 +738,7 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 - Per-request RBAC check middleware in FastAPI.
 - Signup endpoint globally gated behind `MEGOOCI_SIGNUP_ENABLED`; administrators can flip the flag at any time.
 - Incoming webhooks verified via HMAC signatures and per-endpoint secrets; outgoing webhooks signed with HMAC and retried on 5xx.
-- Python pipelines executed in a sandboxed subprocess with CPU/time/memory limits and a whitelisted SDK; no network or filesystem access during graph construction.
+- YAML-only pipeline definitions eliminate server-side code execution risks during pipeline parsing.
 - Controller ↔ agent channel authenticated with mutual TLS or shared signed tokens.
 - AI calls optionally route through a configurable base URL, allowing air-gapped deployments with Ollama. External AI providers are disabled automatically for private projects unless explicitly opted in.
 - CSRF protection on state-changing endpoints; strict CORS policy.
@@ -764,8 +749,8 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 ### 9.5 Key Technical Decisions / ADRs (to author)
 
 - ADR-001: YAML schema for pipelines.
-- ADR-002: Python pipeline SDK surface and sandboxed execution model.
-- ADR-003: Shared internal build-graph representation for YAML + Python.
+- ~~ADR-002: Python pipeline SDK surface and sandboxed execution model.~~ **Removed** — Python pipelines dropped.
+- ADR-003: Internal build-graph representation for YAML pipelines.
 - ADR-004: Controller ↔ agent protocol (WebSocket vs gRPC).
 - ADR-005: Local-filesystem artifact & log storage layout, retention, and quota enforcement.
 - ADR-006: Secret & env-var encryption scheme and key management.
@@ -782,7 +767,7 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 - **UserRole** `(user_id, role_id, scope_type, scope_id)`
 - **Invite** `(id, email, role_id, token_hash, expires_at, created_by)`
 - **Project / Folder** `(id, parent_id, name, description, created_by, allow_ai_repo_context)`
-- **Pipeline** `(id, project_id, project_repository_id_nullable, name, source_repo_url, default_branch, definition_path, definition_format [yaml|python], enabled)`
+- **Pipeline** `(id, project_id, project_repository_id_nullable, name, source_repo_url, default_branch, definition_path, definition_format [yaml], enabled)`
 - **Trigger** `(id, pipeline_id, type, config_json)`
 - **WebhookEndpoint** `(id, pipeline_id, slug, secret_hash, created_at, last_used_at)` — legacy pipeline-scoped endpoint; superseded by `ProjectRepository` webhooks in §6.16.
 - **OutgoingWebhook** `(id, scope_type, scope_id, url, events[], secret_hash)`
@@ -808,9 +793,9 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 
 ---
 
-## 11. Pipeline Authoring Formats
+## 11. Pipeline Authoring Format
 
-MegooCI supports two equally-capable authoring formats. Both compile to the same internal build graph.
+MegooCI uses **YAML** as its single pipeline authoring format. All pipelines are defined as `megooci.yaml` files, edited in the UI with CodeMirror 6 syntax highlighting, and compiled to an internal build graph.
 
 ### 11.1 YAML — `megooci.yaml`
 
@@ -877,74 +862,14 @@ notifications:
     - slack: "#deploys"
 ```
 
-### 11.2 Python — `megooci.py`
+### 11.2 AI-assisted Pipeline Creation (Chat-based UI Flow)
 
-Python pipelines are expressed with the `megooci-sdk` package. The file is loaded by the controller inside a sandboxed subprocess; its job is to return a `Pipeline` object describing the build graph. Arbitrary Python logic is allowed at graph-construction time (loops, conditionals, helper functions), but no network or filesystem I/O.
-
-```python
-from megooci import (
-    Pipeline, Stage, Step, Parallel,
-    GithubPushTrigger, ScheduleTrigger, WebhookTrigger,
-    ChoiceParam, secret, env, param,
-)
-
-pipeline = Pipeline(
-    name="build-and-deploy-web",
-    triggers=[
-        GithubPushTrigger(branches=["main", "release/*"]),
-        ScheduleTrigger(cron="0 2 * * *"),
-        WebhookTrigger(slug="release-trigger"),
-    ],
-    parameters=[
-        ChoiceParam(
-            name="DEPLOY_ENV",
-            choices=["staging", "production"],
-            default="staging",
-        ),
-    ],
-    env={
-        "NODE_ENV": "production",
-        "LOG_LEVEL": "info",
-    },
-    agent_label="linux-docker",
-)
-
-pipeline.add(Stage("install", steps=[Step.run("npm ci")]))
-
-pipeline.add(Stage("test", parallel=[
-    Parallel("unit", steps=[Step.run("npm run test:unit")]),
-    Parallel("lint", steps=[Step.run("npm run lint")]),
-]))
-
-pipeline.add(Stage("build", steps=[
-    Step.run("npm run build"),
-    Step.upload_artifact(path=".next/", name="next-build"),
-]))
-
-deploy_steps = [
-    Step.run(
-        "./scripts/deploy.sh",
-        env={
-            "AWS_ACCESS_KEY_ID": secret("aws_access_key"),
-            "AWS_SECRET_ACCESS_KEY": secret("aws_secret_key"),
-            "ENV": param("DEPLOY_ENV"),
-        },
-    ),
-]
-pipeline.add(Stage("deploy", when=pipeline.when(branch="main"), steps=deploy_steps))
-
-pipeline.on_failure(slack="#ci-alerts")
-pipeline.on_success(slack="#deploys")
-```
-
-### 11.3 AI-generated Pipelines (UI Flow)
-
-1. User clicks **"Generate pipeline with AI"** on a new pipeline page.
-2. User picks the target format (**YAML** or **Python**) and, optionally, connects a Git repo.
-3. User describes the goal in plain English (e.g., "Build a FastAPI backend, run pytest with coverage, produce a Docker image, push to GHCR on main").
+1. User opens the pipeline creation page and clicks **"Generate with AI"** to open the chat panel alongside the YAML editor.
+2. User optionally connects a Git repo for context-aware generation.
+3. User describes the goal in plain English in the chat (e.g., "Build a FastAPI backend, run pytest with coverage, produce a Docker image, push to GHCR on main").
 4. Backend gathers repo context (manifest files, languages, existing config) within privacy limits (F-12.8).
-5. AI streams a draft pipeline; the UI renders it in the editor with a **Diff** view.
-6. User iterates via chat ("also add a nightly cron"), accepts changes, and saves.
+5. AI streams a draft YAML pipeline; the editor updates in real-time with syntax highlighting.
+6. User iterates via further chat messages ("also add a nightly cron", "run tests in parallel"), and the AI applies diffs to the YAML editor.
 7. On save, the pipeline is linted (`megooci lint`) and dry-run compiled; only valid pipelines can be committed.
 
 ---
@@ -985,9 +910,9 @@ pipeline.on_success(slack="#deploys")
 | Milestone | Target | Scope |
 | --- | --- | --- |
 | **M0 — Foundations** | Week 0–3 | Repo setup, CI/CD for MegooCI itself, ADRs, design system, DB schema, auth skeleton. |
-| **M1 — MVP (Alpha)** | Week 4–10 | Local executor, **YAML pipelines**, Git webhook (GitHub), live logs, basic UI, manual + cron triggers, local user auth with **signup env toggle**, local-FS artifact storage, env vars + secrets. |
-| **M2 — Beta** | Week 11–16 | Docker executor, remote SSH agents, **Python pipelines + SDK**, JUnit, Slack notifications, OIDC, RBAC, audit log, multi-branch, incoming + outgoing webhooks, **embedded OCI registry v1 (push/pull, deploy tokens, GC, UI)**. |
-| **M3 — 1.0 GA** | Week 17–22 | Matrix builds, parallel stages, templates, GitLab/Bitbucket, Helm chart, backup/restore, Prometheus metrics, **AI pipeline generator (v1: YAML + Python generation, chat-based edit)**, registry multi-arch + provenance links, hardening + pen-test. |
+| **M1 — MVP (Alpha)** | Week 4–10 | Local executor, **YAML pipelines with syntax-highlighted editor**, Git webhook (GitHub), live logs, basic UI, manual + cron triggers, local user auth with **signup env toggle**, local-FS artifact storage, env vars + secrets. |
+| **M2 — Beta** | Week 11–16 | Docker executor, remote SSH agents, JUnit, Slack notifications, OIDC, RBAC, audit log, multi-branch, incoming + outgoing webhooks, **embedded OCI registry v1 (push/pull, deploy tokens, GC, UI)**. |
+| **M3 — 1.0 GA** | Week 17–22 | Matrix builds, parallel stages, templates, GitLab/Bitbucket, Helm chart, backup/restore, Prometheus metrics, **AI pipeline assistant (v1: chat-based YAML generation + editing)**, registry multi-arch + provenance links, hardening + pen-test. |
 | **M4 — 1.1** | Post-GA | Kubernetes executor, SAML/LDAP, visual pipeline editor, Vault integration, OTel tracing, **AI fix-it suggestions on failed builds**, **registry image signing + Trivy vulnerability scans**. |
 | **M5 — 1.2+** | Post-GA | Auto-scaling agent pools, signed artifacts, cross-build comparison, AI provider fine-tuning hooks, **registry proxy cache for external registries**. (Note: **no plugin framework is planned**, per NG2.) |
 
@@ -1000,13 +925,13 @@ pipeline.on_success(slack="#deploys")
 | Scope creep chasing Jenkins parity | High | High | Strict priority labels (M/S/C); quarterly scope review; NG2 (no plugins) is a hard line. |
 | Celery is the wrong fit for long-running build orchestration | Medium | High | Prototype in M0; benchmark vs. custom scheduler; keep execution layer abstracted. |
 | Controller ↔ agent protocol instability | Medium | High | Early load testing; versioned protocol; ADR-004 upfront. |
-| Python pipelines enable arbitrary code execution on controller | High | Critical | Mandatory subprocess sandbox with time/memory limits; no network/FS I/O during graph construction; ADR-002. |
+| ~~Python pipelines enable arbitrary code execution on controller~~ | — | — | **Eliminated.** Python pipeline format has been removed; YAML-only pipelines pose no code-execution risk on the controller. |
 | Local filesystem storage limits scale / HA story | Medium | High | Document single-node vs clustered deployment; support RWX PVs on K8s; add disk-quota enforcement and retention policies from day one. |
 | Security vulnerability in execution sandbox | Medium | Critical | Container isolation by default, mandatory log masking, external audit pre-1.0. |
 | Adoption blocked by missing Jenkins plugin equivalents | High | Medium | Ship top-20 most-used integrations as first-party features; publish a compatibility matrix; AI assistant helps users author replacements for niche plugins as shell/container steps. |
 | AI provider outage / cost / data leakage | Medium | Medium | Feature is toggle-able (`MEGOOCI_AI_ENABLED`); support self-hosted Ollama for air-gapped environments; per-project privacy controls (F-12.8). |
 | AI generates incorrect or insecure pipelines | Medium | Medium | Output is always diff-reviewed before save; automatic `megooci lint` + dry-run compile gate save; logs of every AI-assisted change in the audit log. |
-| DSL schema churn across YAML + Python | Medium | Medium | `version: 1` field, semver for the Python SDK, shared build-graph IR (ADR-003) decouples authoring format from internal model. |
+| YAML schema churn | Low | Medium | `version: 1` field in YAML pipelines; build-graph IR (ADR-003) decouples YAML surface from internal model. Single format simplifies maintenance. |
 | Embedded registry disk exhaustion / runaway growth | High | High | Per-project quotas (F-13.19), tag-aware retention tied to build retention (F-13.10), scheduled GC with visibility (F-13.11), disk-usage dashboard. |
 | OCI spec conformance bugs block real-world Docker clients | Medium | High | Run the official OCI conformance test suite in our CI; test against `docker`, `podman`, `crane`, `containerd`, `helm`, and Kubernetes `kubelet` on every release. |
 | Unauthorized image pull from production hosts | Medium | Critical | Deploy tokens are scoped to a project, revocable, and expire; all pulls are audit-logged; anonymous pull is off by default; TLS required for non-localhost. |
@@ -1018,22 +943,21 @@ pipeline.on_success(slack="#deploys")
 
 1. What is our **upgrade/migration story** from Jenkins? Do we provide a best-effort `Jenkinsfile → megooci.yaml` converter (likely powered by the AI generator)?
 2. Should v1 ship with a **built-in artifact/package registry UI**, or purely filesystem-based artifact browsing?
-3. Should Python pipelines also be allowed to run **runtime hooks** (e.g. small Python callbacks during build execution), or strictly limited to graph-construction time?
+3. ~~Should Python pipelines also be allowed to run runtime hooks?~~ **Closed** — Python pipelines removed from scope.
 4. Is a **hosted/SaaS tier** part of the monetization plan, and if so, does v1 need multi-tenant primitives now?
 5. Do we require organizations to **bring their own AI API key**, or do we ever proxy through a MegooCI-hosted AI gateway?
 6. Single binary distribution (Go rewrite of controller) — is it worth it in v1.x for the "Sam" persona?
-7. Should the Python pipeline SDK also be usable **outside MegooCI** (e.g., to dry-run a pipeline locally), or is it controller-only?
+7. ~~Should the Python pipeline SDK also be usable outside MegooCI?~~ **Closed** — Python pipeline SDK is no longer part of the product. The `megooci-sdk` now focuses exclusively on API client functionality.
 
 ---
 
 ## 17. Glossary
 
-- **Pipeline** — a versioned definition of build/test/deploy stages, stored as `megooci.yaml` or `megooci.py` in a repo.
+- **Pipeline** — a versioned definition of build/test/deploy stages, stored as `megooci.yaml` in a repo.
 - **Build** — a single execution of a pipeline against a specific commit & parameters.
 - **Stage** — a logical group of steps within a build (e.g., `test`, `deploy`).
 - **Step** — an atomic unit of work within a stage (a shell command, script, or container invocation).
-- **Build graph** — the internal DAG representation that both YAML and Python pipelines compile to.
-- **Python SDK** — the `megooci-sdk` PyPI package used to author `megooci.py` pipelines and as a client library.
+- **Build graph** — the internal DAG representation that YAML pipelines compile to.
 - **Agent / Runner** — a worker process that executes build steps, connected to the controller.
 - **Controller** — the central server hosting the API, UI, scheduler, and orchestration logic.
 - **Executor** — the runtime environment a step is run in (local process, Docker container, K8s pod, SSH host).

@@ -24,8 +24,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { YamlEditor } from "@/components/ui/yaml-editor";
 
 function statusVariant(
   s: BuildStatus,
@@ -200,9 +200,7 @@ export default function PipelineDetailPage() {
               <h1 className="break-all text-xl font-bold sm:text-2xl">
                 {pipeline.name}
               </h1>
-              <Badge variant="secondary">
-                {pipeline.definition_format.toUpperCase()}
-              </Badge>
+              <Badge variant="secondary">YAML</Badge>
               <Badge variant={pipeline.enabled ? "success" : "pending"}>
                 {pipeline.enabled ? "Active" : "Inactive"}
               </Badge>
@@ -268,7 +266,7 @@ export default function PipelineDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Format</span>
-                  <span>{pipeline.definition_format.toUpperCase()}</span>
+                  <span>YAML</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Branch</span>
@@ -441,18 +439,13 @@ export default function PipelineDetailPage() {
               )}
             </CardHeader>
             <CardContent>
-              {editing ? (
-                <Textarea
-                  className="min-h-[400px] font-mono text-sm"
-                  value={editContent}
-                  onChange={(e) => setEditContent(e.target.value)}
-                  spellCheck={false}
-                />
-              ) : (
-                <pre className="overflow-x-auto rounded-lg bg-muted p-4 text-sm">
-                  <code>{pipeline.yaml_content || "No definition yet."}</code>
-                </pre>
-              )}
+              <YamlEditor
+                value={editing ? editContent : (pipeline.yaml_content || "")}
+                onChange={editing ? setEditContent : undefined}
+                readOnly={!editing}
+                minHeight="400px"
+                placeholder="No definition yet."
+              />
             </CardContent>
           </Card>
         )}

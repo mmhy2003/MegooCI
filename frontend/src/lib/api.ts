@@ -245,7 +245,7 @@ export interface Pipeline {
   source_repo_url: string | null;
   default_branch: string;
   definition_path: string;
-  definition_format: "yaml" | "python";
+  definition_format: "yaml";
   yaml_content: string | null;
   enabled: boolean;
   created_by: string;
@@ -259,7 +259,7 @@ export interface CreatePipelineRequest {
   project_repository_id?: string | null;
   source_repo_url?: string;
   default_branch?: string;
-  definition_format?: "yaml" | "python";
+  definition_format?: "yaml";
   yaml_content?: string;
 }
 

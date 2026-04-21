@@ -99,7 +99,7 @@ export default function PipelinesPage() {
                         {pipeline.name}
                       </CardTitle>
                       <Badge variant="secondary" className="ml-2 shrink-0">
-                        {pipeline.definition_format.toUpperCase()}
+                        YAML
                       </Badge>
                     </div>
                     {pipeline.source_repo_url && (

@@ -14,8 +14,8 @@ import {
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
+import { YamlEditor } from "@/components/ui/yaml-editor";
 import {
   Card,
   CardContent,
@@ -53,9 +53,6 @@ export default function NewPipelinePage() {
   const [projectId, setProjectId] = React.useState("");
   const [sourceRepo, setSourceRepo] = React.useState("");
   const [defaultBranch, setDefaultBranch] = React.useState("main");
-  const [definitionFormat, setDefinitionFormat] = React.useState<
-    "yaml" | "python"
-  >("yaml");
   const [yamlContent, setYamlContent] = React.useState(YAML_STARTER);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
@@ -124,7 +121,7 @@ export default function NewPipelinePage() {
         project_repository_id: projectRepositoryId || null,
         source_repo_url: sourceRepo || undefined,
         default_branch: defaultBranch,
-        definition_format: definitionFormat,
+        definition_format: "yaml",
         yaml_content: yamlContent,
       });
       toast.success("Pipeline created!");
@@ -152,7 +149,7 @@ export default function NewPipelinePage() {
           <CardHeader>
             <CardTitle>Create Pipeline</CardTitle>
             <CardDescription>
-              Define a new CI/CD pipeline with YAML or Python.
+              Define a new CI/CD pipeline with YAML.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -241,43 +238,14 @@ export default function NewPipelinePage() {
               </div>
 
               <div className="space-y-2">
-                <span className="text-sm font-medium">Definition format</span>
-                <div className="flex gap-4">
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input
-                      type="radio"
-                      name="format"
-                      value="yaml"
-                      checked={definitionFormat === "yaml"}
-                      onChange={() => setDefinitionFormat("yaml")}
-                      className="accent-primary"
-                    />
-                    <span className="text-sm">YAML</span>
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input
-                      type="radio"
-                      name="format"
-                      value="python"
-                      checked={definitionFormat === "python"}
-                      onChange={() => setDefinitionFormat("python")}
-                      className="accent-primary"
-                    />
-                    <span className="text-sm">Python</span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label htmlFor="config" className="text-sm font-medium">
+                <label className="text-sm font-medium">
                   Pipeline definition
                 </label>
-                <Textarea
-                  id="config"
-                  className="min-h-[320px] font-mono text-sm"
+                <YamlEditor
                   value={yamlContent}
-                  onChange={(e) => setYamlContent(e.target.value)}
-                  spellCheck={false}
+                  onChange={setYamlContent}
+                  minHeight="320px"
+                  placeholder="Enter your YAML pipeline definition..."
                 />
               </div>
 
