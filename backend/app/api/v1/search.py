@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.core.deps import get_current_active_user
+from app.core.deps import get_current_active_user, _collect_permissions
 from app.models.user import User
 from app.services.search import multi_search
 
@@ -72,9 +72,22 @@ def _build_hits(hits: list[dict[str, Any]]) -> list[SearchHit]:
 async def search(
     q: str = Query(..., min_length=1, max_length=200, description="Search query"),
     limit: int = Query(5, ge=1, le=20),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ) -> SearchResponse:
-    grouped = await multi_search(q, limit=limit)
+    perms = _collect_permissions(current_user)
+
+    allowed_indexes: list[str] = []
+    if current_user.is_admin or "projects.read" in perms:
+        allowed_indexes.append("projects")
+    if current_user.is_admin or "pipelines.read" in perms:
+        allowed_indexes.append("pipelines")
+    if current_user.is_admin or "builds.read" in perms:
+        allowed_indexes.append("builds")
+
+    if not allowed_indexes:
+        return SearchResponse(query=q, results=[])
+
+    grouped = await multi_search(q, limit=limit, indexes=allowed_indexes)
 
     results: list[SearchHit] = []
     results.extend(_project_hits(grouped.get("projects", [])))

@@ -20,6 +20,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
+import { RequireAdmin } from "@/components/require-permission";
 import {
   gitConnectionsApi,
   type GitConnection,
@@ -446,16 +447,22 @@ export default function IntegrationsPage() {
 
   if (!isAdmin) {
     return (
-      <AppLayout>
-        <div className="mx-auto max-w-3xl">
-          <Card>
-            <CardContent className="py-12 text-center text-sm text-muted-foreground">
-              Integrations are managed by administrators. Ask an admin to add
-              a Git provider connection.
-            </CardContent>
-          </Card>
-        </div>
-      </AppLayout>
+      <RequireAdmin
+        fallback={
+          <AppLayout>
+            <div className="mx-auto max-w-3xl">
+              <Card>
+                <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                  Integrations are managed by administrators. Ask an admin to add
+                  a Git provider connection.
+                </CardContent>
+              </Card>
+            </div>
+          </AppLayout>
+        }
+      >
+        <div />
+      </RequireAdmin>
     );
   }
 

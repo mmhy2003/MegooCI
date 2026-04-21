@@ -15,6 +15,29 @@ from app.models.user import User
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
+# ---------------------------------------------------------------------------
+# Scope helpers
+# ---------------------------------------------------------------------------
+
+def _collect_scoped_permissions(
+    user: User,
+    scope_type: str = "global",
+    scope_id: uuid.UUID | None = None,
+) -> set[str]:
+    """Gather permissions from roles matching the given scope **plus** all
+    global roles (global permissions always apply)."""
+    perms: set[str] = set()
+    if user.is_admin:
+        perms.add("admin")
+    for ur in user.user_roles:
+        if ur.role and ur.role.permissions:
+            if ur.scope_type == "global":
+                perms.update(ur.role.permissions)
+            elif ur.scope_type == scope_type and ur.scope_id == scope_id:
+                perms.update(ur.role.permissions)
+    return perms
+
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
@@ -65,11 +88,19 @@ async def get_current_active_user(
 async def get_current_admin_user(
     current_user: User = Depends(get_current_active_user),
 ) -> User:
-    if not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required"
-        )
-    return current_user
+    """Check that the user has admin-level access.
+
+    Accepts both the legacy ``is_admin`` boolean **and** the RBAC ``admin``
+    permission so the migration to pure RBAC is non-breaking.
+    """
+    if current_user.is_admin:
+        return current_user
+    perms = _collect_permissions(current_user)
+    if "admin" in perms:
+        return current_user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required"
+    )
 
 
 def _collect_permissions(user: User) -> set[str]:
@@ -93,6 +124,14 @@ def require_permission(permission: str) -> Callable:
             return current_user
         perms = _collect_permissions(current_user)
         if permission not in perms and "admin" not in perms:
+            import asyncio
+            from app.core.audit import record as audit_record
+
+            asyncio.ensure_future(audit_record(
+                action="permission_denied",
+                actor_id=current_user.id,
+                metadata={"permission": permission},
+            ))
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permission '{permission}' required",
@@ -100,6 +139,26 @@ def require_permission(permission: str) -> Callable:
         return current_user
 
     return _check
+
+
+def check_scoped_permission(
+    user: User,
+    permission: str,
+    scope_type: str,
+    scope_id: uuid.UUID | None,
+) -> None:
+    """Raise 403 if the user lacks *permission* in the given scope.
+
+    Call from endpoints after resolving the resource.
+    """
+    if user.is_admin:
+        return
+    perms = _collect_scoped_permissions(user, scope_type, scope_id)
+    if permission not in perms and "admin" not in perms:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission '{permission}' required for this {scope_type}",
+        )
 
 
 def get_user_primary_role_name(user: User) -> str | None:

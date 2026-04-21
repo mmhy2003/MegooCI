@@ -27,6 +27,7 @@ import { StageGraph, type Stage, type StageStatus } from "@/components/stage-gra
 import { BuildLogViewer, type LogLine } from "@/components/build-log-viewer";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { usePermission } from "@/hooks/use-permission";
+import { useAuthStore } from "@/lib/auth";
 
 function statusVariant(
   s: BuildStatus,
@@ -77,6 +78,7 @@ export default function BuildDetailPage() {
   const router = useRouter();
   const id = params.id as string;
   const canManageBuilds = usePermission("builds.manage");
+  const { accessToken } = useAuthStore();
 
   const [build, setBuild] = React.useState<BuildDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -86,16 +88,17 @@ export default function BuildDetailPage() {
   const isActive = isRunning || build?.status === "pending";
 
   const wsUrl = React.useMemo(() => {
-    if (!isActive || typeof window === "undefined") return null;
+    if (!isActive || !accessToken || typeof window === "undefined") return null;
+    const tokenParam = `token=${encodeURIComponent(accessToken)}`;
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
     if (apiBase) {
       const url = new URL(apiBase);
       const wsProto = url.protocol === "https:" ? "wss:" : "ws:";
-      return `${wsProto}//${url.host}/api/v1/ws/builds/${id}/logs`;
+      return `${wsProto}//${url.host}/api/v1/ws/builds/${id}/logs?${tokenParam}`;
     }
     const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${wsProto}//${window.location.host}/api/v1/ws/builds/${id}/logs`;
-  }, [isActive, id]);
+    return `${wsProto}//${window.location.host}/api/v1/ws/builds/${id}/logs?${tokenParam}`;
+  }, [isActive, id, accessToken]);
   const { messages } = useWebSocket(wsUrl);
 
   const [logLines, setLogLines] = React.useState<LogLine[]>([]);

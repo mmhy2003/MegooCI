@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.agent_auth import get_current_agent
-from app.core.deps import get_current_active_user, get_current_admin_user
+from app.core.deps import require_permission
 from app.core.security import (
     agent_token_prefix,
     generate_agent_token,
@@ -54,7 +54,7 @@ async def list_agents(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("agents.read")),
 ) -> list[Agent]:
     query = select(Agent).order_by(Agent.name).offset(skip).limit(limit)
     if status_filter:
@@ -75,7 +75,7 @@ async def list_agents(
 async def register_agent(
     body: AgentCreate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("agents.manage")),
 ) -> dict:
     existing = await db.execute(select(Agent).where(Agent.name == body.name))
     if existing.scalar_one_or_none() is not None:
@@ -125,7 +125,7 @@ async def register_agent(
 async def get_agent(
     agent_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("agents.read")),
 ) -> Agent:
     agent = await db.get(Agent, agent_id)
     if agent is None:
@@ -140,7 +140,7 @@ async def update_agent(
     agent_id: uuid.UUID,
     body: AgentUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("agents.manage")),
 ) -> Agent:
     agent = await db.get(Agent, agent_id)
     if agent is None:
@@ -161,7 +161,7 @@ async def update_agent(
 async def delete_agent(
     agent_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("agents.manage")),
 ) -> None:
     agent = await db.get(Agent, agent_id)
     if agent is None:
@@ -179,7 +179,7 @@ async def delete_agent(
 async def rotate_agent_token(
     agent_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("agents.manage")),
 ) -> dict:
     """Issue a fresh token for an agent.
 

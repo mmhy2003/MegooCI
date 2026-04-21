@@ -4,13 +4,18 @@ Gate resolution endpoints for wait_webhook and wait_input step types.
 These endpoints allow external systems (webhooks) and users (approvals) to
 resume a paused pipeline step by writing a payload to the Redis key that
 the corresponding wait handler is polling.
+
+Webhook gates require a per-step gate token passed via the
+``X-Gate-Token`` header or ``gate_token`` query parameter.  The token is
+generated when the wait_webhook step begins executing and stored in Redis
+at ``gate:token:{step_id}``.
 """
 
 import json
 import uuid
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,13 +43,46 @@ def _gate_key(step_id: str, gate_type: str) -> str:
     return f"gate:{gate_type}:{step_id}"
 
 
+def _gate_token_key(step_id: str) -> str:
+    return f"gate:token:{step_id}"
+
+
+async def _verify_gate_token(step_id: uuid.UUID, provided_token: str | None) -> None:
+    """Check the caller-supplied gate token against the one stored in Redis."""
+    if not provided_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing gate token. Supply via X-Gate-Token header or gate_token query parameter.",
+        )
+    settings = get_settings()
+    redis_client = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
+    try:
+        stored_token = await redis_client.get(_gate_token_key(str(step_id)))
+    finally:
+        await redis_client.aclose()
+
+    if stored_token is None or stored_token != provided_token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid gate token",
+        )
+
+
 @router.post("/webhook/{step_id}", status_code=status.HTTP_202_ACCEPTED)
 async def resolve_webhook_gate(
     step_id: uuid.UUID,
     body: WebhookGatePayload,
     db: AsyncSession = Depends(get_db),
+    x_gate_token: str | None = Header(None),
+    gate_token: str | None = Query(None),
 ) -> dict:
-    """Called by an external system to unblock a ``wait_webhook`` step."""
+    """Called by an external system to unblock a ``wait_webhook`` step.
+
+    Requires a per-step gate token for authentication (via ``X-Gate-Token``
+    header or ``gate_token`` query parameter).
+    """
+    await _verify_gate_token(step_id, x_gate_token or gate_token)
+
     step = await db.get(Step, step_id)
     if step is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found")

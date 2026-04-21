@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.deps import get_current_active_user, get_current_admin_user
+from app.core.deps import require_permission
 from app.core.security import hash_password
 from app.database import get_db
 from app.models.role import Role, UserRole
@@ -50,7 +50,7 @@ async def list_users(
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("users.manage")),
 ) -> list[dict]:
     result = await db.execute(
         select(User)
@@ -66,7 +66,7 @@ async def list_users(
 async def create_user(
     body: UserCreateRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("users.manage")),
 ) -> dict:
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none() is not None:
@@ -118,7 +118,7 @@ async def create_user(
 async def get_user(
     user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("users.manage")),
 ) -> dict:
     result = await db.execute(
         select(User)
@@ -136,7 +136,7 @@ async def update_user(
     user_id: uuid.UUID,
     body: UserUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_permission("users.manage")),
 ) -> dict:
     result = await db.execute(
         select(User)
@@ -164,7 +164,7 @@ async def update_user(
                 detail="You cannot remove your own admin privilege",
             )
         user.is_admin = body.is_admin
-    await db.flush()
+    await db.commit()
     await db.refresh(user)
     return _user_to_detail(user)
 
@@ -174,7 +174,7 @@ async def assign_role(
     user_id: uuid.UUID,
     body: UserRoleAssign,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("users.manage")),
 ) -> dict:
     user_result = await db.execute(select(User).where(User.id == user_id))
     if user_result.scalar_one_or_none() is None:
@@ -224,7 +224,7 @@ async def remove_role(
     user_id: uuid.UUID,
     user_role_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("users.manage")),
 ) -> None:
     result = await db.execute(
         select(UserRole).where(UserRole.id == user_role_id, UserRole.user_id == user_id)

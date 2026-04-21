@@ -1,15 +1,69 @@
 import uuid
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
 from app.config import get_settings
+from app.core.security import decode_token
+from app.database import async_session
+from app.models.user import User
+from app.models.role import UserRole
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 router = APIRouter()
 
 
+async def _authenticate_ws(token: str | None) -> bool:
+    """Validate a JWT token for WebSocket connections.
+
+    Returns True if the token belongs to an active user with the
+    ``builds.read`` permission (or admin status).
+    """
+    if not token:
+        return False
+    try:
+        payload = decode_token(token)
+    except ValueError:
+        return False
+    if payload.get("type") != "access":
+        return False
+    user_id_str = payload.get("sub")
+    if not user_id_str:
+        return False
+    try:
+        user_id = uuid.UUID(user_id_str)
+    except ValueError:
+        return False
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(User)
+            .options(selectinload(User.user_roles).selectinload(UserRole.role))
+            .where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        return False
+    if user.is_admin:
+        return True
+    for ur in user.user_roles:
+        if ur.role and ur.role.permissions and "builds.read" in ur.role.permissions:
+            return True
+    return False
+
+
 @router.websocket("/ws/builds/{build_id}/logs")
-async def build_logs_ws(websocket: WebSocket, build_id: uuid.UUID) -> None:
+async def build_logs_ws(
+    websocket: WebSocket,
+    build_id: uuid.UUID,
+    token: str | None = Query(None),
+) -> None:
+    if not await _authenticate_ws(token):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await websocket.accept()
     settings = get_settings()
 

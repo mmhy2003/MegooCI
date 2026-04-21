@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.deps import get_current_active_user
 from app.core.email import send_password_reset_email
+from app.core.rate_limit import rate_limit
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -38,6 +39,7 @@ router = APIRouter()
 async def signup(
     body: SignupRequest,
     db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit("signup", max_requests=5, window_seconds=300)),
 ) -> dict:
     settings = get_settings()
 
@@ -91,27 +93,46 @@ async def signup(
 async def login(
     body: LoginRequest,
     db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit("login", max_requests=10, window_seconds=60)),
 ) -> dict:
+    from app.core.audit import record as audit_record
+
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
     if user is None or user.hashed_password is None:
+        await audit_record(
+            action="login_failed",
+            metadata={"email": body.email, "reason": "invalid_credentials"},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
     if not verify_password(body.password, user.hashed_password):
+        await audit_record(
+            action="login_failed",
+            actor_id=user.id,
+            metadata={"reason": "wrong_password"},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
     if not user.is_active:
+        await audit_record(
+            action="login_failed",
+            actor_id=user.id,
+            metadata={"reason": "account_deactivated"},
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
         )
+
+    await audit_record(action="login_success", actor_id=user.id)
 
     token_data = {"sub": str(user.id)}
     return {
@@ -221,6 +242,7 @@ async def change_password(
 async def forgot_password(
     body: ForgotPasswordRequest,
     db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit("forgot_password", max_requests=5, window_seconds=300)),
 ) -> dict:
     """Request a password-reset email.
 
@@ -248,6 +270,7 @@ async def forgot_password(
 async def reset_password(
     body: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit("reset_password", max_requests=5, window_seconds=300)),
 ) -> dict:
     """Reset a user's password using the token from the forgot-password email."""
     import uuid as _uuid

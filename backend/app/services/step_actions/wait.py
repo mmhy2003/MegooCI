@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 from typing import Any, AsyncIterator
 
 import redis.asyncio as aioredis
@@ -46,6 +47,11 @@ def _gate_key(step_id: str, gate_type: str) -> str:
     return f"gate:{gate_type}:{step_id}"
 
 
+def _gate_token_key(step_id: str) -> str:
+    """Redis key where the per-step gate auth token is stored."""
+    return f"gate:token:{step_id}"
+
+
 class WaitWebhookHandler(StepActionHandler):
     """Pauses the pipeline until an external webhook hits the gate endpoint.
 
@@ -64,6 +70,15 @@ class WaitWebhookHandler(StepActionHandler):
         name = config.get("name", "webhook")
         match_rules: dict[str, str] = config.get("match", {})
 
+        settings = get_settings()
+        redis_client = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
+        key = _gate_key(str(ctx.step_id), "webhook")
+
+        gate_token = secrets.token_urlsafe(32)
+        await redis_client.set(
+            _gate_token_key(str(ctx.step_id)), gate_token, ex=timeout + 300,
+        )
+
         yield LogLine(
             stream="system",
             content=f"Waiting for webhook '{name}' (timeout {timeout}s)…\n",
@@ -72,10 +87,10 @@ class WaitWebhookHandler(StepActionHandler):
             stream="system",
             content=f"Gate endpoint: POST /api/v1/gates/webhook/{ctx.step_id}\n",
         )
-
-        settings = get_settings()
-        redis_client = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
-        key = _gate_key(str(ctx.step_id), "webhook")
+        yield LogLine(
+            stream="system",
+            content=f"Gate token (pass via X-Gate-Token header): {gate_token}\n",
+        )
 
         try:
             elapsed = 0.0

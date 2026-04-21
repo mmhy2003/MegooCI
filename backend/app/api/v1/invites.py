@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
-from app.core.deps import get_current_admin_user
+from app.core.deps import require_permission
 from app.core.email import send_invite_email
 from app.core.security import hash_password
 from app.database import get_db
@@ -39,7 +39,7 @@ def _hash_token(token: str) -> str:
 async def list_invites(
     status_filter: str | None = None,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("invites.manage")),
 ) -> list[dict]:
     query = (
         select(Invite)
@@ -64,7 +64,7 @@ async def list_invites(
 async def create_invite(
     body: InviteCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_permission("invites.manage")),
 ) -> dict:
     settings = get_settings()
 
@@ -192,7 +192,7 @@ async def accept_invite(
 async def revoke_invite(
     invite_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("invites.manage")),
 ) -> None:
     result = await db.execute(select(Invite).where(Invite.id == invite_id))
     invite = result.scalar_one_or_none()
@@ -210,7 +210,7 @@ async def revoke_invite(
 async def resend_invite(
     invite_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_permission("invites.manage")),
 ) -> dict:
     settings = get_settings()
     result = await db.execute(

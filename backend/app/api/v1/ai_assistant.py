@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import get_current_active_user
+from app.core.deps import require_permission
 from app.database import get_db
 from app.models.secret import EnvVar, Secret
 from app.models.user import User
@@ -176,10 +176,14 @@ class AssistantResponse(BaseModel):
 
 
 async def _build_project_context(
-    db: AsyncSession, project_id: str,
+    db: AsyncSession, project_id: str, *, include_values: bool = False,
 ) -> str | None:
-    """Fetch secret names and env var names/values for a project and return
-    a context block the LLM can reference."""
+    """Fetch secret names and env var names for a project and return a
+    context block the LLM can reference.
+
+    Plaintext env var values are only included when *include_values* is
+    True (i.e. the caller has ``secrets.read`` permission).
+    """
     try:
         pid = uuid.UUID(project_id)
     except ValueError:
@@ -218,8 +222,10 @@ async def _build_project_context(
         for name, value, is_ref in env_vars:
             if is_ref:
                 var_lines.append(f"  - `{name}` (references a secret)")
-            else:
+            elif include_values:
                 var_lines.append(f"  - `{name}` = `{value}`")
+            else:
+                var_lines.append(f"  - `{name}`")
         parts.append(
             "Available project environment variables (use via ${{ env.NAME }}):\n"
             + "\n".join(var_lines)
@@ -232,8 +238,10 @@ async def _build_project_context(
 async def pipeline_assistant(
     body: AssistantRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("pipelines.manage")),
 ) -> AssistantResponse:
+    from app.core.deps import _collect_permissions
+
     settings = get_settings()
 
     if not settings.MEGOOCI_AI_ENABLED:
@@ -247,10 +255,15 @@ async def pipeline_assistant(
             detail="AI API key is not configured",
         )
 
+    user_perms = _collect_permissions(current_user)
+    can_read_secrets = current_user.is_admin or "secrets.read" in user_perms
+
     system_content = SYSTEM_PROMPT
 
     if body.project_id:
-        project_ctx = await _build_project_context(db, body.project_id)
+        project_ctx = await _build_project_context(
+            db, body.project_id, include_values=can_read_secrets,
+        )
         if project_ctx:
             system_content += (
                 "\n\n## Project Context\n"

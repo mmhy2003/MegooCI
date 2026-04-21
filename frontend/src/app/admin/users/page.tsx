@@ -21,6 +21,7 @@ import {
   Send,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
+import { RequireAdmin } from "@/components/require-permission";
 import { useAuthStore } from "@/lib/auth";
 import {
   usersApi,
@@ -129,7 +130,13 @@ export default function AdminUsersPage() {
   const [createdPassword, setCreatedPassword] = React.useState<string | null>(null);
   const [createdUserEmail, setCreatedUserEmail] = React.useState("");
 
+  const isAdmin = currentUser?.is_admin ?? false;
+
   const loadData = React.useCallback(async () => {
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
     try {
       const [u, r, i] = await Promise.all([
         usersApi.list(),
@@ -144,7 +151,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   React.useEffect(() => {
     loadData();
@@ -311,13 +318,13 @@ export default function AdminUsersPage() {
     }
   };
 
-  if (!currentUser?.is_admin) {
+  if (!isAdmin) {
     return (
-      <AppLayout>
-        <div className="flex items-center justify-center py-24">
-          <p className="text-muted-foreground">Admin access required.</p>
-        </div>
-      </AppLayout>
+      <RequireAdmin>
+        <AppLayout>
+          <div />
+        </AppLayout>
+      </RequireAdmin>
     );
   }
 

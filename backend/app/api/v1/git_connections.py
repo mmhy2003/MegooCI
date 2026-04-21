@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import get_current_active_user, get_current_admin_user
+from app.core.deps import require_permission
 from app.core.security import credential_hint, decrypt_secret, encrypt_secret
 from app.database import get_db
 from app.models.git_integration import GitProviderConnection, ProjectRepository
@@ -65,7 +65,7 @@ def _apply_validation_result(
 @router.get("/", response_model=list[ConnectionResponse])
 async def list_connections(
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("git_connections.manage")),
 ) -> list[GitProviderConnection]:
     result = await db.execute(
         select(GitProviderConnection).order_by(GitProviderConnection.created_at.desc())
@@ -81,7 +81,7 @@ async def list_connections(
 async def create_connection(
     body: ConnectionCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(require_permission("git_connections.manage")),
 ) -> GitProviderConnection:
     if body.auth_mode != "pat":
         # OAuth is Phase 2; model already has the columns so future work
@@ -134,7 +134,7 @@ async def create_connection(
 async def get_connection(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("git_connections.manage")),
 ) -> GitProviderConnection:
     connection = await db.get(GitProviderConnection, connection_id)
     if connection is None:
@@ -149,7 +149,7 @@ async def update_connection(
     connection_id: uuid.UUID,
     body: ConnectionUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("git_connections.manage")),
 ) -> GitProviderConnection:
     connection = await db.get(GitProviderConnection, connection_id)
     if connection is None:
@@ -189,7 +189,7 @@ async def update_connection(
 async def delete_connection(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("git_connections.manage")),
 ) -> None:
     connection = await db.get(GitProviderConnection, connection_id)
     if connection is None:
@@ -220,7 +220,7 @@ async def delete_connection(
 async def test_connection(
     connection_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("git_connections.manage")),
 ) -> ConnectionTestResult:
     connection = await db.get(GitProviderConnection, connection_id)
     if connection is None:
@@ -248,7 +248,7 @@ async def list_provider_repositories(
     connection_id: uuid.UUID,
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("projects.manage")),
 ) -> ProviderRepositoryList:
     """List repositories visible to this connection's PAT.
 

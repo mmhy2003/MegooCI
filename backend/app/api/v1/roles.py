@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_admin_user
+from app.core.deps import require_permission
+from app.core.permissions import validate_permissions
 from app.database import get_db
 from app.models.role import Role
 from app.models.user import User
@@ -16,7 +17,7 @@ router = APIRouter()
 @router.get("/", response_model=list[RoleResponse])
 async def list_roles(
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("roles.manage")),
 ) -> list[Role]:
     result = await db.execute(select(Role).order_by(Role.name))
     return list(result.scalars().all())
@@ -26,7 +27,7 @@ async def list_roles(
 async def get_role(
     role_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("roles.manage")),
 ) -> Role:
     result = await db.execute(select(Role).where(Role.id == role_id))
     role = result.scalar_one_or_none()
@@ -39,8 +40,15 @@ async def get_role(
 async def create_role(
     body: RoleCreate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("roles.manage")),
 ) -> Role:
+    invalid = validate_permissions(body.permissions)
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid permission(s): {', '.join(invalid)}",
+        )
+
     existing = await db.execute(select(Role).where(Role.name == body.name))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(
@@ -64,8 +72,16 @@ async def update_role(
     role_id: uuid.UUID,
     body: RoleUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("roles.manage")),
 ) -> Role:
+    if body.permissions is not None:
+        invalid = validate_permissions(body.permissions)
+        if invalid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid permission(s): {', '.join(invalid)}",
+            )
+
     result = await db.execute(select(Role).where(Role.id == role_id))
     role = result.scalar_one_or_none()
     if role is None:
@@ -98,7 +114,7 @@ async def update_role(
 async def delete_role(
     role_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_admin_user),
+    _current_user: User = Depends(require_permission("roles.manage")),
 ) -> None:
     result = await db.execute(select(Role).where(Role.id == role_id))
     role = result.scalar_one_or_none()
