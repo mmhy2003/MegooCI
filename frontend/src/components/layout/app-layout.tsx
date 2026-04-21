@@ -6,6 +6,7 @@ import { useAuthStore } from "@/lib/auth";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import { CommandPalette } from "@/components/command-palette";
+import { NotificationProvider } from "@/contexts/notification-context";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -49,22 +50,24 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   if (!accessToken) return null;
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar
-        mobileOpen={mobileOpen}
-        onCloseMobile={() => setMobileOpen(false)}
-      />
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <Header
-          onOpenMobile={() => setMobileOpen(true)}
-          onOpenSearch={() => setSearchOpen(true)}
+    <NotificationProvider>
+      <div className="flex h-screen overflow-hidden">
+        <Sidebar
+          mobileOpen={mobileOpen}
+          onCloseMobile={() => setMobileOpen(false)}
         />
-        <main className="flex-1 overflow-auto bg-background p-4 sm:p-6">
-          {children}
-        </main>
-      </div>
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <Header
+            onOpenMobile={() => setMobileOpen(true)}
+            onOpenSearch={() => setSearchOpen(true)}
+          />
+          <main className="flex-1 overflow-auto bg-background p-4 sm:p-6">
+            {children}
+          </main>
+        </div>
 
-      <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
-    </div>
+        <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
+      </div>
+    </NotificationProvider>
   );
 }

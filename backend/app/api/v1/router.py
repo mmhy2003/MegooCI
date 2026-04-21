@@ -17,6 +17,7 @@ from app.api.v1 import (
     search,
     secrets,
     system,
+    user_notifications,
     users,
     webhooks_git,
     websocket,
@@ -44,6 +45,11 @@ api_v1_router.include_router(
 )
 api_v1_router.include_router(
     notifications.router, prefix="/notifications", tags=["notifications"]
+)
+api_v1_router.include_router(
+    user_notifications.router,
+    prefix="/user-notifications",
+    tags=["user-notifications"],
 )
 api_v1_router.include_router(search.router, prefix="/search", tags=["search"])
 api_v1_router.include_router(gates.router, prefix="/gates", tags=["gates"])

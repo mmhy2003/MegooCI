@@ -23,6 +23,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.models.build import Build, LogChunk, Stage, Step
+from app.services.in_app_notifications import notify_user, get_admin_user_ids
 from app.services.agent_dispatcher import (
     dispatch_step_to_agent,
     pick_online_agent,
@@ -163,6 +164,10 @@ async def execute_build(
             "build_id": str(build_id),
             "status": final_status,
         })
+
+        await _send_build_finished_notification(
+            db, redis_client, build, final_status
+        )
 
     await redis_client.aclose()
 
@@ -435,3 +440,32 @@ async def _try_dispatch_to_agent(
         build_id=build_id,
         agent_id=agent.id,
     )
+
+
+async def _send_build_finished_notification(
+    db: AsyncSession,
+    redis_client: aioredis.Redis,
+    build: Build,
+    final_status: str,
+) -> None:
+    """Send an in-app notification to the user who triggered the build."""
+    if build.triggered_by is None:
+        return
+
+    status_label = {"success": "succeeded", "failed": "failed", "cancelled": "was cancelled"}
+    verb = status_label.get(final_status, final_status)
+
+    try:
+        await notify_user(
+            db,
+            redis_client,
+            user_id=build.triggered_by,
+            type=f"build_{final_status}",
+            title=f"Build #{build.number} {verb}",
+            body=f"Build #{build.number} on branch {build.branch or 'default'} {verb}.",
+            entity_type="build",
+            entity_id=build.id,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()

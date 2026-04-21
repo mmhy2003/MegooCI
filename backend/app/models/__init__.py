@@ -11,6 +11,7 @@ from app.models.git_integration import (
 from app.models.invite import Invite
 from app.models.notification import NotificationChannel, NotificationDelivery
 from app.models.pipeline import Pipeline
+from app.models.user_notification import UserNotification
 from app.models.project import Project
 from app.models.role import Role, UserRole
 from app.models.secret import EnvVar, Secret
@@ -41,4 +42,5 @@ __all__ = [
     "WebhookDelivery",
     "NotificationChannel",
     "NotificationDelivery",
+    "UserNotification",
 ]

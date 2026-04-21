@@ -28,6 +28,8 @@ from typing import Awaitable, Callable
 import redis.asyncio as aioredis
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+import redis.asyncio as _aioredis_top
+
 from app.config import get_settings
 from app.core.agent_auth import (
     AgentAuthError,
@@ -42,6 +44,7 @@ from app.services.agent_dispatcher import (
     step_result_channel,
     tasks_list_key,
 )
+from app.services.in_app_notifications import get_admin_user_ids, notify_users
 
 router = APIRouter()
 
@@ -132,13 +135,36 @@ async def agent_control_ws(
         except Exception:
             pass
 
-        # Flip to offline so the dispatcher stops choosing us.
+        # Flip to offline so the dispatcher stops choosing us, and
+        # notify admins that this agent disconnected.
         async with async_session() as db:
             agent = await db.get(Agent, agent_pk)
             if agent is not None:
                 agent.status = "offline"
                 agent.connected_at = None
                 await db.commit()
+
+                try:
+                    settings = get_settings()
+                    notif_redis = _aioredis_top.from_url(
+                        settings.MEGOOCI_REDIS_URL, decode_responses=True
+                    )
+                    admin_ids = await get_admin_user_ids(db)
+                    if admin_ids:
+                        await notify_users(
+                            db,
+                            notif_redis,
+                            user_ids=admin_ids,
+                            type="agent_offline",
+                            title=f"Agent '{agent.name}' went offline",
+                            body=f"Agent '{agent.name}' disconnected and is no longer available for builds.",
+                            entity_type="agent",
+                            entity_id=agent.id,
+                        )
+                        await db.commit()
+                    await notif_redis.aclose()
+                except Exception:
+                    pass
 
 
 # ----------------------------------------------------------------------------

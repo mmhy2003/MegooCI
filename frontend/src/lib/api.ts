@@ -1132,3 +1132,62 @@ export const aiAssistantApi = {
       body: JSON.stringify(data),
     }),
 };
+
+// ------------------------------------------------------------------
+// In-App User Notifications
+// ------------------------------------------------------------------
+export type UserNotificationType =
+  | "build_success"
+  | "build_failed"
+  | "build_cancelled"
+  | "agent_offline"
+  | "agent_online"
+  | "invite_received"
+  | "invite_accepted"
+  | "role_assigned"
+  | "role_removed"
+  | "pipeline_enabled"
+  | "pipeline_disabled";
+
+export interface UserNotification {
+  id: string;
+  user_id: string;
+  type: UserNotificationType | string;
+  title: string;
+  body: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface UnreadCountResponse {
+  count: number;
+}
+
+export const userNotificationsApi = {
+  list: (params?: { unread_only?: boolean; limit?: number; before?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.unread_only) qs.set("unread_only", "true");
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.before) qs.set("before", params.before);
+    const query = qs.toString();
+    return fetchApi<UserNotification[]>(
+      `/api/v1/user-notifications${query ? `?${query}` : ""}`,
+    );
+  },
+
+  unreadCount: () =>
+    fetchApi<UnreadCountResponse>("/api/v1/user-notifications/unread-count"),
+
+  markRead: (id: string) =>
+    fetchApi<UserNotification>(
+      `/api/v1/user-notifications/${id}/read`,
+      { method: "PATCH" },
+    ),
+
+  markAllRead: () =>
+    fetchApi<void>("/api/v1/user-notifications/mark-all-read", {
+      method: "POST",
+    }),
+};
