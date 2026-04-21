@@ -1,8 +1,11 @@
-"""Lightweight async email helper for sending invite notifications.
+"""Lightweight email helper for sending invite and password-reset emails.
 
-Falls back gracefully when SMTP is not configured — the invite link is still
-returned in the API response so admins can copy-paste it manually.
+Email is now configured via NotificationChannel (channel_type='email') in the
+admin UI instead of env vars. Falls back gracefully when no email channel is
+configured — the invite link is still returned in the API response so admins
+can copy-paste it manually.
 """
+
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -13,24 +16,67 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+def _get_email_config() -> dict | None:
+    """Load SMTP config from the first enabled email notification channel.
+
+    Returns the decrypted config dict, or None if no email channel exists.
+    """
+    import asyncio
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.notification import NotificationChannel
+
+    async def _load() -> dict | None:
+        from app.database import async_session
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(NotificationChannel).where(
+                    NotificationChannel.channel_type == "email",
+                    NotificationChannel.enabled.is_(True),
+                ).limit(1)
+            )
+            channel = result.scalar_one_or_none()
+            if channel is None:
+                return None
+
+            from app.services.notification_service import decrypt_channel_config
+            return decrypt_channel_config(channel.config_encrypted)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            return pool.submit(lambda: asyncio.run(_load())).result(timeout=10)
+    else:
+        return asyncio.run(_load())
+
+
 def is_smtp_configured() -> bool:
-    settings = get_settings()
-    return bool(settings.MEGOOCI_SMTP_HOST and settings.MEGOOCI_SMTP_USER)
+    config = _get_email_config()
+    return config is not None and bool(config.get("smtp_host"))
 
 
 def send_invite_email(to_email: str, invite_link: str, inviter_name: str | None = None) -> bool:
-    """Send an invitation email. Returns True on success, False on failure.
-
-    If SMTP is not configured, logs a warning and returns False (non-fatal).
-    """
-    settings = get_settings()
-    if not is_smtp_configured():
+    """Send an invitation email. Returns True on success, False on failure."""
+    config = _get_email_config()
+    if not config or not config.get("smtp_host"):
         logger.warning(
-            "SMTP not configured — skipping invite email to %s. "
+            "No email channel configured — skipping invite email to %s. "
             "Share the invite link manually: %s",
             to_email, invite_link,
         )
         return False
+
+    settings = get_settings()
+    from_email = config.get("from_email", "noreply@megooci.local")
+    from_name = config.get("from_name", "MegooCI")
 
     subject = "You've been invited to MegooCI"
     invited_by = f" by {inviter_name}" if inviter_name else ""
@@ -68,24 +114,27 @@ def send_invite_email(to_email: str, invite_link: str, inviter_name: str | None 
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = f"{settings.MEGOOCI_SMTP_FROM_NAME} <{settings.MEGOOCI_SMTP_FROM_EMAIL}>"
+    msg["From"] = f"{from_name} <{from_email}>"
     msg["To"] = to_email
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    return _send_email(to_email, msg)
+    return _send_email(config, to_email, msg)
 
 
 def send_password_reset_email(to_email: str, reset_link: str) -> bool:
     """Send a password-reset email. Returns True on success, False on failure."""
-    settings = get_settings()
-    if not is_smtp_configured():
+    config = _get_email_config()
+    if not config or not config.get("smtp_host"):
         logger.warning(
-            "SMTP not configured — skipping password-reset email to %s. "
+            "No email channel configured — skipping password-reset email to %s. "
             "Reset link: %s",
             to_email, reset_link,
         )
         return False
+
+    from_email = config.get("from_email", "noreply@megooci.local")
+    from_name = config.get("from_name", "MegooCI")
 
     subject = "Reset your MegooCI password"
 
@@ -122,27 +171,33 @@ def send_password_reset_email(to_email: str, reset_link: str) -> bool:
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = f"{settings.MEGOOCI_SMTP_FROM_NAME} <{settings.MEGOOCI_SMTP_FROM_EMAIL}>"
+    msg["From"] = f"{from_name} <{from_email}>"
     msg["To"] = to_email
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    return _send_email(to_email, msg)
+    return _send_email(config, to_email, msg)
 
 
-def _send_email(to_email: str, msg: MIMEMultipart) -> bool:
-    settings = get_settings()
+def _send_email(config: dict, to_email: str, msg: MIMEMultipart) -> bool:
     try:
-        if settings.MEGOOCI_SMTP_TLS:
-            server = smtplib.SMTP(settings.MEGOOCI_SMTP_HOST, settings.MEGOOCI_SMTP_PORT)
+        host = config["smtp_host"]
+        port = int(config.get("smtp_port", 587))
+        use_tls = config.get("tls", True)
+        user = config.get("smtp_user", "")
+        password = config.get("smtp_password", "")
+        from_email = config.get("from_email", "noreply@megooci.local")
+
+        if use_tls:
+            server = smtplib.SMTP(host, port)
             server.starttls()
         else:
-            server = smtplib.SMTP(settings.MEGOOCI_SMTP_HOST, settings.MEGOOCI_SMTP_PORT)
+            server = smtplib.SMTP(host, port)
 
-        if settings.MEGOOCI_SMTP_USER:
-            server.login(settings.MEGOOCI_SMTP_USER, settings.MEGOOCI_SMTP_PASSWORD)
+        if user:
+            server.login(user, password)
 
-        server.sendmail(settings.MEGOOCI_SMTP_FROM_EMAIL, to_email, msg.as_string())
+        server.sendmail(from_email, to_email, msg.as_string())
         server.quit()
         logger.info("Email sent to %s", to_email)
         return True

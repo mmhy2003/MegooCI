@@ -3,6 +3,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import {
+  Bell,
   ChevronDown,
   ChevronRight,
   Terminal,
@@ -168,6 +169,21 @@ stages:
     allowed_users:
       - admin
       - lead`,
+  },
+  {
+    id: "notify",
+    title: "Send Notification",
+    icon: <Bell className="h-4 w-4" />,
+    description:
+      "Send a notification through a configured channel (email, Slack, or Telegram). Channels are set up by admins under Integrations > Notification Channels.",
+    yaml: `- name: notify-team
+  notify:
+    channel: "deploy-alerts"
+    message: |
+      Build finished on branch \${{ build.branch }}
+      Commit: \${{ build.commit_sha }}
+    subject: "Build Report"       # optional (email only)
+    recipient: "#deployments"     # optional override`,
   },
   {
     id: "secrets",

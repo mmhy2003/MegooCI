@@ -46,7 +46,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [results, setResults] = React.useState<SearchHit[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [activeIndex, setActiveIndex] = React.useState(0);
-  const debounceRef = React.useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = React.useRef<ReturnType<typeof setTimeout>>(undefined);
 
   React.useEffect(() => {
     if (open) {

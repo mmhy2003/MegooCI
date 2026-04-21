@@ -9,6 +9,7 @@ from app.models.git_integration import (
     WebhookDelivery,
 )
 from app.models.invite import Invite
+from app.models.notification import NotificationChannel, NotificationDelivery
 from app.models.pipeline import Pipeline
 from app.models.project import Project
 from app.models.role import Role, UserRole
@@ -38,4 +39,6 @@ __all__ = [
     "GitProviderConnection",
     "ProjectRepository",
     "WebhookDelivery",
+    "NotificationChannel",
+    "NotificationDelivery",
 ]

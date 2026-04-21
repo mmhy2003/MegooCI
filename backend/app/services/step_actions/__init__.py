@@ -36,6 +36,7 @@ def _bootstrap() -> None:
         git,
         ssh,
         wait,
+        notify,
     )
 
 

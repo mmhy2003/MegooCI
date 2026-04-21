@@ -184,6 +184,8 @@ async def _execute_step(
     2. If ``step.step_type == "run"`` and an agent is online, dispatch to agent.
     3. Fall back to legacy local shell execution for ``run`` steps.
     """
+    from app.models.pipeline import Pipeline
+
     handler = get_handler(step.step_type)
 
     step_config = dict(step.config_json or {})
@@ -193,6 +195,25 @@ async def _execute_step(
     step_config = interpolate_value(step_config, secrets, env_vars)
     merged_env = {**env_vars}
     merged_env = interpolate_value(merged_env, secrets, env_vars)
+
+    pipeline = await db.get(Pipeline, build.pipeline_id)
+    project_id = pipeline.project_id if pipeline else build.pipeline_id
+
+    # Notify steps need DB access to look up channels — always run server-side.
+    if step.step_type == "notify" and handler is not None:
+        ctx = StepContext(
+            build_id=build.id,
+            step_id=step.id,
+            step_name=step.name,
+            stage_name=stage.name,
+            pipeline_id=build.pipeline_id,
+            project_id=project_id,
+            branch=build.branch,
+            commit_sha=build.commit_sha,
+            env=merged_env,
+            secrets=secrets,
+        )
+        return await _run_handler(handler, step_config, ctx, step, db, redis_client, channel, secrets)
 
     if step.step_type == "run":
         agent_result = await _try_dispatch_to_agent(
@@ -224,7 +245,7 @@ async def _execute_step(
         step_name=step.name,
         stage_name=stage.name,
         pipeline_id=build.pipeline_id,
-        project_id=build.pipeline_id,
+        project_id=project_id,
         branch=build.branch,
         commit_sha=build.commit_sha,
         env=merged_env,

@@ -90,6 +90,9 @@ container and run it as the `docker` group.
 4. **Receive `run_step`** — for each, spawns a subprocess, streams stdout
    and stderr as `log` frames (with sequence numbers), and reports
    `step_started` then `step_finished` with the exit code.
+   **Note:** `notify` steps are always executed server-side (they require
+   DB access to look up notification channel credentials) and are never
+   dispatched to agents.
 5. **Receive `cancel_step`** — cancels the matching subprocess via context
    cancellation (sends SIGKILL on POSIX / CtrlBreak on Windows).
 6. **Reconnect** on controller restarts with exponential backoff + jitter.

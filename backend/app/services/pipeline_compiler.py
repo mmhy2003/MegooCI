@@ -30,6 +30,7 @@ STEP_TYPE_KEYS = {
     "ssh_exec",
     "wait_webhook",
     "wait_input",
+    "notify",
 }
 
 
@@ -317,5 +318,14 @@ def _validate_step(step: dict[str, Any], stage_name: str, step_index: int) -> li
     elif step_type == "wait_input":
         if value is not None and not isinstance(value, dict):
             errors.append(f"{prefix}: 'wait_input' must be a mapping or null")
+
+    elif step_type == "notify":
+        if not isinstance(value, dict):
+            errors.append(f"{prefix}: 'notify' must be a mapping")
+        else:
+            if not value.get("channel"):
+                errors.append(f"{prefix}: 'notify' requires 'channel'")
+            if not value.get("message"):
+                errors.append(f"{prefix}: 'notify' requires 'message'")
 
     return errors

@@ -16,7 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export default function AcceptInvitePage() {
+function AcceptInviteContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") || "";
@@ -123,5 +123,17 @@ export default function AcceptInvitePage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function AcceptInvitePage() {
+  return (
+    <React.Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    }>
+      <AcceptInviteContent />
+    </React.Suspense>
   );
 }

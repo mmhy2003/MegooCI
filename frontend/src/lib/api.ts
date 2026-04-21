@@ -1015,6 +1015,97 @@ export const invitesApi = {
 };
 
 // ------------------------------------------------------------------
+// Notification Channels
+// ------------------------------------------------------------------
+export type NotificationChannelType = "email" | "slack" | "telegram";
+
+export interface NotificationChannel {
+  id: string;
+  name: string;
+  channel_type: NotificationChannelType;
+  enabled: boolean;
+  config_summary: Record<string, unknown>;
+  validation_status: string;
+  last_validated_at: string | null;
+  validation_error: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface NotificationChannelCreate {
+  name: string;
+  channel_type: NotificationChannelType;
+  config: Record<string, unknown>;
+}
+
+export interface NotificationChannelUpdate {
+  name?: string;
+  config?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export interface NotificationChannelTestResult {
+  ok: boolean;
+  detail: string;
+}
+
+export interface NotificationDelivery {
+  id: string;
+  channel_id: string;
+  build_id: string | null;
+  step_id: string | null;
+  recipient: string | null;
+  subject: string | null;
+  message: string;
+  status: string;
+  error: string | null;
+  sent_at: string | null;
+  created_at: string;
+}
+
+export const notificationChannelsApi = {
+  list: () =>
+    fetchApi<NotificationChannel[]>("/api/v1/notifications/channels"),
+
+  create: (data: NotificationChannelCreate) =>
+    fetchApi<NotificationChannel>("/api/v1/notifications/channels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  get: (id: string) =>
+    fetchApi<NotificationChannel>(`/api/v1/notifications/channels/${id}`),
+
+  update: (id: string, data: NotificationChannelUpdate) =>
+    fetchApi<NotificationChannel>(`/api/v1/notifications/channels/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    fetchApi<void>(`/api/v1/notifications/channels/${id}`, {
+      method: "DELETE",
+    }),
+
+  test: (id: string) =>
+    fetchApi<NotificationChannelTestResult>(
+      `/api/v1/notifications/channels/${id}/test`,
+      { method: "POST" },
+    ),
+
+  deliveries: (params?: { channel_id?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.channel_id) qs.set("channel_id", params.channel_id);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return fetchApi<NotificationDelivery[]>(
+      `/api/v1/notifications/deliveries${query ? `?${query}` : ""}`,
+    );
+  },
+};
+
+// ------------------------------------------------------------------
 // AI Pipeline Assistant
 // ------------------------------------------------------------------
 export interface AiChatMessage {

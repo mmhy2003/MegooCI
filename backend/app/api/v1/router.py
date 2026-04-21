@@ -9,6 +9,7 @@ from app.api.v1 import (
     gates,
     git_connections,
     invites,
+    notifications,
     pipelines,
     project_repositories,
     projects,
@@ -40,6 +41,9 @@ api_v1_router.include_router(
     project_repositories.router,
     prefix="/projects/{project_id}/repositories",
     tags=["git-integration"],
+)
+api_v1_router.include_router(
+    notifications.router, prefix="/notifications", tags=["notifications"]
 )
 api_v1_router.include_router(search.router, prefix="/search", tags=["search"])
 api_v1_router.include_router(gates.router, prefix="/gates", tags=["gates"])

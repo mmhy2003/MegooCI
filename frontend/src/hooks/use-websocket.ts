@@ -12,7 +12,7 @@ export function useWebSocket(url: string | null): UseWebSocketReturn {
   const [messages, setMessages] = useState<string[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const urlRef = useRef(url);
   urlRef.current = url;
 

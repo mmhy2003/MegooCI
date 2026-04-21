@@ -123,6 +123,20 @@ definitions in YAML for the MegooCI platform.
       - lead
 ```
 
+### notify — Send a notification via a configured channel
+```yaml
+- notify:
+    channel: "deploy-alerts"   # channel name from Admin > Notification Channels
+    message: |
+      Build finished with status on branch ${{ build.branch }}
+      Commit: ${{ build.commit_sha }}
+    subject: "Build Report"    # optional (used by email channels)
+    recipient: "#deployments"  # optional channel/chat_id/email override
+```
+
+Supported channel types: email (SMTP), Slack (webhook), Telegram (bot).
+Channels are configured by admins in the Notification Channels UI.
+
 ## Pipeline Structure
 ```yaml
 version: 1
@@ -155,6 +169,8 @@ markdown fences, no explanations before or after.
 short YAML example.
 4. Use realistic, production-quality examples.
 5. Always use `${{ secrets.X }}` for sensitive values — never hardcode passwords.
+6. For notification steps, always use a configured channel name — never hardcode \
+webhook URLs or bot tokens in the YAML.
 """
 
 
