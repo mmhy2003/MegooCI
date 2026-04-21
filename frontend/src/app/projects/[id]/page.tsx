@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { usePermission } from "@/hooks/use-permission";
 import { ProjectIntegrations } from "@/components/project-integrations";
 import {
   projectsApi,
@@ -47,6 +48,9 @@ export default function ProjectDetailPage() {
   const router = useRouter();
   const confirm = useConfirm();
   const id = params.id as string;
+  const canManageProjects = usePermission("projects.manage");
+  const canManageSecrets = usePermission("secrets.manage");
+  const canManagePipelines = usePermission("pipelines.manage");
 
   const [project, setProject] = React.useState<Project | null>(null);
   const [pipelines, setPipelines] = React.useState<Pipeline[]>([]);
@@ -337,15 +341,17 @@ export default function ProjectDetailPage() {
               {project.slug}
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            onClick={handleDeleteProject}
-          >
-            <Trash2 className="mr-1.5 h-4 w-4" />
-            Delete project
-          </Button>
+          {canManageProjects && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={handleDeleteProject}
+            >
+              <Trash2 className="mr-1.5 h-4 w-4" />
+              Delete project
+            </Button>
+          )}
         </div>
 
         <div className="-mx-4 flex gap-1 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0">
@@ -373,14 +379,16 @@ export default function ProjectDetailPage() {
                   <p className="text-sm text-muted-foreground">
                     No pipelines in this project yet.
                   </p>
-                  <Button
-                    className="mt-4"
-                    size="sm"
-                    onClick={() => router.push("/pipelines/new")}
-                  >
-                    <Plus className="mr-1.5 h-4 w-4" />
-                    Create Pipeline
-                  </Button>
+                  {canManagePipelines && (
+                    <Button
+                      className="mt-4"
+                      size="sm"
+                      onClick={() => router.push("/pipelines/new")}
+                    >
+                      <Plus className="mr-1.5 h-4 w-4" />
+                      Create Pipeline
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             ) : (
@@ -426,14 +434,16 @@ export default function ProjectDetailPage() {
                   open={secretDialogOpen}
                   onOpenChange={setSecretDialogOpen}
                 >
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setSecretDialogOpen(true)}
-                  >
-                    <Plus className="mr-1.5 h-4 w-4" />
-                    Add Secret
-                  </Button>
+                  {canManageSecrets && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setSecretDialogOpen(true)}
+                    >
+                      <Plus className="mr-1.5 h-4 w-4" />
+                      Add Secret
+                    </Button>
+                  )}
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Add Secret</DialogTitle>
@@ -489,14 +499,16 @@ export default function ProjectDetailPage() {
                               addSuffix: true,
                             })}
                           </span>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-destructive"
-                            onClick={() => handleDeleteSecret(secret.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          {canManageSecrets && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive"
+                              onClick={() => handleDeleteSecret(secret.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -512,14 +524,16 @@ export default function ProjectDetailPage() {
                   Environment Variables
                 </CardTitle>
                 <Dialog open={envDialogOpen} onOpenChange={setEnvDialogOpen}>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEnvDialogOpen(true)}
-                  >
-                    <Plus className="mr-1.5 h-4 w-4" />
-                    Add Variable
-                  </Button>
+                  {canManageSecrets && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEnvDialogOpen(true)}
+                    >
+                      <Plus className="mr-1.5 h-4 w-4" />
+                      Add Variable
+                    </Button>
+                  )}
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Add Environment Variable</DialogTitle>
@@ -570,14 +584,16 @@ export default function ProjectDetailPage() {
                             {v.is_secret_ref ? "••••••" : v.value}
                           </span>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0 text-destructive"
-                          onClick={() => handleDeleteEnv(v.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {canManageSecrets && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 text-destructive"
+                            onClick={() => handleDeleteEnv(v.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     ))}
                   </div>

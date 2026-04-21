@@ -159,6 +159,8 @@ export interface User {
   is_active: boolean;
   auth_provider: string;
   created_at: string;
+  role: string | null;
+  permissions: string[];
 }
 
 export const authApi = {
@@ -181,6 +183,24 @@ export const authApi = {
     }),
 
   getMe: () => fetchApi<User>("/api/v1/auth/me"),
+
+  changePassword: (data: { current_password: string; new_password: string }) =>
+    fetchApi<{ message: string }>("/api/v1/auth/change-password", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  forgotPassword: (email: string) =>
+    fetchApi<{ message: string }>("/api/v1/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, new_password: string) =>
+    fetchApi<{ message: string }>("/api/v1/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, new_password }),
+    }),
 };
 
 // ------------------------------------------------------------------
@@ -800,6 +820,198 @@ export const projectRepositoriesApi = {
     fetchApi<WebhookDelivery[]>(
       `/api/v1/projects/${projectId}/repositories/${repoId}/deliveries?limit=${limit}`,
     ),
+};
+
+// ------------------------------------------------------------------
+// Roles
+// ------------------------------------------------------------------
+export interface Role {
+  id: string;
+  name: string;
+  description: string | null;
+  permissions: string[];
+  is_system: boolean;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface CreateRoleRequest {
+  name: string;
+  description?: string;
+  permissions?: string[];
+}
+
+export interface UpdateRoleRequest {
+  name?: string;
+  description?: string;
+  permissions?: string[];
+}
+
+export const rolesApi = {
+  list: () => fetchApi<Role[]>("/api/v1/roles/"),
+
+  get: (id: string) => fetchApi<Role>(`/api/v1/roles/${id}`),
+
+  create: (data: CreateRoleRequest) =>
+    fetchApi<Role>("/api/v1/roles/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  update: (id: string, data: UpdateRoleRequest) =>
+    fetchApi<Role>(`/api/v1/roles/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    fetchApi<void>(`/api/v1/roles/${id}`, { method: "DELETE" }),
+};
+
+// ------------------------------------------------------------------
+// User Management
+// ------------------------------------------------------------------
+export interface UserRoleInfo {
+  id: string;
+  role_id: string;
+  role_name: string | null;
+  scope_type: string;
+  scope_id: string | null;
+}
+
+export interface UserDetail {
+  id: string;
+  email: string;
+  name: string;
+  is_admin: boolean;
+  is_active: boolean;
+  auth_provider: string;
+  created_at: string;
+  updated_at: string | null;
+  roles: UserRoleInfo[];
+}
+
+export interface CreateUserRequest {
+  email: string;
+  name: string;
+  role_id: string;
+}
+
+export interface UserCreated extends UserDetail {
+  generated_password: string;
+}
+
+export interface UpdateUserRequest {
+  name?: string;
+  is_active?: boolean;
+  is_admin?: boolean;
+}
+
+export interface AssignRoleRequest {
+  role_id: string;
+  scope_type?: string;
+  scope_id?: string;
+}
+
+export interface UserRoleAssignment {
+  id: string;
+  user_id: string;
+  role_id: string;
+  scope_type: string;
+  scope_id: string | null;
+  role_name: string | null;
+  created_at: string;
+}
+
+export const usersApi = {
+  list: (params?: { skip?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.skip) qs.set("skip", String(params.skip));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return fetchApi<UserDetail[]>(`/api/v1/users/${query ? `?${query}` : ""}`);
+  },
+
+  create: (data: CreateUserRequest) =>
+    fetchApi<UserCreated>("/api/v1/users/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  get: (id: string) => fetchApi<UserDetail>(`/api/v1/users/${id}`),
+
+  update: (id: string, data: UpdateUserRequest) =>
+    fetchApi<UserDetail>(`/api/v1/users/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  assignRole: (userId: string, data: AssignRoleRequest) =>
+    fetchApi<UserRoleAssignment>(`/api/v1/users/${userId}/roles`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  removeRole: (userId: string, userRoleId: string) =>
+    fetchApi<void>(`/api/v1/users/${userId}/roles/${userRoleId}`, {
+      method: "DELETE",
+    }),
+};
+
+// ------------------------------------------------------------------
+// Invitations
+// ------------------------------------------------------------------
+export interface Invite {
+  id: string;
+  email: string;
+  role_id: string;
+  role_name: string | null;
+  status: string;
+  expires_at: string;
+  created_by: string | null;
+  creator_name: string | null;
+  accepted_at: string | null;
+  created_at: string;
+}
+
+export interface InviteCreated extends Invite {
+  invite_link: string;
+}
+
+export interface CreateInviteRequest {
+  email: string;
+  role_id: string;
+}
+
+export interface AcceptInviteRequest {
+  token: string;
+  name: string;
+  password: string;
+}
+
+export const invitesApi = {
+  list: (status?: string) => {
+    const qs = status ? `?status_filter=${status}` : "";
+    return fetchApi<Invite[]>(`/api/v1/invites/${qs}`);
+  },
+
+  create: (data: CreateInviteRequest) =>
+    fetchApi<InviteCreated>("/api/v1/invites/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  revoke: (id: string) =>
+    fetchApi<void>(`/api/v1/invites/${id}`, { method: "DELETE" }),
+
+  resend: (id: string) =>
+    fetchApi<Invite>(`/api/v1/invites/${id}/resend`, { method: "POST" }),
+
+  accept: (data: AcceptInviteRequest) =>
+    fetchApi<AuthTokens>("/api/v1/invites/accept", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };
 
 // ------------------------------------------------------------------

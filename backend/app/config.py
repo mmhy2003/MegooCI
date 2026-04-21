@@ -36,6 +36,16 @@ class Settings(BaseSettings):
     MEGOOCI_REGISTRY_ENABLED: bool = True
     MEGOOCI_REGISTRY_HOST: str = "localhost"
 
+    # Email / SMTP (for invitations and notifications)
+    MEGOOCI_SMTP_HOST: str = ""
+    MEGOOCI_SMTP_PORT: int = 587
+    MEGOOCI_SMTP_USER: str = ""
+    MEGOOCI_SMTP_PASSWORD: str = ""
+    MEGOOCI_SMTP_FROM_EMAIL: str = "noreply@megooci.local"
+    MEGOOCI_SMTP_FROM_NAME: str = "MegooCI"
+    MEGOOCI_SMTP_TLS: bool = True
+    MEGOOCI_INVITE_EXPIRY_HOURS: int = 72
+
     # Git provider integration (PRD §6.16)
     # OAuth client credentials are Phase 2; keep them optional so Phase 1
     # works without any configuration.

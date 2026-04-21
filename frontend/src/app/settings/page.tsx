@@ -14,12 +14,14 @@ import {
   Shield,
   Package,
   Palette,
+  Lock,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useAuthStore } from "@/lib/auth";
 import { useTheme } from "@/components/providers";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { systemApi, type AiInfo, type SystemInfo } from "@/lib/api";
+import { authApi, systemApi, type AiInfo, type SystemInfo } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -81,6 +83,11 @@ export default function SettingsPage() {
   const [info, setInfo] = React.useState<SystemInfo | null>(null);
   const [loading, setLoading] = React.useState(true);
 
+  const [currentPw, setCurrentPw] = React.useState("");
+  const [newPw, setNewPw] = React.useState("");
+  const [confirmPw, setConfirmPw] = React.useState("");
+  const [changingPw, setChangingPw] = React.useState(false);
+
   React.useEffect(() => {
     systemApi
       .info()
@@ -88,6 +95,41 @@ export default function SettingsPage() {
       .catch(() => toast.error("Failed to load system configuration"))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!currentPw || !newPw || !confirmPw) {
+      toast.error("Please fill in all password fields");
+      return;
+    }
+    if (newPw !== confirmPw) {
+      toast.error("New passwords do not match");
+      return;
+    }
+    if (newPw.length < 8) {
+      toast.error("New password must be at least 8 characters");
+      return;
+    }
+    setChangingPw(true);
+    try {
+      await authApi.changePassword({
+        current_password: currentPw,
+        new_password: newPw,
+      });
+      toast.success("Password updated successfully");
+      setCurrentPw("");
+      setNewPw("");
+      setConfirmPw("");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to change password";
+      const detail =
+        (err as { body?: { detail?: string } })?.body?.detail ?? message;
+      toast.error(detail);
+    } finally {
+      setChangingPw(false);
+    }
+  }
 
   return (
     <AppLayout>
@@ -125,7 +167,7 @@ export default function SettingsPage() {
               <label className="text-sm font-medium">Role</label>
               <div>
                 <Badge variant="secondary">
-                  {user?.is_admin ? "Admin" : "User"}
+                  {user?.role || (user?.is_admin ? "admin" : "user")}
                 </Badge>
               </div>
             </div>
@@ -139,6 +181,63 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Change Password */}
+        {user?.auth_provider === "local" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Lock className="h-5 w-5" />
+                Change Password
+              </CardTitle>
+              <CardDescription>
+                Update your account password. You&apos;ll need your current
+                password to set a new one.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleChangePassword} className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Current password
+                  </label>
+                  <Input
+                    type="password"
+                    placeholder="••••••••"
+                    value={currentPw}
+                    onChange={(e) => setCurrentPw(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">New password</label>
+                  <Input
+                    type="password"
+                    placeholder="••••••••"
+                    value={newPw}
+                    onChange={(e) => setNewPw(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Confirm new password
+                  </label>
+                  <Input
+                    type="password"
+                    placeholder="••••••••"
+                    value={confirmPw}
+                    onChange={(e) => setConfirmPw(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+                <Button type="submit" disabled={changingPw}>
+                  {changingPw ? "Updating..." : "Update password"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Appearance */}
         <Card>

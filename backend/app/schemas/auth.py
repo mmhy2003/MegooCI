@@ -19,6 +19,20 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -35,3 +49,5 @@ class UserResponse(BaseModel):
     is_active: bool
     auth_provider: str
     created_at: datetime
+    role: str | None = None
+    permissions: list[str] = []

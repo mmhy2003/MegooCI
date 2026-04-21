@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StageGraph, type Stage, type StageStatus } from "@/components/stage-graph";
 import { BuildLogViewer, type LogLine } from "@/components/build-log-viewer";
 import { useWebSocket } from "@/hooks/use-websocket";
+import { usePermission } from "@/hooks/use-permission";
 
 function statusVariant(
   s: BuildStatus,
@@ -75,6 +76,7 @@ export default function BuildDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
+  const canManageBuilds = usePermission("builds.manage");
 
   const [build, setBuild] = React.useState<BuildDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -243,28 +245,30 @@ export default function BuildDetailPage() {
               </span>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRetry}
-              className="flex-1 sm:flex-none"
-            >
-              <RotateCw className="mr-1.5 h-4 w-4" />
-              Re-run
-            </Button>
-            {isRunning && (
+          {canManageBuilds && (
+            <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                className="flex-1 text-destructive sm:flex-none"
-                onClick={handleCancel}
+                onClick={handleRetry}
+                className="flex-1 sm:flex-none"
               >
-                <XCircle className="mr-1.5 h-4 w-4" />
-                Cancel
+                <RotateCw className="mr-1.5 h-4 w-4" />
+                Re-run
               </Button>
-            )}
-          </div>
+              {isRunning && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 text-destructive sm:flex-none"
+                  onClick={handleCancel}
+                >
+                  <XCircle className="mr-1.5 h-4 w-4" />
+                  Cancel
+                </Button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Stage Visualization */}

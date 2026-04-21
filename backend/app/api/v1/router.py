@@ -8,12 +8,15 @@ from app.api.v1 import (
     builds,
     gates,
     git_connections,
+    invites,
     pipelines,
     project_repositories,
     projects,
+    roles,
     search,
     secrets,
     system,
+    users,
     webhooks_git,
     websocket,
 )
@@ -27,6 +30,9 @@ api_v1_router.include_router(builds.router, prefix="/builds", tags=["builds"])
 api_v1_router.include_router(secrets.router, prefix="/secrets-env", tags=["secrets"])
 api_v1_router.include_router(agents.router, prefix="/agents", tags=["agents"])
 api_v1_router.include_router(system.router, prefix="/system", tags=["system"])
+api_v1_router.include_router(roles.router, prefix="/roles", tags=["roles"])
+api_v1_router.include_router(users.router, prefix="/users", tags=["users"])
+api_v1_router.include_router(invites.router, prefix="/invites", tags=["invites"])
 api_v1_router.include_router(
     git_connections.router, prefix="/git/connections", tags=["git-integration"]
 )

@@ -6,6 +6,7 @@ import { formatDistanceToNow } from "date-fns";
 import { KeyRound, Plus, Trash2, Variable } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { usePermission } from "@/hooks/use-permission";
 import {
   projectsApi,
   secretsApi,
@@ -36,6 +37,7 @@ interface ProjectSecrets {
 
 export default function SecretsPage() {
   const confirm = useConfirm();
+  const canManage = usePermission("secrets.manage");
   const [projectData, setProjectData] = React.useState<ProjectSecrets[]>([]);
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -230,14 +232,16 @@ export default function SecretsPage() {
               Secrets
             </CardTitle>
             <Dialog open={secretDialogOpen} onOpenChange={setSecretDialogOpen}>
-              <Button
-                size="sm"
-                onClick={() => setSecretDialogOpen(true)}
-                disabled={projects.length === 0}
-              >
-                <Plus className="mr-1.5 h-4 w-4" />
-                Add Secret
-              </Button>
+              {canManage && (
+                <Button
+                  size="sm"
+                  onClick={() => setSecretDialogOpen(true)}
+                  disabled={projects.length === 0}
+                >
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Add Secret
+                </Button>
+              )}
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Add Secret</DialogTitle>
@@ -326,16 +330,18 @@ export default function SecretsPage() {
                             addSuffix: true,
                           })}
                         </td>
-                        <td className="py-3">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-destructive"
-                            onClick={() => handleDeleteSecret(secret.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </td>
+                        {canManage && (
+                          <td className="py-3">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive"
+                              onClick={() => handleDeleteSecret(secret.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -353,14 +359,16 @@ export default function SecretsPage() {
               Environment Variables
             </CardTitle>
             <Dialog open={envDialogOpen} onOpenChange={setEnvDialogOpen}>
-              <Button
-                size="sm"
-                onClick={() => setEnvDialogOpen(true)}
-                disabled={projects.length === 0}
-              >
-                <Plus className="mr-1.5 h-4 w-4" />
-                Add Variable
-              </Button>
+              {canManage && (
+                <Button
+                  size="sm"
+                  onClick={() => setEnvDialogOpen(true)}
+                  disabled={projects.length === 0}
+                >
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Add Variable
+                </Button>
+              )}
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Add Environment Variable</DialogTitle>
@@ -439,16 +447,18 @@ export default function SecretsPage() {
                         <td className="py-3 pr-4 text-muted-foreground">
                           {v.projectName}
                         </td>
-                        <td className="py-3">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-destructive"
-                            onClick={() => handleDeleteEnv(v.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </td>
+                        {canManage && (
+                          <td className="py-3">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive"
+                              onClick={() => handleDeleteEnv(v.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

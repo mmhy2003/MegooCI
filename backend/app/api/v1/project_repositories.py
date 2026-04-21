@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import get_current_active_user
+from app.core.deps import require_permission
 from app.core.security import (
     encrypt_webhook_secret,
     generate_webhook_secret,
@@ -94,7 +94,7 @@ def _with_secret_response(
 async def list_repositories(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("projects.read")),
 ) -> list[ProjectRepository]:
     await _get_project_or_404(db, project_id)
     result = await db.execute(
@@ -114,7 +114,7 @@ async def link_repository(
     project_id: uuid.UUID,
     body: ProjectRepositoryCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("projects.manage")),
 ) -> ProjectRepositoryWithSecretResponse:
     await _get_project_or_404(db, project_id)
     connection = await db.get(GitProviderConnection, body.connection_id)
@@ -151,7 +151,7 @@ async def update_repository(
     repo_id: uuid.UUID,
     body: ProjectRepositoryUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("projects.manage")),
 ) -> ProjectRepository:
     repo = await _get_repo_or_404(db, project_id, repo_id)
     if body.default_branch is not None:
@@ -168,7 +168,7 @@ async def unlink_repository(
     project_id: uuid.UUID,
     repo_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("projects.manage")),
 ) -> None:
     repo = await _get_repo_or_404(db, project_id, repo_id)
     # Cascade handles WebhookDelivery rows (models.relationship cascade).
@@ -184,7 +184,7 @@ async def rotate_webhook_secret(
     project_id: uuid.UUID,
     repo_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("projects.manage")),
 ) -> ProjectRepositoryWithSecretResponse:
     repo = await _get_repo_or_404(db, project_id, repo_id)
     settings = get_settings()
@@ -205,7 +205,7 @@ async def list_deliveries(
     repo_id: uuid.UUID,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("projects.read")),
 ) -> list[WebhookDelivery]:
     await _get_repo_or_404(db, project_id, repo_id)
     result = await db.execute(

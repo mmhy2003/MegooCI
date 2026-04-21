@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.deps import get_current_active_user
+from app.core.deps import require_permission
 from app.database import get_db
 from app.models.build import Build, Stage
 from app.models.pipeline import Pipeline
@@ -23,7 +23,7 @@ async def list_builds(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("builds.read")),
 ) -> list[Build]:
     query = select(Build).order_by(Build.created_at.desc())
     if pipeline_id is not None:
@@ -39,7 +39,7 @@ async def trigger_build(
     pipeline_id: uuid.UUID,
     body: BuildTriggerRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("builds.manage")),
 ) -> Build:
     pipeline = await db.get(Pipeline, pipeline_id)
     if pipeline is None:
@@ -119,7 +119,7 @@ async def trigger_build(
 async def get_build(
     build_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("builds.read")),
 ) -> Build:
     result = await db.execute(
         select(Build)
@@ -138,7 +138,7 @@ async def get_build(
 async def cancel_build(
     build_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("builds.manage")),
 ) -> Build:
     build = await db.get(Build, build_id)
     if build is None:
@@ -195,7 +195,7 @@ async def _notify_agents_of_cancel(
 async def retry_build(
     build_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("builds.manage")),
 ) -> Build:
     original = await db.execute(
         select(Build)

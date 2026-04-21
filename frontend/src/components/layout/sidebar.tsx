@@ -18,6 +18,7 @@ import {
   Moon,
   Sun,
   User,
+  Users,
   X,
   Plug,
 } from "lucide-react";
@@ -40,17 +41,18 @@ interface NavItem {
   label: string;
   icon: React.ElementType;
   adminOnly?: boolean;
+  permission?: string;
 }
 
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pipelines", label: "Pipelines", icon: GitBranch },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/builds", label: "Builds", icon: Hammer },
-  { href: "/agents", label: "Agents", icon: Server },
-  { href: "/secrets", label: "Secrets", icon: KeyRound },
-  // Admin-only: admin-scoped Git provider connections (PRD §6.16).
+  { href: "/pipelines", label: "Pipelines", icon: GitBranch, permission: "pipelines.read" },
+  { href: "/projects", label: "Projects", icon: FolderKanban, permission: "projects.read" },
+  { href: "/builds", label: "Builds", icon: Hammer, permission: "builds.read" },
+  { href: "/agents", label: "Agents", icon: Server, permission: "agents.read" },
+  { href: "/secrets", label: "Secrets", icon: KeyRound, permission: "secrets.read" },
   { href: "/integrations", label: "Integrations", icon: Plug, adminOnly: true },
+  { href: "/admin/users", label: "Users", icon: Users, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -162,6 +164,7 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
         <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
           {navItems.map((item) => {
             if (item.adminOnly && !user?.is_admin) return null;
+            if (item.permission && !user?.is_admin && !user?.permissions?.includes(item.permission)) return null;
             const isActive =
               pathname === item.href || pathname.startsWith(item.href + "/");
             return (

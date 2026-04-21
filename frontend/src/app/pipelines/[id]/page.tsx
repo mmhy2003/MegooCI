@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PipelineEditor } from "@/components/pipeline/pipeline-editor";
+import { usePermission } from "@/hooks/use-permission";
 
 function statusVariant(
   s: BuildStatus,
@@ -61,6 +62,8 @@ export default function PipelineDetailPage() {
   const router = useRouter();
   const confirm = useConfirm();
   const id = params.id as string;
+  const canManagePipelines = usePermission("pipelines.manage");
+  const canManageBuilds = usePermission("builds.manage");
 
   const [pipeline, setPipeline] = React.useState<Pipeline | null>(null);
   const [builds, setBuilds] = React.useState<Build[]>([]);
@@ -212,24 +215,28 @@ export default function PipelineDetailPage() {
             )}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleTrigger}
-              className="flex-1 sm:flex-none"
-            >
-              <Play className="mr-1.5 h-4 w-4" />
-              Trigger Build
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 text-destructive sm:flex-none"
-              onClick={handleDelete}
-            >
-              <Trash2 className="mr-1.5 h-4 w-4" />
-              Delete
-            </Button>
+            {canManageBuilds && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleTrigger}
+                className="flex-1 sm:flex-none"
+              >
+                <Play className="mr-1.5 h-4 w-4" />
+                Trigger Build
+              </Button>
+            )}
+            {canManagePipelines && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 text-destructive sm:flex-none"
+                onClick={handleDelete}
+              >
+                <Trash2 className="mr-1.5 h-4 w-4" />
+                Delete
+              </Button>
+            )}
           </div>
         </div>
 
@@ -408,14 +415,16 @@ export default function PipelineDetailPage() {
             <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Pipeline Definition</CardTitle>
               {!editing ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setEditing(true)}
-                >
-                  <Pencil className="mr-1.5 h-4 w-4" />
-                  Edit
-                </Button>
+                canManagePipelines && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditing(true)}
+                  >
+                    <Pencil className="mr-1.5 h-4 w-4" />
+                    Edit
+                  </Button>
+                )
               ) : (
                 <div className="flex gap-2">
                   <Button

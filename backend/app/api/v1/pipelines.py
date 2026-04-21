@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_active_user
+from app.core.deps import require_permission
 from app.database import get_db
 from app.models.pipeline import Pipeline
 from app.models.project import Project
@@ -20,7 +20,7 @@ async def list_pipelines(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("pipelines.read")),
 ) -> list[Pipeline]:
     query = select(Pipeline).order_by(Pipeline.created_at.desc())
     if project_id is not None:
@@ -35,7 +35,7 @@ async def list_pipelines(
 async def create_pipeline(
     body: PipelineCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("pipelines.manage")),
 ) -> Pipeline:
     project = await db.get(Project, body.project_id)
     if project is None:
@@ -88,7 +88,7 @@ async def create_pipeline(
 async def get_pipeline(
     pipeline_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("pipelines.read")),
 ) -> Pipeline:
     pipeline = await db.get(Pipeline, pipeline_id)
     if pipeline is None:
@@ -103,7 +103,7 @@ async def update_pipeline(
     pipeline_id: uuid.UUID,
     body: PipelineUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("pipelines.manage")),
 ) -> Pipeline:
     pipeline = await db.get(Pipeline, pipeline_id)
     if pipeline is None:
@@ -128,7 +128,7 @@ async def update_pipeline(
 async def delete_pipeline(
     pipeline_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("pipelines.manage")),
 ) -> None:
     pipeline = await db.get(Pipeline, pipeline_id)
     if pipeline is None:

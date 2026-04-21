@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Plus, GitBranch, ExternalLink } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { pipelinesApi, type Pipeline } from "@/lib/api";
+import { usePermission } from "@/hooks/use-permission";
 import {
   Card,
   CardContent,
@@ -21,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function PipelinesPage() {
   const router = useRouter();
+  const canManage = usePermission("pipelines.manage");
   const [pipelines, setPipelines] = React.useState<Pipeline[]>([]);
   const [loading, setLoading] = React.useState(true);
 
@@ -46,13 +48,15 @@ export default function PipelinesPage() {
               configured
             </p>
           </div>
-          <Button
-            onClick={() => router.push("/pipelines/new")}
-            className="w-full sm:w-auto"
-          >
-            <Plus className="mr-1.5 h-4 w-4" />
-            New Pipeline
-          </Button>
+          {canManage && (
+            <Button
+              onClick={() => router.push("/pipelines/new")}
+              className="w-full sm:w-auto"
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              New Pipeline
+            </Button>
+          )}
         </div>
 
         {/* Loading */}
@@ -82,10 +86,12 @@ export default function PipelinesPage() {
                 Create your first pipeline to start automating your builds and
                 deployments.
               </p>
-              <Button onClick={() => router.push("/pipelines/new")}>
-                <Plus className="mr-1.5 h-4 w-4" />
-                Create Pipeline
-              </Button>
+              {canManage && (
+                <Button onClick={() => router.push("/pipelines/new")}>
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Create Pipeline
+                </Button>
+              )}
             </CardContent>
           </Card>
         ) : (

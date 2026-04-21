@@ -27,9 +27,11 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { usePermission } from "@/hooks/use-permission";
 
 export default function ProjectsPage() {
   const confirm = useConfirm();
+  const canManage = usePermission("projects.manage");
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -164,13 +166,15 @@ export default function ProjectsPage() {
             </p>
           </div>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <Button
-              onClick={() => setDialogOpen(true)}
-              className="w-full sm:w-auto"
-            >
-              <Plus className="mr-1.5 h-4 w-4" />
-              New Project
-            </Button>
+            {canManage && (
+              <Button
+                onClick={() => setDialogOpen(true)}
+                className="w-full sm:w-auto"
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                New Project
+              </Button>
+            )}
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Create Project</DialogTitle>
@@ -238,10 +242,12 @@ export default function ProjectsPage() {
               <p className="mb-6 max-w-sm text-center text-sm text-muted-foreground">
                 Create your first project to start organizing your pipelines.
               </p>
-              <Button onClick={() => setDialogOpen(true)}>
-                <Plus className="mr-1.5 h-4 w-4" />
-                Create Project
-              </Button>
+              {canManage && (
+                <Button onClick={() => setDialogOpen(true)}>
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Create Project
+                </Button>
+              )}
             </CardContent>
           </Card>
         ) : (
@@ -273,24 +279,26 @@ export default function ProjectsPage() {
                       </CardContent>
                     </Card>
                   </Link>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Delete project ${project.name}`}
-                    disabled={isDeleting}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleDeleteProject(project);
-                    }}
-                    className="absolute right-2 top-2 h-8 w-8 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-                  >
-                    {isDeleting ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
+                  {canManage && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Delete project ${project.name}`}
+                      disabled={isDeleting}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleDeleteProject(project);
+                      }}
+                      className="absolute right-2 top-2 h-8 w-8 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      {isDeleting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  )}
                 </div>
               );
             })}

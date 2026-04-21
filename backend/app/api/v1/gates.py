@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import get_current_active_user
+from app.core.deps import require_permission
 from app.database import get_db
 from app.models.build import Step
 from app.models.user import User
@@ -73,7 +73,7 @@ async def resolve_input_gate(
     step_id: uuid.UUID,
     body: InputGatePayload,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("builds.manage")),
 ) -> dict:
     """Called by the UI when a user approves or rejects a ``wait_input`` step."""
     step = await db.get(Step, step_id)

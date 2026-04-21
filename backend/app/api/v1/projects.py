@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_active_user
+from app.core.deps import require_permission
 from app.database import get_db
 from app.models.git_integration import ProjectRepository, WebhookDelivery
 from app.models.pipeline import Pipeline
@@ -29,7 +29,7 @@ async def list_projects(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("projects.read")),
 ) -> list[Project]:
     result = await db.execute(
         select(Project).order_by(Project.created_at.desc()).offset(skip).limit(limit)
@@ -41,7 +41,7 @@ async def list_projects(
 async def create_project(
     body: ProjectCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("projects.manage")),
 ) -> Project:
     slug = _slugify(body.name)
 
@@ -81,7 +81,7 @@ async def create_project(
 async def get_project(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("projects.read")),
 ) -> Project:
     project = await db.get(Project, project_id)
     if project is None:
@@ -96,7 +96,7 @@ async def update_project(
     project_id: uuid.UUID,
     body: ProjectUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("projects.manage")),
 ) -> Project:
     project = await db.get(Project, project_id)
     if project is None:
@@ -141,7 +141,7 @@ async def delete_project(
         ),
     ),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("projects.manage")),
 ) -> None:
     """Delete a project.
 

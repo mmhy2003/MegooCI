@@ -8,8 +8,10 @@ from app.models.git_integration import (
     ProjectRepository,
     WebhookDelivery,
 )
+from app.models.invite import Invite
 from app.models.pipeline import Pipeline
 from app.models.project import Project
+from app.models.role import Role, UserRole
 from app.models.secret import EnvVar, Secret
 from app.models.trigger import Trigger, WebhookEndpoint
 from app.models.user import User
@@ -17,6 +19,9 @@ from app.models.user import User
 __all__ = [
     "Base",
     "User",
+    "Role",
+    "UserRole",
+    "Invite",
     "Project",
     "Pipeline",
     "Build",

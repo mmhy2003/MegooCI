@@ -45,6 +45,9 @@ class User(Base):
     env_vars: Mapped[list["EnvVar"]] = relationship(  # noqa: F821
         back_populates="creator", foreign_keys="EnvVar.created_by"
     )
+    user_roles: Mapped[list["UserRole"]] = relationship(  # noqa: F821
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<User {self.email}>"

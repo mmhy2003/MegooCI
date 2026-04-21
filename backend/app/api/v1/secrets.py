@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import get_current_active_user
+from app.core.deps import require_permission
 from app.core.security import encrypt_secret
 from app.database import get_db
 from app.models.secret import EnvVar, Secret
@@ -28,7 +28,7 @@ async def list_secrets(
     scope_type: str = Query(...),
     scope_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("secrets.read")),
 ) -> list[Secret]:
     query = select(Secret).where(Secret.scope_type == scope_type)
     if scope_id is not None:
@@ -43,7 +43,7 @@ async def list_secrets(
 async def create_secret(
     body: SecretCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("secrets.manage")),
 ) -> Secret:
     settings = get_settings()
     encrypted = encrypt_secret(body.value, settings.MEGOOCI_SECRET_KEY)
@@ -66,7 +66,7 @@ async def create_secret(
 async def delete_secret(
     secret_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("secrets.manage")),
 ) -> None:
     secret = await db.get(Secret, secret_id)
     if secret is None:
@@ -85,7 +85,7 @@ async def list_env_vars(
     scope_type: str = Query(...),
     scope_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("secrets.read")),
 ) -> list[EnvVar]:
     query = select(EnvVar).where(EnvVar.scope_type == scope_type)
     if scope_id is not None:
@@ -100,7 +100,7 @@ async def list_env_vars(
 async def create_env_var(
     body: EnvVarCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("secrets.manage")),
 ) -> EnvVar:
     env_var = EnvVar(
         scope_type=body.scope_type,
@@ -120,7 +120,7 @@ async def update_env_var(
     env_var_id: uuid.UUID,
     body: EnvVarUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("secrets.manage")),
 ) -> EnvVar:
     env_var = await db.get(EnvVar, env_var_id)
     if env_var is None:
@@ -141,7 +141,7 @@ async def update_env_var(
 async def delete_env_var(
     env_var_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_active_user),
+    _current_user: User = Depends(require_permission("secrets.manage")),
 ) -> None:
     env_var = await db.get(EnvVar, env_var_id)
     if env_var is None:
