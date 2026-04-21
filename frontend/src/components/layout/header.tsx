@@ -8,12 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { ThemeToggle } from "@/components/theme-toggle";
 
+const HIDDEN_SEGMENTS = new Set(["admin"]);
+
 function getBreadcrumbs(pathname: string) {
   const segments = pathname.split("/").filter(Boolean);
-  return segments.map((segment, index) => ({
+  const visible = segments.filter((s) => !HIDDEN_SEGMENTS.has(s));
+  return visible.map((segment, index) => ({
     label: segment.charAt(0).toUpperCase() + segment.slice(1).replace(/-/g, " "),
-    href: "/" + segments.slice(0, index + 1).join("/"),
-    isLast: index === segments.length - 1,
+    href: "/" + segments.slice(0, segments.indexOf(segment) + 1).join("/"),
+    isLast: index === visible.length - 1,
   }));
 }
 
