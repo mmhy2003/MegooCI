@@ -242,7 +242,7 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
                   </div>
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent side="top" align="start">
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem>
