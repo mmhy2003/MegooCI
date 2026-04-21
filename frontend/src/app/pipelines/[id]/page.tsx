@@ -100,10 +100,9 @@ export default function PipelineDetailPage() {
 
   async function handleTrigger() {
     try {
-      await buildsApi.trigger(id);
+      const build = await buildsApi.trigger(id);
       toast.success("Build triggered!");
-      const b = await buildsApi.list({ pipeline_id: id, limit: 20 });
-      setBuilds(b);
+      router.push(`/builds/${build.id}`);
     } catch {
       toast.error("Failed to trigger build");
     }
