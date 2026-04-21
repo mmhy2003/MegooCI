@@ -4,13 +4,14 @@
 | --- | --- |
 | **Product Name** | MegooCI |
 | **Tagline** | A simpler, modern open-source alternative to Jenkins |
-| **Document Status** | Draft v1.5 |
+| **Document Status** | Draft v1.7 |
 | **Last Updated** | 2026-04-21 |
 | **Owner** | MegooCI Core Team |
 | **License (planned)** | Apache-2.0 (OSS) |
 
 > **Change log**
 >
+> - **v1.7 (2026-04-21)** — **RBAC, user invitations, step action framework, and AI pipeline assistant delivered.** (1) Role-based access control: `Role`, `UserRole` tables with three seeded system roles (`admin`, `developer`, `viewer`) and granular permissions; `require_permission()` FastAPI dependency; frontend `usePermission` hook; admin user management page at `/admin/users` with role assignment. (2) User invitations (F-7.3): `Invite` model, admin-only CRUD endpoints (`/api/v1/invites`), SHA-256 hashed invite tokens, configurable expiry, email delivery via SMTP with graceful fallback, frontend `/invite/accept` flow. (3) Password reset: `/forgot-password` and `/reset-password` UI pages with backend endpoints. (4) Step action framework (§6.19): pluggable `StepActionHandler` registry with concrete handlers for `shell`, `docker_build`, `docker_login`, `docker_push`, `git_clone`, `git_pull`, `git_push`, `ssh_exec`, `wait_webhook`, and `wait_input`; template interpolation resolves `${{ secrets.NAME }}` and `${{ env.NAME }}` at runtime with scoped secret/env loading (global → project → pipeline); gate resolution endpoints at `/api/v1/gates/` for webhook callbacks and manual approvals; Go agent updated with step-type awareness. Alembic migrations `004_step_actions` and `005_roles_invites`. (5) AI pipeline assistant (F-12.1, F-12.3): backend `POST /api/v1/ai/assistant` endpoint using OpenAI-compatible chat API, system prompt with full step-type documentation, project-context-aware generation (injects available secrets/env vars), multi-turn chat history; frontend `AiAssistantPanel` with chat UI, quick-prompt suggestions, YAML preview, and one-click apply; `DocsPanel` for pipeline syntax reference; `PipelineEditor` wrapper integrating YAML editor + AI panel + docs panel. (6) Pipeline inline name editing. (7) WebSocket URL construction fixed (dynamic `window.location` instead of hardcoded). (8) Async session factory for Celery tasks. Updated §6.7, §6.12, §6.14, §6.15, §6.19, §9.2, §10.
 > - **v1.6 (2026-04-21)** — **Python pipeline format removed; YAML is now the sole authoring format.** Imperative Python pipelines (F-1.2) and the `megooci-sdk` are dropped from scope; all pipeline authoring is declarative YAML (`megooci.yaml`). The frontend pipeline editor now ships with **CodeMirror 6 YAML syntax highlighting** (replacing the plain `<textarea>`), with a custom cyberpunk theme matching the app design system. The YAML/Python format toggle is removed from the pipeline creation UI. Backend schema enforces `definition_format = "yaml"` via `Literal["yaml"]`. AI pipeline assistant (F-12.*) will generate and edit YAML pipelines exclusively via a chat-based interface. Updated §6.1, §6.12, §6.15, §7, §9.2, §11.
 > - **v1.5 (2026-04-21)** — Global search delivered (§6.17). Meilisearch added as an infrastructure dependency; backend indexes projects, pipelines, and builds on startup and incrementally on CRUD. New `GET /api/v1/search` endpoint with multi-index query. Frontend ships a fully-functional `Cmd/Ctrl+K` command palette with debounced search, keyboard navigation, and grouped results by entity type. Build log viewer gains in-log search (`Ctrl/Cmd+F`). UI/UX overhaul: cyberpunk-inspired color theme with neon-cyan/magenta palette, three-way theme toggle (Light / Dark / System) with OS-level tracking and flash-free SSR, custom hand-rolled UI primitives (badge variants, promise-based confirm dialog, dialog system, avatar with initials fallback), visual stage graph, terminal-style build log viewer with auto-scroll/follow/fullscreen/copy, collapsible sidebar with mobile drawer, dynamic breadcrumbs, and PWA support (service worker + web manifest). Updated §6.9, §6.14, §6.15, §9.1, §9.2.
 > - **v1.4 (2026-04-20)** — Agent control plane delivered (F-3.4, F-3.7). New `agent/` Go module ships the `megooci-agent` binary (Cobra CLI, gorilla/websocket client, subprocess executor, heartbeat, reconnect, capacity semaphore, cancellation). Backend gains `/api/v1/ws/agents/{id}/connect` with bcrypt-hashed token auth, a Redis-queue dispatcher, `/rotate-token` endpoint, and a try-agent-first / fall-back-to-local execution strategy. Alembic migration `003_agent_tokens.py`. §6.15 status updated accordingly.
@@ -201,7 +202,7 @@ Features are grouped into **Must-Have (M)** for v1.0, **Should-Have (S)** for v1
 | --- | --- | --- |
 | F-7.1 | Local username/password auth | M |
 | F-7.2 | **Runtime signup toggle via env var** (`MEGOOCI_SIGNUP_ENABLED=true/false`) — hides the signup UI, disables `POST /api/auth/signup`, and returns `403 SignupDisabled`. Admins can still invite users when signup is off. | M |
-| F-7.3 | Admin-initiated user invites (email + one-time link) | M |
+| F-7.3 | Admin-initiated user invites (email + one-time link, SMTP with graceful fallback, configurable expiry) | M |
 | F-7.4 | First-run bootstrap: first created account becomes admin; signup automatically disabled afterward unless explicitly re-enabled | M |
 | F-7.5 | OAuth2/OIDC (GitHub, Google, Okta, generic) | M |
 | F-7.6 | SAML 2.0 | S |
@@ -372,6 +373,14 @@ All operational toggles are driven by environment variables so administrators ca
 | `MEGOOCI_GITHUB_OAUTH_CLIENT_SECRET` | — | GitHub OAuth app Client Secret (Phase 2). |
 | `MEGOOCI_GITLAB_OAUTH_CLIENT_ID` | — | GitLab OAuth application ID (Phase 2). |
 | `MEGOOCI_GITLAB_OAUTH_CLIENT_SECRET` | — | GitLab OAuth application secret (Phase 2). |
+| `MEGOOCI_SMTP_HOST` | — | SMTP server hostname for sending invitation emails. Leave empty to disable email delivery (invite links are still returned in the API response for manual sharing). |
+| `MEGOOCI_SMTP_PORT` | `587` | SMTP server port. |
+| `MEGOOCI_SMTP_USER` | — | SMTP username for authentication. |
+| `MEGOOCI_SMTP_PASSWORD` | — | SMTP password for authentication. |
+| `MEGOOCI_SMTP_FROM_EMAIL` | `noreply@megooci.local` | "From" email address for outgoing emails. |
+| `MEGOOCI_SMTP_FROM_NAME` | `MegooCI` | "From" display name for outgoing emails. |
+| `MEGOOCI_SMTP_TLS` | `true` | Whether to use TLS for SMTP connections. |
+| `MEGOOCI_INVITE_EXPIRY_HOURS` | `72` | How many hours an invite link remains valid before it expires. |
 | `MEGOOCI_WEBHOOK_DELIVERY_RETENTION` | `200` | Max `WebhookDelivery` rows kept per linked repository; older rows pruned on insert. |
 
 ### 6.15 Implementation Status Snapshot (as of 2026-04-21)
@@ -382,11 +391,11 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 
 #### 6.15.1 Backend (`backend/`)
 
-**Stack** — ✅ FastAPI + SQLAlchemy 2 (async) + Pydantic v2 + Celery (Redis broker) + Alembic + `python-jose` + `bcrypt` + `PyYAML` + `meilisearch-python-sdk`. Python 3.12. Versions in `pyproject.toml` are mostly unpinned. **No AI SDKs** and **no OCI/registry libraries** are listed as dependencies.
+**Stack** — ✅ FastAPI + SQLAlchemy 2 (async) + Pydantic v2 + Celery (Redis broker) + Alembic + `python-jose` + `bcrypt` + `PyYAML` + `meilisearch-python-sdk` + `httpx` (AI provider client). Python 3.12. Versions in `pyproject.toml` are mostly unpinned. **No OCI/registry libraries** are listed as dependencies.
 
-**API routers under `/api/v1/`:** `auth`, `projects`, `pipelines`, `builds`, `secrets-env`, `agents`, `system`, `websocket`, `search`. Plus `GET /health` on the root app.
+**API routers under `/api/v1/`:** `auth`, `projects`, `pipelines`, `builds`, `secrets-env`, `agents`, `system`, `websocket`, `search`, `roles`, `users`, `invites`, `gates`, `ai`. Plus `GET /health` on the root app.
 
-**Data model (`backend/app/models/`):** `User`, `Project`, `Pipeline`, `Trigger`, `WebhookEndpoint`, `Build`, `Stage`, `Step`, `LogChunk`, `Artifact`, `Agent`, `Secret`, `EnvVar`, `AuditLogEntry`. **Missing** vs §10: `Role`, `UserRole`, `Invite`, `OutgoingWebhook`, `ContainerRepository`, `ContainerImage`, `ContainerTag`, `RegistryDeployToken`, `RegistryEvent`, `AiConversation`, `AiMessage`.
+**Data model (`backend/app/models/`):** `User`, `Project`, `Pipeline`, `Trigger`, `WebhookEndpoint`, `Build`, `Stage`, `Step`, `LogChunk`, `Artifact`, `Agent`, `Secret`, `EnvVar`, `AuditLogEntry`, `Role`, `UserRole`, `Invite`. **Missing** vs §10: `OutgoingWebhook`, `ContainerRepository`, `ContainerImage`, `ContainerTag`, `RegistryDeployToken`, `RegistryEvent`, `AiConversation`, `AiMessage`.
 
 | Area | PRD ref | Status | Notes |
 | --- | --- | --- | --- |
@@ -394,16 +403,17 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 | `MEGOOCI_SIGNUP_ENABLED` runtime gate + first-user becomes admin | F-7.2, F-7.4 | 🟡 | Flag enforced. **Bug:** the "auto-disable signup after first admin" path mutates the in-memory `Settings` object only — not persisted, so signup re-enables on every restart. |
 | OIDC / OAuth2 · SAML · LDAP | F-7.5, F-7.6, F-7.7 | ❌ | Not implemented. |
 | API tokens / PATs per user | F-7.9 | ❌ | Only JWT access + refresh exist. |
-| Admin-initiated invites | F-7.3 | ❌ | No model, no endpoints. |
-| RBAC (Role / UserRole, scoped permissions) | F-7.8 | ❌ | No tables; `User.is_admin` boolean is the only authorization primitive. |
+| Admin-initiated invites | F-7.3 | ✅ | `Invite` model + Alembic migration `005_roles_invites.py`. Admin-only endpoints: `POST /api/v1/invites` (create), `GET /api/v1/invites` (list), `POST /api/v1/invites/{id}/revoke` (revoke), `POST /api/v1/invites/{id}/resend` (resend email). SHA-256 hashed token, configurable expiry (`MEGOOCI_INVITE_EXPIRY_HOURS`). Invite acceptance: `POST /api/v1/auth/accept-invite` creates user with assigned role. SMTP email delivery via `core/email.py` with graceful fallback — invite link always returned in API response for manual sharing. Frontend: `/invite/accept` page, invitation management in admin users page. |
+| RBAC (Role / UserRole, scoped permissions) | F-7.8 | ✅ | `Role` + `UserRole` tables via migration `005_roles_invites.py`. Three seeded system roles: `admin` (full access), `developer` (project + pipeline + build + secret management), `viewer` (read-only). Permissions stored as a Postgres `ARRAY(String)` on `Role`; scoping via `scope_type` / `scope_id` on `UserRole`. `require_permission()` FastAPI dependency factory checks user's aggregated permissions (admins bypass). Admin user management page at `/admin/users` with role assignment, user creation, and activation/deactivation. Frontend `usePermission` / `useAnyPermission` hooks for UI-level gating. All existing CRUD endpoints refactored to enforce permission checks. |
 | Projects / Pipelines / Builds / Stages / Steps CRUD | F-1.\* | ✅ | With `definition_format` (enforced `"yaml"` via `Literal["yaml"]`) and `yaml_content`. |
 | YAML pipeline parser, compiler, validator | F-1.1 | 🟡 | `services/pipeline_compiler.py` has `parse_yaml_pipeline`, `compile_to_build_graph`, and `validate_pipeline`. **Validation is not called** on pipeline create/update; it runs implicitly at `POST /builds/{pipeline_id}/trigger`. |
 | ~~Imperative Python pipelines + sandbox~~ | ~~F-1.2~~ | — | **Removed from scope.** YAML is the sole pipeline format. |
 | Freestyle jobs · Multi-branch · Parameterized · Matrix | F-1.3 – F-1.6 | ❌ | None of these are wired into the trigger or executor. |
 | Parallel stages, conditional `when`, matrix/axis | F-1.6 – F-1.8 | ❌ | Executor runs stages strictly sequentially; `when` is not evaluated; no matrix expansion. |
-| Pipeline env variable scoping & inheritance | F-1.9 | ❌ | Secrets/env vars are not loaded by the executor at build time. |
+| Pipeline env variable scoping & inheritance | F-1.9 | ✅ | Template interpolation module (`services/step_actions/interpolation.py`) resolves `${{ secrets.NAME }}` and `${{ env.NAME }}` at runtime. Scoped loading: global → project → pipeline (later scope wins on name collision). Secrets are decrypted on-demand; env vars loaded from plaintext `EnvVar` rows. |
 | Local executor (shell on controller) | F-3.1 | ✅ | `services/build_executor.py` invokes `asyncio.create_subprocess_shell(step.command)` as a fallback when no agent is online. Used unchanged for back-compat. |
-| Docker / SSH / Kubernetes executors | F-3.2, F-3.3, F-3.5 | ❌ | Agent-side `executor.Executor` interface is in place for future implementations; only `Local` ships today. |
+| **Step action framework** | §6.19 | ✅ | Pluggable `StepActionHandler` registry with 10 built-in handlers: `shell` (run), `docker` (docker_login, docker_build, docker_push), `git` (git_clone, git_pull, git_push), `ssh` (ssh_exec), `wait` (wait_webhook, wait_input). Template interpolation resolves `${{ secrets.X }}` / `${{ env.X }}` before handler execution. Gate resolution endpoints at `/api/v1/gates/`. Alembic migration `004_step_actions` adds `step_type` + `config_json` to Step model. Agent Go binary updated with step-type awareness. |
+| Docker / SSH / Kubernetes agent-side executors | F-3.2, F-3.3, F-3.5 | 🟡 | Step action handlers exist for Docker and SSH commands in the controller's step_actions framework, but the agent-side `executor.Executor` interface only has `Local` implemented. K8s executor is not built. |
 | **Agent control plane** (Go binary + WebSocket + token auth + dispatcher) | F-3.4 | ✅ | `agent/` module: `megooci-agent` Go binary with Cobra CLI, gorilla/websocket client, subprocess executor, heartbeat, reconnect, cancellation. Backend: `agents_ws.py` WS endpoint, `core/agent_auth.py` bcrypt token auth, `services/agent_dispatcher.py` Redis queue + pub/sub, `build_executor.py` dispatches to a connected agent when available and falls back to local otherwise. Alembic migration `003_agent_tokens.py` persists bcrypt-hashed tokens + 12-char prefix + issued-at. Dockerfile + GoReleaser config included. |
 | Agent capacity limits | F-3.7 | ✅ | Enforced client-side via a buffered-channel semaphore in the Go agent (`internal/executor/local.go`). |
 | Agent labels / label-based scheduling | F-3.6 | 🟡 | `Agent.labels` is persisted and shown in the UI; Phase-1 dispatcher picks the least-recently-used online agent without consulting labels. Label matching is the next scheduler improvement. |
@@ -413,7 +423,7 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 | JUnit / coverage ingestion | F-5.7, F-5.8 | ❌ | Not implemented. |
 | Secret store (Fernet-encrypted, scoped) + types | F-8.1, F-8.2, F-8.3 | ✅ | `core/security.py` uses Fernet keyed from `MEGOOCI_SECRET_KEY`. **Note:** Fernet is AES-128-CBC + HMAC-SHA256, **not AES-256-GCM as specified in F-8.1**. Scoping via `scope_type` / `scope_id`; `secret_type` defaults to `"text"` but is not enum-validated. |
 | Env vars (non-secret) | F-8.4 | ✅ | Separate `EnvVar` model; values stored **plaintext** (consistent with F-8.4). |
-| Reference by name in pipelines (`${{ secrets.X }}`) | F-8.5 | ❌ | No template interpolation; executor never loads secret/env values. |
+| Reference by name in pipelines (`${{ secrets.X }}`) | F-8.5 | ✅ | `services/step_actions/interpolation.py` resolves `${{ secrets.NAME }}` and `${{ env.NAME }}` in step config at execution time. Scoped secret/env loading (global → project → pipeline) with later scope overriding earlier. |
 | Automatic log masking of secret values | F-8.6 | ❌ | Not implemented. |
 | Incoming Git webhooks (GitHub / GitLab / Generic) with HMAC | F-2.2, F-11.1, F-16.\* | ✅ | `POST /api/v1/webhooks/git/{slug}` in `api/v1/webhooks_git.py`; per-provider verification in `services/git_providers.py`; replay protection via `UNIQUE(project_repository_id, provider_delivery_id)`. Legacy pipeline-scoped `WebhookEndpoint` table remains unused. |
 | Admin-scoped Git provider connections + per-project repo links | F-16.1 – F-16.14 | ✅ | Models `GitProviderConnection`, `ProjectRepository`, `WebhookDelivery` + Alembic `002_git_integration.py`; admin routes `/api/v1/git/connections` and project routes `/api/v1/projects/{id}/repositories`. PAT only; OAuth deferred to Phase 2. |
@@ -422,7 +432,8 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 | SCM polling · upstream/downstream · tag/release triggers | F-2.4, F-2.5, F-2.6 | ❌ | None. |
 | `Trigger` model (storage) | — | 🟡 | Exists; no API and no evaluator. |
 | Notifications (email / Slack / Teams / Discord / generic webhook) | F-6.\* | ❌ | No config, no sender, no templates. |
-| AI provider adapter + streaming chat endpoints | F-12.\* | 🟡 | Env vars defined (`MEGOOCI_AI_*`) and surfaced via `GET /system/info.ai` with derived readiness strings. **No chat/completion endpoints**, no provider clients, no prompt templates. |
+| AI pipeline assistant (chat endpoint + project context) | F-12.1, F-12.3, F-12.6, F-12.7 | ✅ | `POST /api/v1/ai/assistant` endpoint using OpenAI-compatible chat API via `httpx`. System prompt includes full step-type reference documentation (all §6.19 action types). Project-context-aware: when `project_id` is provided, injects available secret names and env var names/values into the system prompt so the AI uses real placeholder names. Multi-turn chat via `history` field. YAML extraction from AI responses (fenced or bare). Kill switch: returns 503 when `MEGOOCI_AI_ENABLED=false` or API key is missing. Provider-agnostic: any OpenAI-compatible endpoint works via `MEGOOCI_AI_BASE_URL` (OpenAI, Azure, Ollama, vLLM). **Not yet streaming** — full response is returned after completion. |
+| AI streaming / fix-it suggestions / privacy controls | F-12.2, F-12.5, F-12.8, F-12.9 | 🟡 | Repository-aware generation (F-12.2) not implemented — no repo introspection. Fix-it suggestions (F-12.5), privacy controls (F-12.8), and lint+dry-run validation before save (F-12.9) are not implemented. |
 | Embedded OCI/Docker registry (`/v2/...`) | F-13.\* | ❌ | No `/v2/...` routes; no `ContainerRepository` / `ContainerImage` / `ContainerTag` / `RegistryDeployToken` models. `MEGOOCI_REGISTRY_ENABLED` / `MEGOOCI_REGISTRY_HOST` are only reflected in `/system/info` for the UI. |
 | Audit log storage | F-7.10 | 🟡 | `AuditLogEntry` table exists; **no writer code** anywhere in the request pipeline. |
 | System info (config snapshot) | — | ✅ | `GET /api/v1/system/info` returns `SystemInfo` with AI / storage / auth / registry blocks. |
@@ -430,35 +441,40 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 | Prometheus `/metrics` | F-10.2 | ❌ | No metrics endpoint. |
 | Structured JSON logging | F-10.3 | ❌ | Standard uvicorn logging. `MEGOOCI_LOG_LEVEL` is exposed but not applied to logger config. |
 | Backup / restore tooling | F-10.5 | ❌ | Not present. |
-| Alembic migrations | — | ✅ | Revision `001_initial_schema.py` present. **Redundancy:** `database.init_db()` also calls `Base.metadata.create_all()` on startup, overlapping with migrations. |
+| Alembic migrations | — | ✅ | Revisions: `001_initial_schema`, `002_git_integration`, `003_agent_tokens`, `004_step_actions`, `005_roles_invites`, `006_update_role_permissions`. **Redundancy:** `database.init_db()` also calls `Base.metadata.create_all()` on startup, overlapping with migrations. |
 
 #### 6.15.2 Frontend (`frontend/`)
 
-**Stack** — ✅ Next.js 15 (App Router) + React 19 + TypeScript + Tailwind 3 + TanStack Query 5 + Zustand 5 + `sonner` + `lucide-react` + `class-variance-authority` + **CodeMirror 6** (`@uiw/react-codemirror` + `@codemirror/lang-yaml`) + custom UI primitives. **No charting library**, **no Radix UI packages** (UI primitives are hand-rolled to match the shadcn look). Custom `CommandPalette` replaces any need for `cmdk`.
+**Stack** — ✅ Next.js 15 (App Router) + React 19 + TypeScript + Tailwind 3 + TanStack Query 5 + Zustand 5 + `sonner` + `lucide-react` + `class-variance-authority` + **CodeMirror 6** (`@uiw/react-codemirror` + `@codemirror/lang-yaml`) + custom UI primitives. **No charting library**, **no Radix UI packages** (UI primitives are hand-rolled to match the shadcn look). Custom `CommandPalette` replaces any need for `cmdk`. `usePermission` hook for role-based UI gating.
 
-**Pages implemented:** `/`, `/login`, `/signup`, `/dashboard`, `/pipelines`, `/pipelines/new`, `/pipelines/[id]`, `/projects`, `/projects/[id]`, `/builds`, `/builds/[id]`, `/agents`, `/secrets`, `/settings`.
+**Pages implemented:** `/`, `/login`, `/signup`, `/dashboard`, `/pipelines`, `/pipelines/new`, `/pipelines/[id]`, `/projects`, `/projects/[id]`, `/builds`, `/builds/[id]`, `/agents`, `/secrets`, `/settings`, `/admin/users`, `/invite/accept`, `/forgot-password`, `/reset-password`.
 
-**UI primitives (`src/components/ui/`):** `avatar`, `badge`, `button`, `card`, `confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `scroll-area`, `select`, `separator`, `skeleton`, `textarea`.
+**UI primitives (`src/components/ui/`):** `avatar`, `badge`, `button`, `card`, `confirm-dialog`, `dialog`, `dropdown-menu`, `input`, `scroll-area`, `select`, `separator`, `skeleton`, `textarea`, `yaml-editor`.
+
+**Pipeline authoring components (`src/components/pipeline/`):** `pipeline-editor` (wrapper integrating YAML editor + side panels), `ai-assistant-panel` (chat-based AI pipeline generation), `docs-panel` (step type reference documentation).
 
 | Area | PRD ref | Status | Notes |
 | --- | --- | --- | --- |
 | **App shell — collapsible sidebar + mobile drawer** | F-9.7, F-18.7, F-18.8 | ✅ | Desktop: collapsible sidebar with state persisted to `localStorage`. Mobile: full-width off-canvas drawer with dark backdrop overlay and body scroll lock. 8 nav items (Dashboard, Pipelines, Projects, Builds, Agents, Secrets, Integrations [admin-only], Settings). User section at bottom with avatar dropdown (profile, theme cycle) and one-click logout with confirmation. Route change closes drawer. Dynamic breadcrumbs in header (full trail on desktop, page title + hamburger on mobile). |
 | Dashboard — stat cards + recent builds table | F-9.1 | ✅ | Cards: total pipelines, total builds, success rate, active agents. Table columns hide progressively on smaller viewports. |
 | Pipeline listing, detail, creation, edit | F-1.1 | ✅ | Detail has Overview / Builds / Configuration tabs; trigger build; delete with in-app confirm. |
-| YAML pipeline editor with syntax highlighting | F-1.1 | ✅ | **CodeMirror 6** with custom cyberpunk light/dark themes, YAML language mode, line numbers, code folding, bracket matching. Used on both the create and detail (edit/read-only) pages. Python format toggle removed; YAML is the sole format. |
-| Builds list + detail with stage graph + live logs + re-run / cancel | F-9.2, F-5.1, F-18.5, F-18.6 | ✅ | `StageGraph` (status-aware colored buttons with arrow connectors, clickable with ring highlight, spin animation on running stages) + `BuildLogViewer` (terminal-dark theme `#0d1117`, line numbers, timestamps, stderr red coloring, auto-scroll/follow, fullscreen toggle, copy-all, **in-log search `Ctrl/Cmd+F`** with yellow `<mark>` highlighting); WebSocket via `useWebSocket` hook with auto-reconnect every 3 s. **WS URL is hardcoded to `ws://<hostname>:8000/ws/...`** instead of using the Next.js rewrite proxy. |
+| YAML pipeline editor with syntax highlighting + AI panel + docs | F-1.1, F-12.1 | ✅ | **CodeMirror 6** with custom cyberpunk light/dark themes, YAML language mode, line numbers, code folding, bracket matching. Wrapped in `PipelineEditor` component with toggleable side panels: AI assistant (chat-based pipeline generation) and Docs (step type reference). Used on both the create and detail (edit/read-only) pages. Python format toggle removed; YAML is the sole format. Pipeline name is editable inline on the detail page. |
+| Builds list + detail with stage graph + live logs + re-run / cancel | F-9.2, F-5.1, F-18.5, F-18.6 | ✅ | `StageGraph` (status-aware colored buttons with arrow connectors, clickable with ring highlight, spin animation on running stages) + `BuildLogViewer` (terminal-dark theme `#0d1117`, line numbers, timestamps, stderr red coloring, auto-scroll/follow, fullscreen toggle, copy-all, **in-log search `Ctrl/Cmd+F`** with yellow `<mark>` highlighting); WebSocket via `useWebSocket` hook with auto-reconnect every 3 s. WS URL now dynamically derived from `window.location` (fixed from previously hardcoded). Build status polling with automatic refresh on status changes. Permission-gated retry/cancel actions via `usePermission`. |
 | Projects listing / detail with secrets + env vars tabs | F-9.3 | ✅ | Scoped secrets + env vars CRUD in project settings tab. |
 | Agents listing + admin-only registration + one-time token card | F-3.4 | ✅ | 15-second polling; destructive actions use `useConfirm`. |
 | Secrets / env vars global page | F-8.\* | ✅ | `/secrets` aggregates per project with add + delete. `envVarsApi.update` exists but has **no UI** surface (values can only be deleted + re-created). |
 | Settings page mirror of `GET /system/info` (profile, AI, auth, storage, registry) | — | ✅ | Read-only; registry block is purely informational. |
 | **Promise-based confirmation dialogs** (replaces `window.confirm`) | UX principle 9, F-18.4 | ✅ | `ConfirmProvider` + `useConfirm` hook. 4 tones: `default`, `destructive`, `warning`, `success`, each with distinct icon, icon background color, and button variant. Backdrop blur, scale/translate entry animation, body scroll lock, keyboard handling (Esc/Enter), auto-focus on confirm button. Zero remaining `window.confirm` calls. |
 | Signup page gated by `signup_enabled` | F-7.2 | 🟡 | Backend flag is **displayed** on Settings but not yet used to conditionally hide `/signup` or the "Create one" link on `/login`. |
+| **Admin user management** | F-7.3, F-7.8 | ✅ | `/admin/users` page: tabbed view with Users list (create, deactivate, role assignment) and Invitations management (create, revoke, resend, copy link). Role selector (admin/developer/viewer), temporary password generation for new users. Permission-gated (admin-only). |
+| **Password reset flow** | F-7.1 | ✅ | `/forgot-password` page (email entry) and `/reset-password` page (token + new password). Backend endpoints in `auth.py`. |
 | **Cyberpunk design system** | F-18.1 | ✅ | Full cyberpunk-inspired color theme. Light: lavender surfaces, teal-cyan primary, magenta accents. Dark: deep violet-black surfaces, neon cyan primary, hot magenta destructive. Custom CSS variables for all semantic tokens in `globals.css`. |
 | **Three-way theme toggle (Light / Dark / System)** | F-9.5, F-18.2 | ✅ | Custom `ThemeProvider` (not `next-themes`) persists to `localStorage` under `megooci_theme`. System mode tracks `prefers-color-scheme` and auto-updates. Two variants: `segmented` (settings pages) and `icon` (header). Flash-free SSR via inline script in `layout.tsx`. |
 | **Global search / `⌘K` command palette** | F-9.4, F-9.6, F-17.6 | ✅ | `CommandPalette` component triggered by `Cmd/Ctrl+K` or header search bar click. 200 ms debounced Meilisearch query via `GET /api/v1/search`. Results grouped by type (Project/Pipeline/Build) with type-specific icons and colors. Full keyboard navigation (↑↓ to move, Enter to open, Esc to close). Desktop header shows a styled search input with "Cmd+K" hint; mobile shows a compact icon button. |
 | Notifications UI | F-6.4 | ❌ | Header bell icon has no dropdown; no notification center, no Slack/email config UI. |
 | "New Build" header quick action | — | ❌ | Button exists but has no `onClick`. |
-| AI chat panel / "Generate with AI" / fix-it suggestions | F-12.\* | ❌ | No AI UI at all; Settings only reflects backend readiness. |
+| AI chat panel / "Generate with AI" | F-12.1, F-12.3 | ✅ | `AiAssistantPanel` component: full chat UI with message history, quick-prompt suggestions (5 presets), YAML code block rendering with syntax highlighting, copy and one-click "Apply to editor" actions. `DocsPanel`: interactive step-type reference documentation panel. `PipelineEditor` wrapper: integrates `YamlEditor` + toggleable AI panel (sparkle icon) + docs panel (book icon). Available on both pipeline create and edit pages. Project-context-aware (passes `projectId` to backend for secret/env injection). |
+| AI fix-it / repo-aware / privacy | F-12.2, F-12.5, F-12.8, F-12.9 | ❌ | No repo introspection UI, no fix-it suggestions on failed builds, no privacy toggle per project, no lint-before-save validation. |
 | Container registry UI (image browser, tags, pull snippets) | F-13.12 | ❌ | Only read-only status in Settings. |
 | Artifact browser / downloads | F-5.3 | ❌ | No UI. |
 | JUnit / coverage results view | F-5.7, F-5.8 | ❌ | No UI. |
@@ -476,26 +492,32 @@ Legend: ✅ Implemented · 🟡 Partial (model, UI scaffolding, or config-only; 
 - ✅ Operators can view current backend configuration (AI, auth, storage, registry) via the Settings page.
 - ✅ **Global search** works end-to-end: Meilisearch indexes are synced on startup, `Cmd/Ctrl+K` opens the command palette, and users can search across projects, pipelines, and builds with instant, typo-tolerant results and keyboard navigation.
 - ✅ **Design system** is cohesive: cyberpunk theme with Light / Dark / System modes, semantic badges, promise-based confirm dialogs, visual stage graph, terminal-style build log viewer with in-log search, collapsible sidebar with mobile drawer, dynamic breadcrumbs, and PWA support.
-- ✅ **YAML editor** ships with CodeMirror 6 syntax highlighting on pipeline create and detail pages, matching the cyberpunk design system in both light and dark modes.
-- 🟡 Cancellation, retry, and live log streaming all work. A cancel on a running build now also signals any agent executing a step; the build log WebSocket to the browser remains unauthenticated.
-- ❌ Docker / SSH / K8s executors, artifact flow, notifications, and registry are still unbuilt.
+- ✅ **YAML editor** ships with CodeMirror 6 syntax highlighting on pipeline create and detail pages, integrated with an AI assistant chat panel and a step-type docs panel.
+- ✅ **RBAC** is functional: three system roles (admin, developer, viewer), scoped `UserRole` assignments, permission checks on all CRUD endpoints, frontend gating via `usePermission` hook.
+- ✅ **User invitations** work end-to-end: admins create invites with a role, optionally send via SMTP email, users accept via `/invite/accept` page to create an account.
+- ✅ **AI pipeline assistant** generates YAML pipelines from natural-language prompts with project-context awareness (available secrets/env vars), multi-turn chat, and one-click apply.
+- ✅ **Step action framework** supports 10 action types (shell, docker_build, docker_login, docker_push, git_clone, git_pull, git_push, ssh_exec, wait_webhook, wait_input) with runtime template interpolation (`${{ secrets.X }}`, `${{ env.X }}`).
+- ✅ **Password reset** flow with forgot-password and reset-password pages.
+- 🟡 Cancellation, retry, and live log streaming all work. WebSocket URL is now dynamically resolved. The build log WebSocket to the browser remains unauthenticated.
+- ❌ K8s executor, artifact flow, notifications, and registry are still unbuilt.
 
 #### 6.15.4 Largest gaps vs. the specification (priority-ordered for upcoming work)
 
-1. **Pipeline runtime fidelity.** Parallel stages (F-1.7), conditional `when` (F-1.8), matrix (F-1.6), parameters (F-1.5), and **secret/env injection** into the executor (F-8.5, F-1.9). The agent side is ready to receive richer step descriptors; the controller's compiler output needs to catch up.
-2. **Alternative executors on the agent** — Docker (F-3.2), SSH (F-3.3), Kubernetes (F-3.5). The agent exposes an `executor.Executor` interface; only `Local` ships today.
-3. **Label-based agent scheduling** (F-3.6). Labels are persisted and displayed; the dispatcher currently ignores them when selecting an online agent.
-4. **Outgoing webhooks** (F-11.2). Incoming Git webhooks are implemented (§6.16); outgoing webhooks with HMAC + retries are not.
-5. **Scheduled triggers** via Celery Beat (F-2.3). Beat is wired up; the schedule is empty.
-6. **Artifacts + test results** (F-5.3 – F-5.8). No endpoints, no on-disk layout, no UI.
-7. **Embedded OCI/Docker registry** (F-13.\*). Entirely unbuilt and the largest net-new feature in the PRD.
-8. **AI assistant** (F-12.\*). Config-only today; needs provider adapter, streaming chat endpoint, and the "Generate with AI" UI flow.
-9. **Audit-log writers.** Table exists; no handler records events (F-7.10).
-10. **Notifications** (F-6.\*). No config, no sender, no templates, no notification center UI. Header bell icon has no dropdown.
-11. **Observability** — `/metrics` (F-10.2) and structured JSON logging (F-10.3).
-12. **Enterprise auth** — OIDC (F-7.5), SAML/LDAP (F-7.6/7), API tokens (F-7.9), invites (F-7.3), RBAC (F-7.8), and a **durable** signup-disable mechanism that survives restarts (F-7.2/4).
+1. **Pipeline runtime fidelity.** Parallel stages (F-1.7), conditional `when` (F-1.8), matrix (F-1.6), and parameters (F-1.5). The agent side is ready to receive richer step descriptors; the controller's compiler output needs to catch up. *(Note: secret/env injection (F-8.5, F-1.9) is now resolved — template interpolation is implemented.)*
+2. **Label-based agent scheduling** (F-3.6). Labels are persisted and displayed; the dispatcher currently ignores them when selecting an online agent.
+3. **Outgoing webhooks** (F-11.2). Incoming Git webhooks are implemented (§6.16); outgoing webhooks with HMAC + retries are not.
+4. **Scheduled triggers** via Celery Beat (F-2.3). Beat is wired up; the schedule is empty.
+5. **Artifacts + test results** (F-5.3 – F-5.8). No endpoints, no on-disk layout, no UI.
+6. **Embedded OCI/Docker registry** (F-13.\*). Entirely unbuilt and the largest net-new feature in the PRD.
+7. **AI streaming + advanced features** (F-12.2, F-12.5, F-12.8, F-12.9). Chat endpoint works but is not streaming. Repo-aware generation, fix-it suggestions, per-project privacy controls, and lint+dry-run before save are not implemented.
+8. **Audit-log writers.** Table exists; no handler records events (F-7.10).
+9. **Notifications** (F-6.\*). No config, no sender, no templates, no notification center UI. Header bell icon has no dropdown.
+10. **Observability** — `/metrics` (F-10.2) and structured JSON logging (F-10.3).
+11. **Enterprise auth** — OIDC (F-7.5), SAML/LDAP (F-7.6/7), API tokens (F-7.9), and a **durable** signup-disable mechanism that survives restarts (F-7.2/4).
+12. **Log masking** (F-8.6). Secrets are resolved at runtime but their values are not masked in log output.
+13. **Kubernetes executor** (F-3.5). The agent's `executor.Executor` interface is defined; only `Local` ships today. Docker (F-3.2) and SSH (F-3.3) step types exist in the step action framework but are not wired as agent-side executors.
 
-> **Closed since last snapshot:** Global search / command palette (F-9.4) is now fully functional (§6.17). Dark mode has been upgraded to a three-way theme toggle (F-9.5, F-18.2). All `window.confirm` calls replaced with promise-based dialogs (F-18.4). PWA support shipped (F-18.11). **YAML syntax-highlighted editor** now ships on pipeline create and detail pages (CodeMirror 6 with cyberpunk theme). Python pipeline format (F-1.2) removed from scope — YAML is the sole format.
+> **Closed since last snapshot:** (1) **RBAC** (F-7.8) is now fully functional with three system roles, scoped user-role assignments, and permission-gated endpoints. (2) **User invitations** (F-7.3) work end-to-end with email delivery, invite acceptance, and admin management UI. (3) **AI pipeline assistant** (F-12.1, F-12.3) ships with a chat UI, project-context-aware generation, multi-turn history, and one-click apply. (4) **Step action framework** (§6.19) delivers 10 action types with template interpolation for `${{ secrets.X }}` and `${{ env.X }}`. (5) **Secret/env injection** (F-8.5, F-1.9) is resolved via the interpolation module. (6) **Password reset** flow added. (7) **WebSocket URL** is now dynamically derived instead of hardcoded. (8) Pipeline name inline editing on detail page.
 
 ### 6.16 Git Provider Integration
 
@@ -566,6 +588,58 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 | F-18.9 | **Custom dialog system** | M | Fully custom dialog (no Radix dependency) with controlled/uncontrolled modes. Mobile-first: `items-end` (bottom sheet) on small screens, `items-center` on SM+. Escape key handling, backdrop click to close. |
 | F-18.10 | **Avatar with initials fallback** | M | Generates initials from name/email, supports `sm`/`md`/`lg` sizes, with image error fallback to initials. |
 | F-18.11 | **PWA support** | S | Service worker registration in production. Full PWA metadata: web manifest, Apple web app config, theme colors, viewport fit cover, app icons in multiple sizes. |
+
+### 6.19 Step Action Framework
+
+MegooCI pipelines support multiple **step action types** beyond simple shell commands. Each action type is implemented as a pluggable `StepActionHandler` with a standard interface: an async `execute()` generator that yields log lines and a final result, plus a `validate_config()` method for schema validation. The build executor dispatches each step to the appropriate handler via a global registry.
+
+All action types support **template interpolation**: `${{ secrets.NAME }}` and `${{ env.NAME }}` placeholders are resolved at runtime before the handler receives its config. Secret/env loading follows a scoped precedence: global → project → pipeline (later scope wins on name collision). Secrets are decrypted on-demand using the configured `MEGOOCI_SECRET_KEY`.
+
+| ID | Step Type | Description |
+| --- | --- | --- |
+| F-19.1 | `run` (shell) | Execute an arbitrary shell command. The original and most common step type. |
+| F-19.2 | `docker_login` | Authenticate with a container registry (registry, username, password). |
+| F-19.3 | `docker_build` | Build a Docker image with support for context, dockerfile, tags, build args, target, no-cache, and platform. |
+| F-19.4 | `docker_push` | Push one or more tagged images to a registry. |
+| F-19.5 | `git_clone` | Clone a Git repository with optional branch, depth (shallow clone), and checkout path. |
+| F-19.6 | `git_pull` | Pull latest changes from a remote branch. |
+| F-19.7 | `git_push` | Push commits to a remote branch with optional force flag. |
+| F-19.8 | `ssh_exec` | Execute commands on a remote server via SSH with private key auth, custom port, and per-command env vars. |
+| F-19.9 | `wait_webhook` | Pause pipeline execution until an external webhook callback is received. Configurable timeout and event-name matching. Gate resolved via `POST /api/v1/gates/webhook/{step_id}`. |
+| F-19.10 | `wait_input` | Pause pipeline execution until a user approves or rejects via the UI. Configurable timeout, prompt message, and allowed-users list. Gate resolved via `POST /api/v1/gates/input/{step_id}` (permission-gated). |
+
+#### 6.19.1 Agent-side support
+
+The Go agent (`agent/`) has been updated with step-type awareness. The agent protocol includes `step_type` and `config` fields in job descriptors. The local executor on the agent resolves the command to execute based on the step type (e.g., invoking `docker build` for `docker_build`, `ssh` for `ssh_exec`, etc.). Step types that are purely server-side (`wait_webhook`, `wait_input`) are handled by the controller rather than dispatched to agents.
+
+#### 6.19.2 Pipeline YAML examples
+
+```yaml
+stages:
+  - name: build
+    steps:
+      - docker_build:
+          context: "."
+          dockerfile: Dockerfile
+          tags:
+            - "ghcr.io/org/app:${{ env.VERSION }}"
+      - docker_push:
+          tags:
+            - "ghcr.io/org/app:${{ env.VERSION }}"
+
+  - name: deploy
+    steps:
+      - wait_input:
+          prompt: "Deploy to production?"
+          timeout: 86400
+      - ssh_exec:
+          host: deploy.example.com
+          user: deploy
+          private_key: ${{ secrets.SSH_KEY }}
+          commands:
+            - "cd /opt/app && docker compose pull"
+            - "docker compose up -d"
+```
 
 ---
 
@@ -691,7 +765,8 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 - Validation: Pydantic v2.
 - **Pipeline compiler** that converts YAML pipeline definitions into an internal **build graph** (DAG of stages and steps).
   - YAML → parsed and validated with Pydantic schemas.
-- **AI adapter layer** — provider-agnostic interface with concrete implementations for OpenAI, Anthropic, Azure OpenAI, and Ollama. Handles prompt templating, repo-context assembly, token streaming, and YAML diff generation for the chat-based pipeline assistant.
+- **AI adapter layer** — OpenAI-compatible chat API client via `httpx`, supporting any provider that speaks the OpenAI format (OpenAI, Azure OpenAI, Ollama, vLLM) via `MEGOOCI_AI_BASE_URL`. System prompt includes full step-type reference. Project-context-aware: injects available secret names and env var names/values for more accurate pipeline generation. Multi-turn chat history supported.
+- **Step action framework** — pluggable handler registry (`services/step_actions/`) with abstract `StepActionHandler` base class. Built-in handlers: shell, docker (login/build/push), git (clone/pull/push), ssh_exec, wait_webhook, wait_input. Template interpolation resolves `${{ secrets.X }}` / `${{ env.X }}` with scoped loading (global → project → pipeline). Gate endpoints for webhook callbacks and manual approvals.
 - **Embedded OCI/Docker registry** — the `/v2/…` endpoint tree is mounted directly on the FastAPI app (can also be bound to a separate port). Implements the OCI Distribution Spec v1.1 over the local filesystem, with Postgres for metadata (repos, tags, image↔build provenance) and Redis for upload session tracking and push/pull rate limiting. Auth is unified with MegooCI auth: Docker `login` uses a user's API token or a project deploy token.
 - Dispatches build jobs onto Celery queues.
 - Emits events to Redis pub/sub for frontend push updates.
@@ -762,10 +837,10 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 
 ## 10. Data Model (Logical, Simplified)
 
-- **User** `(id, email, name, auth_provider, created_at, is_active, is_admin)`
-- **Role** `(id, name, permissions[])`
-- **UserRole** `(user_id, role_id, scope_type, scope_id)`
-- **Invite** `(id, email, role_id, token_hash, expires_at, created_by)`
+- **User** `(id, email, name, auth_provider, created_at, updated_at, is_active, is_admin)`
+- **Role** `(id, name, description, permissions[], is_system, created_at, updated_at)` — three seeded system roles: `admin`, `developer`, `viewer`.
+- **UserRole** `(id, user_id, role_id, scope_type [global|project], scope_id_nullable, created_at)` with `UNIQUE(user_id, role_id, scope_type, scope_id)`.
+- **Invite** `(id, email, role_id, token_hash, status [pending|accepted|revoked|expired], expires_at, created_by, accepted_at, created_at)`
 - **Project / Folder** `(id, parent_id, name, description, created_by, allow_ai_repo_context)`
 - **Pipeline** `(id, project_id, project_repository_id_nullable, name, source_repo_url, default_branch, definition_path, definition_format [yaml], enabled)`
 - **Trigger** `(id, pipeline_id, type, config_json)`
@@ -776,7 +851,7 @@ MegooCI's frontend has been overhauled with a cohesive, cyberpunk-inspired desig
 - **WebhookDelivery** `(id, project_repository_id, provider_delivery_id, event_type, branch, commit_sha, author, signature_valid, http_status, error, payload_excerpt, received_at, processed_at)` with `UNIQUE(project_repository_id, provider_delivery_id)`
 - **Build** `(id, pipeline_id, number, branch, commit_sha, status, started_at, finished_at, triggered_by, trigger_type, params_json)`
 - **Stage** `(id, build_id, name, status, started_at, finished_at)`
-- **Step** `(id, stage_id, name, status, exit_code, started_at, finished_at, agent_id)`
+- **Step** `(id, stage_id, name, status, exit_code, started_at, finished_at, agent_id, step_type, config_json)` — `step_type` identifies the action handler (e.g., `run`, `docker_build`, `ssh_exec`, `wait_input`); `config_json` stores type-specific configuration.
 - **LogChunk** `(id, step_id, seq, ts, stream, content)` (hot, in Postgres) → flushed to local disk at `MEGOOCI_STORAGE_ROOT/logs/...` on step completion.
 - **Artifact** `(id, build_id, relative_path, size_bytes, checksum_sha256, storage_path, retention_until)`
 - **ContainerRepository** `(id, project_id, name, is_public, immutable_tags, created_at)`
