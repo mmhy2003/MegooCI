@@ -160,21 +160,11 @@ export function AiAssistantPanel({
   return (
     <div className={cn("flex flex-col", className)}>
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
+      <div className="flex items-center border-b px-4 py-3">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" />
           <h3 className="text-sm font-semibold">AI Assistant</h3>
         </div>
-        {messages.length > 0 && (
-          <button
-            type="button"
-            onClick={clearChat}
-            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Trash2 className="h-3 w-3" />
-            Clear
-          </button>
-        )}
       </div>
 
       {/* Messages */}
@@ -282,9 +272,21 @@ export function AiAssistantPanel({
             )}
           </button>
         </div>
-        <p className="mt-1 text-[10px] text-muted-foreground">
-          Press Enter to send, Shift+Enter for new line
-        </p>
+        <div className="mt-1 flex items-center justify-between">
+          <p className="text-[10px] text-muted-foreground">
+            Press Enter to send, Shift+Enter for new line
+          </p>
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={clearChat}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Trash2 className="h-3 w-3" />
+              Clear
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
