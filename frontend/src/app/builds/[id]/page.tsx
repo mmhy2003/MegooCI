@@ -154,7 +154,7 @@ export default function BuildDetailPage() {
 
   const statusColor: Record<StageStatus, string> = {
     pending: "text-gray-500",
-    running: "text-blue-500",
+    running: "text-cyan-500",
     success: "text-emerald-500",
     failed: "text-red-500",
     cancelled: "text-yellow-500",

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { Providers, ThemedToaster } from "@/components/providers";
+import { PWARegister } from "@/components/pwa-register";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -8,6 +9,26 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata: Metadata = {
   title: "MegooCI",
   description: "A simpler, modern open-source alternative to Jenkins",
+  manifest: "/manifest.webmanifest",
+  applicationName: "MegooCI",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "MegooCI",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/icon.svg", type: "image/svg+xml" },
+      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/favicon-16.png", sizes: "16x16", type: "image/png" },
+    ],
+    shortcut: "/icons/favicon.ico",
+    apple: "/icons/apple-touch-icon.png",
+  },
+  other: {
+    "msapplication-TileColor": "#ff2d95",
+    "msapplication-TileImage": "/icons/icon-144.png",
+  },
 };
 
 export const viewport: Viewport = {
@@ -15,9 +36,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   viewportFit: "cover",
+  colorScheme: "light dark",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0f1e" },
+    { media: "(prefers-color-scheme: dark)", color: "#00fff0" },
   ],
 };
 
@@ -44,6 +66,7 @@ export default function RootLayout({
         <Providers>
           {children}
           <ThemedToaster />
+          <PWARegister />
         </Providers>
       </body>
     </html>

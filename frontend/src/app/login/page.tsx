@@ -49,10 +49,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-slate-950 dark:via-blue-950/40 dark:to-indigo-950/50 px-4">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-violet-50 via-fuchsia-50/40 to-cyan-50/50 dark:from-[#0a0118] dark:via-[#0d0026] dark:to-[#001a1f] px-4">
       {/* Decorative blobs */}
       <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-indigo-400/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-fuchsia-500/10 blur-3xl" />
 
       {/* Theme toggle floats in the top-right so pre-login users can match
           the app to their OS preference without signing in. */}
@@ -62,9 +62,12 @@ export default function LoginPage() {
 
       <Card className="relative z-10 w-full max-w-md shadow-xl">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground text-xl font-bold shadow-lg">
-            M
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/icons/icon.svg"
+            alt="MegooCI"
+            className="mx-auto mb-4 h-12 w-12 rounded-xl shadow-lg"
+          />
           <CardTitle className="text-2xl">Welcome back</CardTitle>
           <CardDescription>Sign in to your MegooCI account</CardDescription>
         </CardHeader>

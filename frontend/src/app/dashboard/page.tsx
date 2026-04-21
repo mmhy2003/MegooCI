@@ -107,8 +107,8 @@ export default function DashboardPage() {
       title: "Total Pipelines",
       value: stats?.totalPipelines ?? 0,
       icon: GitBranch,
-      color: "text-blue-600 dark:text-blue-400",
-      bg: "bg-blue-500/10",
+      color: "text-cyan-600 dark:text-cyan-400",
+      bg: "bg-cyan-500/10",
     },
     {
       title: "Total Builds",

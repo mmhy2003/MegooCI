@@ -29,9 +29,9 @@ const statusConfig: Record<
     icon: Circle,
   },
   running: {
-    color: "text-blue-600 dark:text-blue-400",
-    bg: "bg-blue-500/10",
-    border: "border-blue-400",
+    color: "text-cyan-600 dark:text-cyan-400",
+    bg: "bg-cyan-500/10",
+    border: "border-cyan-400",
     icon: Loader2,
   },
   success: {

@@ -19,7 +19,7 @@ const badgeVariants = cva(
         failed:
           "border-transparent bg-red-500/15 text-red-700 dark:text-red-400",
         running:
-          "border-transparent bg-blue-500/15 text-blue-700 dark:text-blue-400 animate-pulse-slow",
+          "border-transparent bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 animate-pulse-slow",
         pending:
           "border-transparent bg-gray-500/15 text-gray-700 dark:text-gray-400",
         cancelled:

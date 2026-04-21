@@ -123,7 +123,7 @@ export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
             size="icon"
             className={cn(
               "h-7 w-7 hover:bg-[#21262d] hover:text-[#c9d1d9]",
-              follow ? "text-blue-400" : "text-[#8b949e]",
+              follow ? "text-cyan-400" : "text-[#8b949e]",
             )}
             onClick={() => {
               setFollow(!follow);

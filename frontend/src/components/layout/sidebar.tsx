@@ -135,9 +135,12 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
             className="flex items-center gap-2"
             onClick={onCloseMobile}
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-              M
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/icons/icon.svg"
+              alt="MegooCI"
+              className="h-8 w-8 rounded-lg"
+            />
             {(!isCollapsed || mobileOpen) && (
               <span className="text-lg font-bold tracking-tight md:block">
                 <span className={cn(isCollapsed && "md:hidden")}>MegooCI</span>
