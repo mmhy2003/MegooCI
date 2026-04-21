@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     MEGOOCI_AI_BASE_URL: str = ""
     MEGOOCI_PYTHON_PIPELINE_TIMEOUT_SECONDS: int = 10
     MEGOOCI_LOG_LEVEL: str = "INFO"
+
+    # Meilisearch
+    MEGOOCI_MEILISEARCH_URL: str = "http://localhost:7700"
+    MEGOOCI_MEILISEARCH_API_KEY: str = "megooci-meili-master-key"
     MEGOOCI_PUBLIC_URL: str = "http://localhost:8000"
     MEGOOCI_REGISTRY_ENABLED: bool = True
     MEGOOCI_REGISTRY_HOST: str = "localhost"

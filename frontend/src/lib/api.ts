@@ -560,6 +560,30 @@ export const systemApi = {
   info: () => fetchApi<SystemInfo>("/api/v1/system/info"),
 };
 
+// ------------------------------------------------------------------
+// Search
+// ------------------------------------------------------------------
+export interface SearchHit {
+  id: string;
+  type: "project" | "pipeline" | "build";
+  title: string;
+  subtitle: string | null;
+  url: string;
+  extra: Record<string, unknown>;
+}
+
+export interface SearchResponse {
+  query: string;
+  results: SearchHit[];
+}
+
+export const searchApi = {
+  search: (q: string, limit = 5) =>
+    fetchApi<SearchResponse>(
+      `/api/v1/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
+};
+
 export const agentsApi = {
   list: (params?: { status?: string; skip?: number; limit?: number }) => {
     const qs = new URLSearchParams();

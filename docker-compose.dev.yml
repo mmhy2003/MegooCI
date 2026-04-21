@@ -60,6 +60,11 @@ services:
       - megooci_storage:/var/lib/megooci
     command: celery -A app.tasks.celery_app beat --loglevel=info
 
+  meilisearch:
+    restart: "no"
+    ports:
+      - "7700:7700"
+
   frontend:
     build:
       context: ./frontend

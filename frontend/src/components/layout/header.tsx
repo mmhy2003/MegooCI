@@ -19,13 +19,12 @@ function getBreadcrumbs(pathname: string) {
 
 interface HeaderProps {
   onOpenMobile: () => void;
+  onOpenSearch: () => void;
 }
 
-export function Header({ onOpenMobile }: HeaderProps) {
+export function Header({ onOpenMobile, onOpenSearch }: HeaderProps) {
   const pathname = usePathname();
   const breadcrumbs = getBreadcrumbs(pathname);
-  // On mobile we hide intermediate crumbs and just show the last one for
-  // compactness.
   const mobileCrumb = breadcrumbs[breadcrumbs.length - 1];
 
   return (
@@ -74,14 +73,19 @@ export function Header({ onOpenMobile }: HeaderProps) {
       {/* Right section */}
       <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         {/* Search: lg+ only */}
-        <div className="relative hidden lg:block">
+        <button
+          type="button"
+          onClick={onOpenSearch}
+          className="relative hidden lg:block"
+        >
           <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search... ⌘K"
-            className="w-64 pl-9"
+            className="w-64 cursor-pointer pl-9"
             readOnly
+            tabIndex={-1}
           />
-        </div>
+        </button>
 
         {/* Mobile/tablet: icon-only search */}
         <Button
@@ -89,6 +93,7 @@ export function Header({ onOpenMobile }: HeaderProps) {
           size="icon"
           className="lg:hidden"
           aria-label="Search"
+          onClick={onOpenSearch}
         >
           <Search className="h-4 w-4" />
         </Button>

@@ -77,6 +77,10 @@ async def create_pipeline(
     db.add(pipeline)
     await db.commit()
     await db.refresh(pipeline)
+
+    from app.services.search import index_pipeline
+    await index_pipeline(pipeline)
+
     return pipeline
 
 
@@ -113,6 +117,10 @@ async def update_pipeline(
 
     await db.commit()
     await db.refresh(pipeline)
+
+    from app.services.search import index_pipeline
+    await index_pipeline(pipeline)
+
     return pipeline
 
 
@@ -129,3 +137,6 @@ async def delete_pipeline(
         )
     await db.delete(pipeline)
     await db.commit()
+
+    from app.services.search import remove_pipeline
+    await remove_pipeline(str(pipeline_id))

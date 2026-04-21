@@ -55,6 +55,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      meilisearch:
+        condition: service_healthy
 
   celery-worker:
     build:
@@ -94,6 +96,20 @@ services:
         condition: service_started
     command: celery -A app.tasks.celery_app beat --loglevel=info
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-megooci-meili-master-key}
+      MEILI_ENV: production
+    volumes:
+      - meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://127.0.0.1:7700/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   frontend:
     build:
       context: ./frontend
@@ -113,3 +129,4 @@ volumes:
   postgres_data:
   redis_data:
   megooci_storage:
+  meilisearch_data:

@@ -101,6 +101,9 @@ async def trigger_build(
     await db.commit()
     await db.refresh(build)
 
+    from app.services.search import index_build
+    await index_build(build)
+
     run_build.delay(str(build.id))
 
     return build
@@ -146,6 +149,9 @@ async def cancel_build(
     build.status = "cancelled"
     await db.commit()
     await db.refresh(build)
+
+    from app.services.search import index_build
+    await index_build(build)
 
     # If any step of this build is currently running on an agent, tell that
     # agent to stop. The local executor watches `build.status` between steps
@@ -245,6 +251,9 @@ async def retry_build(
 
     await db.commit()
     await db.refresh(new_build)
+
+    from app.services.search import index_build
+    await index_build(new_build)
 
     run_build.delay(str(new_build.id))
 

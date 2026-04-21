@@ -5,12 +5,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/auth";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
+import { CommandPalette } from "@/components/command-palette";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { accessToken, isLoading, loadUser } = useAuthStore();
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [searchOpen, setSearchOpen] = React.useState(false);
 
   React.useEffect(() => {
     loadUser();
@@ -22,12 +24,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isLoading, accessToken, router]);
 
-  // Close the mobile drawer whenever the route changes.
   React.useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
-  // Prevent body scroll while the mobile drawer is open.
   React.useEffect(() => {
     if (mobileOpen) {
       const prev = document.body.style.overflow;
@@ -55,11 +55,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         onCloseMobile={() => setMobileOpen(false)}
       />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <Header onOpenMobile={() => setMobileOpen(true)} />
+        <Header
+          onOpenMobile={() => setMobileOpen(true)}
+          onOpenSearch={() => setSearchOpen(true)}
+        />
         <main className="flex-1 overflow-auto bg-background p-4 sm:p-6">
           {children}
         </main>
       </div>
+
+      <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
     </div>
   );
 }

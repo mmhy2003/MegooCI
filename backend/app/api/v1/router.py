@@ -9,6 +9,7 @@ from app.api.v1 import (
     pipelines,
     project_repositories,
     projects,
+    search,
     secrets,
     system,
     webhooks_git,
@@ -32,6 +33,7 @@ api_v1_router.include_router(
     prefix="/projects/{project_id}/repositories",
     tags=["git-integration"],
 )
+api_v1_router.include_router(search.router, prefix="/search", tags=["search"])
 api_v1_router.include_router(webhooks_git.router, tags=["git-integration"])
 api_v1_router.include_router(websocket.router, tags=["websocket"])
 api_v1_router.include_router(agents_ws.router, tags=["agents"])

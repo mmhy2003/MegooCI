@@ -70,6 +70,10 @@ async def create_project(
     db.add(project)
     await db.commit()
     await db.refresh(project)
+
+    from app.services.search import index_project
+    await index_project(project)
+
     return project
 
 
@@ -118,6 +122,10 @@ async def update_project(
 
     await db.commit()
     await db.refresh(project)
+
+    from app.services.search import index_project
+    await index_project(project)
+
     return project
 
 
@@ -258,3 +266,6 @@ async def delete_project(
 
     await db.delete(project)
     await db.commit()
+
+    from app.services.search import remove_project
+    await remove_project(str(project_id))

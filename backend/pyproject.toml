@@ -21,6 +21,7 @@ dependencies = [
     "python-multipart",
     "email-validator",
     "cryptography",
+    "meilisearch-python-sdk",
 ]
 
 [build-system]
