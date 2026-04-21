@@ -48,7 +48,7 @@ def _normalize_status(agent: Agent) -> Agent:
     return agent
 
 
-@router.get("/", response_model=list[AgentResponse])
+@router.get("", response_model=list[AgentResponse])
 async def list_agents(
     status_filter: str | None = Query(None, alias="status"),
     skip: int = Query(0, ge=0),
@@ -68,7 +68,7 @@ async def list_agents(
 
 
 @router.post(
-    "/",
+    "",
     response_model=AgentRegistrationResponse,
     status_code=status.HTTP_201_CREATED,
 )

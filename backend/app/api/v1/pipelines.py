@@ -14,7 +14,7 @@ from app.schemas.pipeline import PipelineCreate, PipelineResponse, PipelineUpdat
 router = APIRouter()
 
 
-@router.get("/", response_model=list[PipelineResponse])
+@router.get("", response_model=list[PipelineResponse])
 async def list_pipelines(
     project_id: uuid.UUID | None = Query(None),
     skip: int = Query(0, ge=0),
@@ -31,7 +31,7 @@ async def list_pipelines(
     return list(result.scalars().all())
 
 
-@router.post("/", response_model=PipelineResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=PipelineResponse, status_code=status.HTTP_201_CREATED)
 async def create_pipeline(
     body: PipelineCreate,
     db: AsyncSession = Depends(get_db),

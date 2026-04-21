@@ -17,7 +17,7 @@ from app.tasks.build_tasks import run_build
 router = APIRouter()
 
 
-@router.get("/", response_model=list[BuildResponse])
+@router.get("", response_model=list[BuildResponse])
 async def list_builds(
     pipeline_id: uuid.UUID | None = Query(None),
     skip: int = Query(0, ge=0),

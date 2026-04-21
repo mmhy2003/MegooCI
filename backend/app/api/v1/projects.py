@@ -24,7 +24,7 @@ def _slugify(name: str) -> str:
     return re.sub(r"-+", "-", slug).strip("-")
 
 
-@router.get("/", response_model=list[ProjectResponse])
+@router.get("", response_model=list[ProjectResponse])
 async def list_projects(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
@@ -37,7 +37,7 @@ async def list_projects(
     return list(result.scalars().all())
 
 
-@router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
     body: ProjectCreate,
     db: AsyncSession = Depends(get_db),
