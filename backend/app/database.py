@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -7,7 +8,6 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import get_settings
-from app.models.base import Base
 
 settings = get_settings()
 
@@ -35,5 +35,5 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    async with engine.connect() as conn:
+        await conn.execute(sa.text("SELECT 1"))
