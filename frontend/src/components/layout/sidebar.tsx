@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   GitBranch,
@@ -82,6 +82,7 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
     }
   }, []);
 
+  const router = useRouter();
   const { user, logout } = useAuthStore();
   const { theme, setTheme } = useTheme();
   const confirm = useConfirm();
@@ -245,7 +246,7 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
               <DropdownMenuContent side="top" align="start">
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>
+                <DropdownMenuItem onClick={() => router.push("/settings")}>
                   <User className="mr-2 h-4 w-4" />
                   Profile
                 </DropdownMenuItem>
