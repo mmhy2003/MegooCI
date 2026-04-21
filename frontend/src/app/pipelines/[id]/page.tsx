@@ -11,7 +11,10 @@ import {
   Trash2,
   GitBranch,
   Clock,
+  Check,
+  X,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
@@ -72,6 +75,9 @@ export default function PipelineDetailPage() {
   const [editing, setEditing] = React.useState(false);
   const [editContent, setEditContent] = React.useState("");
   const [saving, setSaving] = React.useState(false);
+  const [editingName, setEditingName] = React.useState(false);
+  const [editName, setEditName] = React.useState("");
+  const [savingName, setSavingName] = React.useState(false);
 
   React.useEffect(() => {
     async function load() {
@@ -145,6 +151,25 @@ export default function PipelineDetailPage() {
     }
   }
 
+  async function handleSaveName() {
+    const trimmed = editName.trim();
+    if (!trimmed || trimmed === pipeline?.name) {
+      setEditingName(false);
+      return;
+    }
+    setSavingName(true);
+    try {
+      const updated = await pipelinesApi.update(id, { name: trimmed });
+      setPipeline(updated);
+      setEditingName(false);
+      toast.success("Pipeline name updated");
+    } catch {
+      toast.error("Failed to update pipeline name");
+    } finally {
+      setSavingName(false);
+    }
+  }
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "builds", label: "Builds" },
@@ -200,9 +225,57 @@ export default function PipelineDetailPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <h1 className="break-all text-xl font-bold sm:text-2xl">
-                {pipeline.name}
-              </h1>
+              {editingName ? (
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    autoFocus
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSaveName();
+                      if (e.key === "Escape") setEditingName(false);
+                    }}
+                    className="h-8 w-56 text-lg font-bold sm:w-72"
+                    disabled={savingName}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={handleSaveName}
+                    disabled={savingName}
+                  >
+                    <Check className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => setEditingName(false)}
+                    disabled={savingName}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="group flex items-center gap-1.5">
+                  <h1 className="break-all text-xl font-bold sm:text-2xl">
+                    {pipeline.name}
+                  </h1>
+                  {canManagePipelines && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditName(pipeline.name);
+                        setEditingName(true);
+                      }}
+                      className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
               <Badge variant="secondary">YAML</Badge>
               <Badge variant={pipeline.enabled ? "success" : "pending"}>
                 {pipeline.enabled ? "Active" : "Inactive"}
