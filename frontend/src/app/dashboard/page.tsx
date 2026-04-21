@@ -10,12 +10,9 @@ import {
   Hammer,
   CheckCircle2,
   Server,
-  Plus,
-  Play,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useAuthStore } from "@/lib/auth";
-import { usePermission } from "@/hooks/use-permission";
 import {
   agentsApi,
   buildsApi,
@@ -66,8 +63,6 @@ interface Stats {
 export default function DashboardPage() {
   const { user } = useAuthStore();
   const router = useRouter();
-  const canManagePipelines = usePermission("pipelines.manage");
-  const canManageBuilds = usePermission("builds.manage");
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [recentBuilds, setRecentBuilds] = React.useState<Build[] | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -148,27 +143,6 @@ export default function DashboardPage() {
             <p className="text-sm text-muted-foreground sm:text-base">
               Here&apos;s what&apos;s happening with your pipelines today.
             </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {canManagePipelines && (
-              <Button
-                variant="outline"
-                onClick={() => router.push("/pipelines/new")}
-                className="flex-1 sm:flex-none"
-              >
-                <Plus className="mr-1.5 h-4 w-4" />
-                New Pipeline
-              </Button>
-            )}
-            {canManageBuilds && (
-              <Button
-                onClick={() => router.push("/pipelines")}
-                className="flex-1 sm:flex-none"
-              >
-                <Play className="mr-1.5 h-4 w-4" />
-                Trigger Build
-              </Button>
-            )}
           </div>
         </div>
 
