@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { usePathname } from "next/navigation";
-import { Search, Bell, Plus, Menu } from "lucide-react";
+import { Search, Bell, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -104,12 +104,6 @@ export function Header({ onOpenMobile }: HeaderProps) {
           aria-label="Notifications"
         >
           <Bell className="h-4 w-4" />
-        </Button>
-
-        {/* New Build: icon-only on small, full on sm+ */}
-        <Button size="sm" className="gap-1.5 px-2 sm:px-3">
-          <Plus className="h-4 w-4" />
-          <span className="hidden sm:inline">New Build</span>
         </Button>
       </div>
     </header>
