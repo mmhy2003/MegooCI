@@ -692,129 +692,14 @@ export default function IntegrationsPage() {
   return (
     <AppLayout>
       <div className="mx-auto max-w-5xl space-y-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-              Integrations
-            </h1>
-            <p className="text-sm text-muted-foreground sm:text-base">
-              Connect MegooCI to GitHub, GitLab, or any Git host using a
-              Personal Access Token. Projects reuse these connections to link
-              specific repositories.
-            </p>
-          </div>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <Button onClick={openCreate} className="w-full sm:w-auto">
-              <Plus className="mr-1.5 h-4 w-4" /> New connection
-            </Button>
-            <DialogContent className="max-w-xl">
-              <DialogHeader>
-                <DialogTitle>
-                  {editing ? "Edit connection" : "New Git connection"}
-                </DialogTitle>
-                <DialogDescription>
-                  {editing
-                    ? "Update connection details. Leave the token field empty to keep the existing token."
-                    : "Register a Personal Access Token for a Git provider. Tokens are encrypted at rest and never returned from the API."}
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Name</label>
-                  <Input
-                    placeholder="Acme GitHub Org"
-                    value={form.name}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, name: e.target.value }))
-                    }
-                    autoFocus
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Provider</label>
-                  {editing ? (
-                    <Input
-                      value={
-                        PROVIDER_META[form.provider_type]?.label ??
-                        form.provider_type
-                      }
-                      readOnly
-                      className="bg-muted"
-                    />
-                  ) : (
-                    <Select
-                      value={form.provider_type}
-                      onChange={(e) =>
-                        onProviderChange(
-                          e.target.value as GitProviderType,
-                        )
-                      }
-                      options={[
-                        { value: "github", label: "GitHub" },
-                        { value: "gitlab", label: "GitLab" },
-                        { value: "generic", label: "Generic Git" },
-                      ]}
-                    />
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    {form.provider_type === "generic"
-                      ? "Repository URL (base)"
-                      : "API base URL"}
-                  </label>
-                  <Input
-                    placeholder={
-                      form.provider_type === "generic"
-                        ? "https://git.example.com/org/repo.git"
-                        : PROVIDER_META[form.provider_type].defaultBaseUrl
-                    }
-                    value={form.base_url}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, base_url: e.target.value }))
-                    }
-                  />
-                </div>
-
-                {/* -----------------------------------------------------
-                   Token section — visually promoted as its own panel so
-                   users understand it's the primary credential step and
-                   can jump straight to the provider's token page.
-                   ----------------------------------------------------- */}
-                <TokenPanel
-                  editing={!!editing}
-                  existingHint={editing?.credential_hint ?? null}
-                  provider={form.provider_type}
-                  baseUrl={form.base_url}
-                  value={form.credential}
-                  onChange={(v) =>
-                    setForm((p) => ({ ...p, credential: v }))
-                  }
-                  showToken={showToken}
-                  onToggleShow={() => setShowToken((v) => !v)}
-                />
-
-                <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setDialogOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={submitting}>
-                    {submitting
-                      ? "Saving\u2026"
-                      : editing
-                        ? "Save changes"
-                        : "Create & test"}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+        <div>
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
+            Integrations
+          </h1>
+          <p className="text-sm text-muted-foreground sm:text-base">
+            Manage notification channels and Git provider connections used
+            across your pipelines and projects.
+          </p>
         </div>
 
         {/* ============================================================
@@ -1079,8 +964,115 @@ export default function IntegrationsPage() {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Git connections</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Git Connections</CardTitle>
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <Button onClick={openCreate} size="sm" variant="outline">
+                <Plus className="mr-1.5 h-4 w-4" /> New connection
+              </Button>
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>
+                    {editing ? "Edit connection" : "New Git connection"}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {editing
+                      ? "Update connection details. Leave the token field empty to keep the existing token."
+                      : "Register a Personal Access Token for a Git provider. Tokens are encrypted at rest and never returned from the API."}
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Name</label>
+                    <Input
+                      placeholder="Acme GitHub Org"
+                      value={form.name}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, name: e.target.value }))
+                      }
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Provider</label>
+                    {editing ? (
+                      <Input
+                        value={
+                          PROVIDER_META[form.provider_type]?.label ??
+                          form.provider_type
+                        }
+                        readOnly
+                        className="bg-muted"
+                      />
+                    ) : (
+                      <Select
+                        value={form.provider_type}
+                        onChange={(e) =>
+                          onProviderChange(
+                            e.target.value as GitProviderType,
+                          )
+                        }
+                        options={[
+                          { value: "github", label: "GitHub" },
+                          { value: "gitlab", label: "GitLab" },
+                          { value: "generic", label: "Generic Git" },
+                        ]}
+                      />
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      {form.provider_type === "generic"
+                        ? "Repository URL (base)"
+                        : "API base URL"}
+                    </label>
+                    <Input
+                      placeholder={
+                        form.provider_type === "generic"
+                          ? "https://git.example.com/org/repo.git"
+                          : PROVIDER_META[form.provider_type].defaultBaseUrl
+                      }
+                      value={form.base_url}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, base_url: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  <TokenPanel
+                    editing={!!editing}
+                    existingHint={editing?.credential_hint ?? null}
+                    provider={form.provider_type}
+                    baseUrl={form.base_url}
+                    value={form.credential}
+                    onChange={(v) =>
+                      setForm((p) => ({ ...p, credential: v }))
+                    }
+                    showToken={showToken}
+                    onToggleShow={() => setShowToken((v) => !v)}
+                  />
+
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setDialogOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={submitting}>
+                      {submitting
+                        ? "Saving\u2026"
+                        : editing
+                          ? "Save changes"
+                          : "Create & test"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
           </CardHeader>
           <CardContent>
             {loading ? (
