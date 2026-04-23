@@ -8,6 +8,7 @@ Supports:
 - git_clone / git_pull / git_push
 - ssh_exec (remote commands)
 - wait_webhook / wait_input (pipeline gates)
+- trigger_pipeline (trigger another pipeline)
 - parallel step groups
 - when conditions (branch, status)
 - env vars at pipeline/stage/step level
@@ -31,6 +32,7 @@ STEP_TYPE_KEYS = {
     "wait_webhook",
     "wait_input",
     "notify",
+    "trigger_pipeline",
 }
 
 
@@ -327,5 +329,15 @@ def _validate_step(step: dict[str, Any], stage_name: str, step_index: int) -> li
                 errors.append(f"{prefix}: 'notify' requires 'channel'")
             if not value.get("message"):
                 errors.append(f"{prefix}: 'notify' requires 'message'")
+
+    elif step_type == "trigger_pipeline":
+        if not isinstance(value, dict):
+            errors.append(f"{prefix}: 'trigger_pipeline' must be a mapping")
+        else:
+            if not value.get("pipeline"):
+                errors.append(f"{prefix}: 'trigger_pipeline' requires 'pipeline'")
+            timeout = value.get("timeout")
+            if timeout is not None and (not isinstance(timeout, (int, float)) or timeout <= 0):
+                errors.append(f"{prefix}: 'trigger_pipeline' timeout must be a positive number")
 
     return errors

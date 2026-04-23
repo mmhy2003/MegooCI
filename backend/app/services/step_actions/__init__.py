@@ -37,6 +37,7 @@ def _bootstrap() -> None:
         ssh,
         wait,
         notify,
+        trigger,
     )
 
 

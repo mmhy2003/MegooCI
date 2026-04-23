@@ -2,7 +2,7 @@
 Build execution service.
 
 Runs a build by iterating through its stages and steps, dispatching each step
-to the correct action handler (shell, docker, git, ssh, wait, …), streaming
+to the correct action handler (shell, docker, git, ssh, wait, trigger, …), streaming
 output to Redis pub/sub, and persisting LogChunks.
 
 Steps that the handler registry doesn't know about (or steps with a plain
@@ -204,8 +204,8 @@ async def _execute_step(
     pipeline = await db.get(Pipeline, build.pipeline_id)
     project_id = pipeline.project_id if pipeline else build.pipeline_id
 
-    # Notify steps need DB access to look up channels — always run server-side.
-    if step.step_type == "notify" and handler is not None:
+    # Notify and trigger_pipeline steps need DB access — always run server-side.
+    if step.step_type in ("notify", "trigger_pipeline") and handler is not None:
         ctx = StepContext(
             build_id=build.id,
             step_id=step.id,

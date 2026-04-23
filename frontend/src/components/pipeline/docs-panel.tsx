@@ -16,6 +16,7 @@ import {
   BookOpen,
   Copy,
   Check,
+  Play,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -184,6 +185,21 @@ stages:
       Commit: \${{ build.commit_sha }}
     subject: "Build Report"       # optional (email only)
     recipient: "#deployments"     # optional override`,
+  },
+  {
+    id: "trigger_pipeline",
+    title: "Trigger Pipeline",
+    icon: <Play className="h-4 w-4" />,
+    description:
+      "Trigger another pipeline from within a running pipeline. Use to chain CI and deploy pipelines, fan-out builds, or orchestrate multi-repo workflows. Optionally wait for the triggered build to finish.",
+    yaml: `- name: trigger-deploy
+  trigger_pipeline:
+    pipeline: "deploy-production"   # name or UUID
+    branch: main                    # optional
+    params:                         # optional
+      VERSION: "1.2.3"
+    wait: true                      # block until child finishes
+    timeout: 3600                   # max wait seconds (default: 3600)`,
   },
   {
     id: "secrets",

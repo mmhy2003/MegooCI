@@ -137,6 +137,21 @@ definitions in YAML for the MegooCI platform.
 Supported channel types: email (SMTP), Slack (webhook), Telegram (bot).
 Channels are configured by admins in the Notification Channels UI.
 
+### trigger_pipeline — Trigger another pipeline
+```yaml
+- trigger_pipeline:
+    pipeline: "deploy-production"   # pipeline name or UUID
+    branch: main                    # optional (defaults to target's default_branch)
+    params:                         # optional parameters forwarded to the child build
+      VERSION: "1.2.3"
+    wait: true                      # optional — block until triggered build finishes (default: false)
+    timeout: 3600                   # optional — max seconds to wait (default: 3600, only when wait=true)
+```
+
+Use `trigger_pipeline` to chain pipelines — e.g. a CI pipeline triggers a deploy \
+pipeline after tests pass. Set `wait: true` when the parent pipeline should fail if \
+the child pipeline fails. Reference the target by its pipeline name or UUID.
+
 ## Pipeline Structure
 ```yaml
 version: 1
