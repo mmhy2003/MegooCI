@@ -128,6 +128,7 @@ async def _get_or_create_repo(
 
 
 async def _resolve_project(db: AsyncSession, project_slug: str) -> Project:
+    """Resolve a project by slug — raises 404 for read-only operations."""
     result = await db.execute(
         select(Project).where(Project.slug == project_slug)
     )
@@ -149,6 +150,8 @@ async def _resolve_project(db: AsyncSession, project_slug: str) -> Project:
             },
         )
     return project
+
+
 
 
 async def _check_anonymous_pull(

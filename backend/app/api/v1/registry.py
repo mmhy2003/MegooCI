@@ -140,11 +140,29 @@ async def delete_repository(
     _current_user: User = Depends(require_permission("registry.manage")),
 ) -> None:
     result = await db.execute(
-        select(ContainerRepository).where(ContainerRepository.id == repo_id)
+        select(ContainerRepository)
+        .options(selectinload(ContainerRepository.images))
+        .where(ContainerRepository.id == repo_id)
     )
     repo = result.scalar_one_or_none()
     if repo is None:
         raise HTTPException(status_code=404)
+
+    project = await db.get(Project, repo.project_id)
+    if project:
+        repo_path = f"{project.slug}/{repo.name}"
+        tags = (await db.execute(
+            select(ContainerTag).where(ContainerTag.repository_id == repo.id)
+        )).scalars().all()
+        for tag in tags:
+            storage.delete_manifest(repo_path, tag.name)
+        for image in repo.images:
+            storage.delete_manifest(repo_path, image.digest)
+        import shutil
+        manifest_dir = storage._registry_root() / "manifests" / repo_path
+        if manifest_dir.is_dir():
+            shutil.rmtree(manifest_dir)
+
     await db.delete(repo)
 
 
@@ -223,6 +241,14 @@ async def delete_tag(
     tag = result.scalar_one_or_none()
     if tag is None:
         raise HTTPException(status_code=404)
+
+    repo = await db.get(ContainerRepository, tag.repository_id)
+    if repo:
+        project = await db.get(Project, repo.project_id)
+        if project:
+            repo_path = f"{project.slug}/{repo.name}"
+            storage.delete_manifest(repo_path, tag.name)
+
     await db.delete(tag)
 
 
