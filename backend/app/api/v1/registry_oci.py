@@ -233,7 +233,7 @@ async def get_token(
         if subject is None:
             raise HTTPException(status_code=401, detail="Invalid credentials")
     else:
-        actions = ["pull"]
+        actions = []
         subject = "anonymous"
 
     token = issue_registry_token(subject, actions, scope=scp or None)
