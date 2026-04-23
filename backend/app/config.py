@@ -26,7 +26,6 @@ class Settings(BaseSettings):
     MEGOOCI_AI_API_KEY: str = ""
     MEGOOCI_AI_MODEL: str = ""
     MEGOOCI_AI_BASE_URL: str = ""
-    MEGOOCI_PYTHON_PIPELINE_TIMEOUT_SECONDS: int = 10
     MEGOOCI_LOG_LEVEL: str = "INFO"
 
     # Meilisearch

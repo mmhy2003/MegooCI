@@ -12,6 +12,8 @@
 #   scoop install make        (Scoop)
 # =============================================================================
 
+-include .env
+
 # --- Configuration ----------------------------------------------------------
 
 COMPOSE       := docker compose
@@ -34,7 +36,7 @@ DB_NAME       ?= megooci
 # tidy, goreleaser snapshot, clean) live in `agent/Makefile` — run those
 # from inside the `agent/` directory.
 AGENT_DIR            := ./agent
-AGENT_VERSION        ?= 0.1.0-dev
+AGENT_VERSION        ?= $(or $(MEGOOCI_AGENT_VERSION),0.1.0-dev)
 AGENT_COMMIT         := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 AGENT_DATE           := $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)
 AGENT_IMAGE          ?= megooci/agent
