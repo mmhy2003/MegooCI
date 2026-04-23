@@ -308,20 +308,27 @@ async def pipeline_assistant(
         {"role": "system", "content": system_content},
     ]
 
-    if body.current_yaml:
-        messages.append({
-            "role": "user",
-            "content": f"Here is my current pipeline YAML:\n```yaml\n{body.current_yaml}\n```",
-        })
-        messages.append({
-            "role": "assistant",
-            "content": "I can see your current pipeline. What would you like me to do with it?",
-        })
-
     if body.history:
         for msg in body.history:
             if msg.role in ("user", "assistant"):
                 messages.append({"role": msg.role, "content": msg.content})
+
+    if body.current_yaml:
+        messages.append({
+            "role": "user",
+            "content": (
+                "Here is the current pipeline YAML from the editor "
+                "(this reflects the latest state, including any manual edits I made):\n"
+                f"```yaml\n{body.current_yaml}\n```"
+            ),
+        })
+        messages.append({
+            "role": "assistant",
+            "content": (
+                "Got it — I can see your current pipeline YAML with all your latest changes. "
+                "What would you like me to do with it?"
+            ),
+        })
 
     messages.append({"role": "user", "content": body.prompt})
 

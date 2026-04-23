@@ -102,6 +102,8 @@ export function AiAssistantPanel({
   const [loading, setLoading] = React.useState(false);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
+  const yamlRef = React.useRef(currentYaml);
+  yamlRef.current = currentYaml;
 
   React.useEffect(() => {
     if (scrollRef.current) {
@@ -121,6 +123,8 @@ export function AiAssistantPanel({
     setInput("");
     setLoading(true);
 
+    const latestYaml = yamlRef.current;
+
     try {
       const history: AiChatMessage[] = messages.map((m) => ({
         role: m.role,
@@ -129,7 +133,7 @@ export function AiAssistantPanel({
 
       const resp = await aiAssistantApi.ask({
         prompt: prompt.trim(),
-        current_yaml: currentYaml || null,
+        current_yaml: latestYaml || null,
         project_id: projectId || null,
         history: history.length > 0 ? history : undefined,
       });
