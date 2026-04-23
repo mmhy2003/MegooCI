@@ -91,6 +91,12 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
   const { theme, setTheme } = useTheme();
   const confirm = useConfirm();
 
+  const MAX_DISPLAY_LEN = 18;
+  const clampText = (text: string | undefined, fallback: string) => {
+    const val = text || fallback;
+    return val.length > MAX_DISPLAY_LEN ? val.slice(0, MAX_DISPLAY_LEN) + "…" : val;
+  };
+
   const handleLogout = React.useCallback(async () => {
     const ok = await confirm({
       title: "Log out of MegooCI?",
@@ -221,12 +227,11 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
               isCollapsed && "md:flex-col md:gap-1",
             )}
           >
-            <div className={cn("min-w-0 flex-1", isCollapsed && "md:flex-none")}>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   className={cn(
-                    "flex w-full min-w-0 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent",
+                    "flex min-w-0 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent",
                     isCollapsed && "md:justify-center md:px-2",
                   )}
                 >
@@ -236,15 +241,16 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
                   />
                   <div
                     className={cn(
-                      "min-w-0 flex-1 text-left",
+                      "text-left",
                       isCollapsed && "md:hidden",
                     )}
+                    style={{ maxWidth: "9.5rem" }}
                   >
-                    <p className="truncate font-medium text-sm">
-                      {user?.name || "User"}
+                    <p className="truncate font-medium text-sm" title={user?.name || "User"}>
+                      {clampText(user?.name, "User")}
                     </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {user?.email}
+                    <p className="truncate text-xs text-muted-foreground" title={user?.email}>
+                      {clampText(user?.email, "")}
                     </p>
                   </div>
                 </button>
@@ -285,7 +291,6 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            </div>
 
             <button
               type="button"
