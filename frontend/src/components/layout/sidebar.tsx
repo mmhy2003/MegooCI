@@ -21,6 +21,7 @@ import {
   Users,
   X,
   Plug,
+  Container,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
@@ -51,6 +52,7 @@ const navItems: NavItem[] = [
   { href: "/builds", label: "Builds", icon: Hammer, permission: "builds.read" },
   { href: "/agents", label: "Agents", icon: Server, permission: "agents.read" },
   { href: "/secrets", label: "Secrets", icon: KeyRound, permission: "secrets.read" },
+  { href: "/registry", label: "Registry", icon: Container, permission: "registry.read" },
   { href: "/integrations", label: "Integrations", icon: Plug, adminOnly: true },
   { href: "/admin/users", label: "Users", icon: Users, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings },

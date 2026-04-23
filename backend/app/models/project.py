@@ -41,6 +41,9 @@ class Project(Base):
     pipelines: Mapped[list["Pipeline"]] = relationship(  # noqa: F821
         back_populates="project"
     )
+    container_repositories: Mapped[list["ContainerRepository"]] = relationship(  # noqa: F821
+        back_populates="project", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Project {self.slug}>"

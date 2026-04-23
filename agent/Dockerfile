@@ -1,9 +1,8 @@
-# Multi-stage build for the MegooCI agent. Produces a tiny final image that
-# is still useful as a build host (Debian slim) — we keep /bin/sh, git, and
-# curl so basic pipeline steps work out of the box without needing the user
-# to bring their own base image. Users who want Docker-in-Docker or custom
-# toolchains can base their own image on this or substitute something
-# larger like a language-specific toolchain image.
+# Multi-stage build for the MegooCI agent. The final image ships a batteries-
+# included toolchain (Python, Node/npm/pnpm, uv, build-essential, Docker CLI)
+# so most pipeline steps work without needing the user to bring their own base
+# image. The Docker CLI is client-only — bind-mount the host socket or run a
+# DinD sidecar to enable `docker build` / `docker run` inside pipelines.
 #
 # Build:
 #   docker build -t megooci/agent:dev ./agent
@@ -61,12 +60,42 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 
 
 FROM debian:bookworm-slim
+
+# Harden apt against the flaky DNS inside Docker Desktop's build VM.
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
+
+# ── System packages (Debian repos) ──────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates git curl \
+      ca-certificates git curl gnupg \
+      build-essential \
+      python3 python3-pip python3-venv \
  && rm -rf /var/lib/apt/lists/*
 
-# Non-root by default. Mount volumes as this user if your steps need to
-# persist data between runs.
+# ── Node.js (NodeSource official repo) ──────────────────────────────────────
+ARG NODE_MAJOR=20
+RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+      | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+      > /etc/apt/sources.list.d/nodesource.list \
+ && apt-get update && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/*
+
+# ── pnpm (via corepack, ships with Node.js) ────────────────────────────────
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# ── Docker CLI (Docker official repo) ───────────────────────────────────────
+RUN curl -fsSL https://download.docker.com/linux/debian/gpg \
+      | gpg --dearmor -o /usr/share/keyrings/docker.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker.gpg] \
+      https://download.docker.com/linux/debian bookworm stable" \
+      > /etc/apt/sources.list.d/docker.list \
+ && apt-get update && apt-get install -y --no-install-recommends docker-ce-cli \
+ && rm -rf /var/lib/apt/lists/*
+
+# ── uv (Astral official image) ─────────────────────────────────────────────
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# ── Non-root user ──────────────────────────────────────────────────────────
 RUN useradd --create-home --shell /bin/sh --uid 1000 runner
 USER runner
 WORKDIR /home/runner

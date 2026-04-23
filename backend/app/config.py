@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     MEGOOCI_PUBLIC_URL: str = "http://localhost:8000"
     MEGOOCI_REGISTRY_ENABLED: bool = True
     MEGOOCI_REGISTRY_HOST: str = "localhost"
+    MEGOOCI_REGISTRY_PORT: int = 0
+    MEGOOCI_REGISTRY_STORAGE_PATH: str = "/var/lib/megooci/registry"
+    MEGOOCI_REGISTRY_MAX_UPLOAD_MB: int = 2048
+    MEGOOCI_REGISTRY_ALLOW_ANONYMOUS_PULL: bool = False
+    MEGOOCI_REGISTRY_GC_CRON: str = "0 3 * * *"
 
     # Email / SMTP is now configured via the UI (notification channels).
     MEGOOCI_INVITE_EXPIRY_HOURS: int = 72

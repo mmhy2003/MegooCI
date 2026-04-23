@@ -22,6 +22,9 @@ VALID_PERMISSIONS: frozenset[str] = frozenset({
     "invites.manage",
     "settings.manage",
     "git_connections.manage",
+    "registry.read",
+    "registry.push",
+    "registry.manage",
 })
 
 

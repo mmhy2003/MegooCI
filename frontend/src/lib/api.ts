@@ -558,6 +558,9 @@ export interface AuthInfo {
 export interface RegistryInfo {
   enabled: boolean;
   host: string;
+  storage_path: string;
+  max_upload_mb: number;
+  gc_cron: string;
 }
 
 export interface GitIntegrationInfo {
@@ -1190,4 +1193,163 @@ export const userNotificationsApi = {
     fetchApi<void>("/api/v1/user-notifications/mark-all-read", {
       method: "POST",
     }),
+};
+
+// ------------------------------------------------------------------
+// Container Registry (PRD §6.13)
+// ------------------------------------------------------------------
+
+export interface ContainerRepository {
+  id: string;
+  project_id: string;
+  name: string;
+  allow_anonymous_pull: boolean;
+  immutable_tags: boolean;
+  quota_bytes: number | null;
+  used_bytes: number;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface ContainerImage {
+  id: string;
+  repository_id: string;
+  digest: string;
+  media_type: string;
+  size_bytes: number;
+  config_digest: string | null;
+  build_id: string | null;
+  pushed_by: string | null;
+  created_at: string;
+}
+
+export interface ContainerImageDetail extends ContainerImage {
+  tags: ContainerTag[];
+}
+
+export interface ContainerTag {
+  id: string;
+  repository_id: string;
+  image_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface DeployToken {
+  id: string;
+  project_id: string;
+  name: string;
+  token_hint: string;
+  scope: string;
+  expires_at: string | null;
+  is_active: boolean;
+  last_used_at: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface DeployTokenCreated extends DeployToken {
+  token: string;
+}
+
+export interface RegistryEvent {
+  id: string;
+  repository_id: string;
+  event_type: string;
+  digest: string | null;
+  tag: string | null;
+  actor_id: string | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface RegistryOverview {
+  total_repositories: number;
+  total_images: number;
+  total_tags: number;
+  total_size_bytes: number;
+}
+
+export const registryApi = {
+  overview: () =>
+    fetchApi<RegistryOverview>("/api/v1/registry/overview"),
+
+  listRepositories: (params?: { project_id?: string; skip?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.project_id) qs.set("project_id", params.project_id);
+    if (params?.skip) qs.set("skip", String(params.skip));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return fetchApi<ContainerRepository[]>(
+      `/api/v1/registry/repositories${query ? `?${query}` : ""}`,
+    );
+  },
+
+  getRepository: (id: string) =>
+    fetchApi<ContainerRepository>(`/api/v1/registry/repositories/${id}`),
+
+  updateRepository: (id: string, data: Partial<Pick<ContainerRepository, "allow_anonymous_pull" | "immutable_tags" | "quota_bytes">>) =>
+    fetchApi<ContainerRepository>(`/api/v1/registry/repositories/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteRepository: (id: string) =>
+    fetchApi<void>(`/api/v1/registry/repositories/${id}`, { method: "DELETE" }),
+
+  listImages: (repoId: string, params?: { skip?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.skip) qs.set("skip", String(params.skip));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return fetchApi<ContainerImage[]>(
+      `/api/v1/registry/repositories/${repoId}/images${query ? `?${query}` : ""}`,
+    );
+  },
+
+  getImage: (imageId: string) =>
+    fetchApi<ContainerImageDetail>(`/api/v1/registry/images/${imageId}`),
+
+  listTags: (repoId: string, params?: { skip?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.skip) qs.set("skip", String(params.skip));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return fetchApi<ContainerTag[]>(
+      `/api/v1/registry/repositories/${repoId}/tags${query ? `?${query}` : ""}`,
+    );
+  },
+
+  deleteTag: (tagId: string) =>
+    fetchApi<void>(`/api/v1/registry/tags/${tagId}`, { method: "DELETE" }),
+
+  listDeployTokens: (params?: { project_id?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.project_id) qs.set("project_id", params.project_id);
+    const query = qs.toString();
+    return fetchApi<DeployToken[]>(
+      `/api/v1/registry/deploy-tokens${query ? `?${query}` : ""}`,
+    );
+  },
+
+  createDeployToken: (projectId: string, data: { name: string; scope: string; expires_in_days?: number }) =>
+    fetchApi<DeployTokenCreated>(
+      `/api/v1/registry/deploy-tokens?project_id=${projectId}`,
+      { method: "POST", body: JSON.stringify(data) },
+    ),
+
+  revokeDeployToken: (tokenId: string) =>
+    fetchApi<void>(`/api/v1/registry/deploy-tokens/${tokenId}`, { method: "DELETE" }),
+
+  listEvents: (params?: { repository_id?: string; skip?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.repository_id) qs.set("repository_id", params.repository_id);
+    if (params?.skip) qs.set("skip", String(params.skip));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return fetchApi<RegistryEvent[]>(
+      `/api/v1/registry/events${query ? `?${query}` : ""}`,
+    );
+  },
 };

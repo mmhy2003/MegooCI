@@ -484,6 +484,21 @@ export default function SettingsPage() {
                     {info.registry.host}
                   </code>
                 </ConfigRow>
+                <ConfigRow label="Storage Path">
+                  <code className="rounded bg-muted px-2 py-0.5 text-xs">
+                    {info.registry.storage_path}
+                  </code>
+                </ConfigRow>
+                <ConfigRow label="Max Upload">
+                  <span className="text-sm">
+                    {info.registry.max_upload_mb} MB
+                  </span>
+                </ConfigRow>
+                <ConfigRow label="GC Schedule">
+                  <code className="rounded bg-muted px-2 py-0.5 text-xs">
+                    {info.registry.gc_cron}
+                  </code>
+                </ConfigRow>
               </div>
             )}
           </CardContent>

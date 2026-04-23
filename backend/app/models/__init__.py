@@ -13,6 +13,13 @@ from app.models.notification import NotificationChannel, NotificationDelivery
 from app.models.pipeline import Pipeline
 from app.models.user_notification import UserNotification
 from app.models.project import Project
+from app.models.registry import (
+    ContainerImage,
+    ContainerRepository,
+    ContainerTag,
+    RegistryDeployToken,
+    RegistryEvent,
+)
 from app.models.role import Role, UserRole
 from app.models.secret import EnvVar, Secret
 from app.models.trigger import Trigger, WebhookEndpoint
@@ -43,4 +50,9 @@ __all__ = [
     "NotificationChannel",
     "NotificationDelivery",
     "UserNotification",
+    "ContainerRepository",
+    "ContainerImage",
+    "ContainerTag",
+    "RegistryDeployToken",
+    "RegistryEvent",
 ]

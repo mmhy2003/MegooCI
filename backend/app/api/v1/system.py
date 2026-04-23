@@ -45,6 +45,9 @@ class AuthInfo(BaseModel):
 class RegistryInfo(BaseModel):
     enabled: bool
     host: str
+    storage_path: str
+    max_upload_mb: int
+    gc_cron: str
 
 
 class GitIntegrationInfo(BaseModel):
@@ -144,6 +147,9 @@ async def get_system_info(
         registry=RegistryInfo(
             enabled=settings.MEGOOCI_REGISTRY_ENABLED,
             host=settings.MEGOOCI_REGISTRY_HOST,
+            storage_path=settings.MEGOOCI_REGISTRY_STORAGE_PATH,
+            max_upload_mb=settings.MEGOOCI_REGISTRY_MAX_UPLOAD_MB,
+            gc_cron=settings.MEGOOCI_REGISTRY_GC_CRON,
         ),
         git=GitIntegrationInfo(
             github_oauth_configured=bool(

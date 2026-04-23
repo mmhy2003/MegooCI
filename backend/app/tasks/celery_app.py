@@ -35,3 +35,14 @@ celery_app.conf.update(
 )
 
 celery_app.autodiscover_tasks(["app.tasks"], related_name="build_tasks")
+celery_app.autodiscover_tasks(["app.tasks"], related_name="registry_tasks")
+
+from celery.schedules import crontab
+
+celery_app.conf.beat_schedule = {
+    "registry-gc": {
+        "task": "megooci.registry_gc",
+        "schedule": crontab(hour=3, minute=0),
+        "options": {"queue": "megooci"},
+    },
+}

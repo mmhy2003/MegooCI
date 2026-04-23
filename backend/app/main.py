@@ -51,5 +51,7 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 from app.api.v1.router import api_v1_router
+from app.api.v1.registry_oci import router as registry_oci_router
 
 app.include_router(api_v1_router)
+app.include_router(registry_oci_router, tags=["registry-oci"])
