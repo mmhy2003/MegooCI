@@ -90,7 +90,7 @@ async function performFetch(
     ...(options.headers as Record<string, string>),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  return fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
+  return fetch(`${BASE_URL}${endpoint}`, { ...options, headers, cache: "no-store" });
 }
 
 async function fetchApi<T>(
