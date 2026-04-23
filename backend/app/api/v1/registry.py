@@ -283,9 +283,9 @@ async def create_deploy_token(
     await db.flush()
     await db.refresh(dt)
 
-    resp = DeployTokenCreatedResponse.model_validate(dt)
-    resp.token = raw_token
-    return resp.model_dump()
+    data = DeployTokenResponse.model_validate(dt).model_dump()
+    data["token"] = raw_token
+    return data
 
 
 @router.delete("/deploy-tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
