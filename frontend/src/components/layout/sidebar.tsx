@@ -214,19 +214,20 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
             Log out icon button on the right.
             Collapsed (desktop only): avatar on top, log out button stacked
             below it so both remain reachable. */}
-        <div className="border-t p-2 overflow-hidden">
+        <div className="border-t p-2">
           <div
             className={cn(
-              "flex min-w-0 items-center gap-1",
+              "flex items-center gap-1",
               isCollapsed && "md:flex-col md:gap-1",
             )}
           >
+            <div className={cn("min-w-0 flex-1", isCollapsed && "md:flex-none")}>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   className={cn(
-                    "flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent overflow-hidden",
-                    isCollapsed && "md:flex-none md:justify-center md:px-2",
+                    "flex w-full min-w-0 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent",
+                    isCollapsed && "md:justify-center md:px-2",
                   )}
                 >
                   <Avatar
@@ -284,6 +285,7 @@ export function Sidebar({ mobileOpen, onCloseMobile }: SidebarProps) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            </div>
 
             <button
               type="button"
