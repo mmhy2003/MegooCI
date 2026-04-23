@@ -47,10 +47,12 @@ async def authenticate_basic(
     if username == "deploy-token":
         return await _auth_deploy_token(db, password)
 
+    from sqlalchemy import or_
+
     result = await db.execute(
         select(User)
         .options(selectinload(User.user_roles).selectinload(UserRole.role))
-        .where(User.email == username)
+        .where(or_(User.email == username, User.name == username))
     )
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:

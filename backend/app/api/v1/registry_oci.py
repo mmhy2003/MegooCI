@@ -18,6 +18,8 @@ compatibility:
 - ``PUT  /v2/<name>/blobs/uploads/<uuid>``    — complete upload
 - ``DELETE /v2/<name>/blobs/uploads/<uuid>``  — cancel upload
 - ``POST /v2/<name>/blobs/uploads/?mount=``   — cross-repo blob mount
+
+Image names follow the format ``<project_slug>/<repo_name>`` (two segments).
 """
 
 from __future__ import annotations
@@ -72,11 +74,16 @@ def _registry_disabled_check() -> None:
         raise HTTPException(status_code=404, detail="Registry is disabled")
 
 
-def _auth_challenge() -> dict[str, str]:
+def _auth_challenge(scope: str | None = None, error: str | None = None) -> dict[str, str]:
     settings = get_settings()
     realm = f"{settings.MEGOOCI_PUBLIC_URL}/v2/token"
+    parts = [f'Bearer realm="{realm}"', f'service="{settings.MEGOOCI_REGISTRY_HOST}"']
+    if scope:
+        parts.append(f'scope="{scope}"')
+    if error:
+        parts.append(f'error="{error}"')
     return {
-        "Www-Authenticate": f'Bearer realm="{realm}",service="{settings.MEGOOCI_REGISTRY_HOST}"',
+        "Www-Authenticate": ",".join(parts),
         "Docker-Distribution-Api-Version": "registry/2.0",
     }
 
@@ -93,7 +100,11 @@ def _require_action(token_payload: dict | None, action: str) -> None:
     if token_payload is None:
         raise HTTPException(status_code=401, headers=_auth_challenge())
     if action not in (token_payload.get("access") or []):
-        raise HTTPException(status_code=403, detail="Insufficient scope")
+        scope = token_payload.get("scope", "")
+        raise HTTPException(
+            status_code=401,
+            headers=_auth_challenge(scope=scope, error="insufficient_scope"),
+        )
 
 
 async def _get_or_create_repo(
@@ -122,7 +133,21 @@ async def _resolve_project(db: AsyncSession, project_slug: str) -> Project:
     )
     project = result.scalar_one_or_none()
     if project is None:
-        raise HTTPException(status_code=404, detail=f"Project '{project_slug}' not found")
+        settings = get_settings()
+        host = settings.MEGOOCI_REGISTRY_HOST
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "errors": [{
+                    "code": "NAME_UNKNOWN",
+                    "message": (
+                        f"Project '{project_slug}' does not exist. "
+                        f"Create it in the MegooCI UI first, then push: "
+                        f"docker push {host}/{project_slug}/<repo>:<tag>"
+                    ),
+                }]
+            },
+        )
     return project
 
 
@@ -164,6 +189,7 @@ async def _record_event(
 # ---------------------------------------------------------------------------
 
 @router.get("/v2/token")
+@router.post("/v2/token")
 async def get_token(
     request: Request,
     service: str = Query(""),
@@ -171,6 +197,21 @@ async def get_token(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     _registry_disabled_check()
+
+    svc = service
+    scp = scope
+    form_username = ""
+    form_password = ""
+    if request.method == "POST":
+        try:
+            form = await request.form()
+            svc = svc or str(form.get("service", ""))
+            scp = scp or str(form.get("scope", ""))
+            form_username = str(form.get("username", ""))
+            form_password = str(form.get("password", ""))
+        except Exception:
+            pass
+
     auth_header = request.headers.get("authorization", "")
     subject: str | None = None
     actions: list[str] = []
@@ -182,11 +223,17 @@ async def get_token(
         subject, actor_id, actions = await authenticate_basic(db, username, password)
         if subject is None:
             raise HTTPException(status_code=401, detail="Invalid credentials")
+    elif form_username and form_password:
+        subject, actor_id, actions = await authenticate_basic(
+            db, form_username, form_password
+        )
+        if subject is None:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
     else:
         actions = ["pull"]
         subject = "anonymous"
 
-    token = issue_registry_token(subject, actions, scope=scope or None)
+    token = issue_registry_token(subject, actions, scope=scp or None)
     return {
         "token": token,
         "access_token": token,
@@ -249,10 +296,10 @@ async def catalog(
 
 
 # ---------------------------------------------------------------------------
-# /v2/<name>/tags/list
+# /v2/<project_slug>/<repo_name>/tags/list
 # ---------------------------------------------------------------------------
 
-@router.get("/v2/{project_slug}/{repo_name:path}/tags/list")
+@router.get("/v2/{project_slug}/{repo_name}/tags/list")
 async def list_tags(
     project_slug: str,
     repo_name: str,
@@ -296,8 +343,8 @@ async def list_tags(
 # Manifests — HEAD / GET / PUT / DELETE
 # ---------------------------------------------------------------------------
 
-@router.head("/v2/{project_slug}/{repo_name:path}/manifests/{reference}")
-@router.get("/v2/{project_slug}/{repo_name:path}/manifests/{reference}")
+@router.head("/v2/{project_slug}/{repo_name}/manifests/{reference}")
+@router.get("/v2/{project_slug}/{repo_name}/manifests/{reference}")
 async def get_manifest(
     project_slug: str,
     repo_name: str,
@@ -346,7 +393,7 @@ async def get_manifest(
     )
 
 
-@router.put("/v2/{project_slug}/{repo_name:path}/manifests/{reference}")
+@router.put("/v2/{project_slug}/{repo_name}/manifests/{reference}")
 async def put_manifest(
     project_slug: str,
     repo_name: str,
@@ -442,7 +489,13 @@ async def put_manifest(
             )
             db.add(tag)
 
-    await _record_event(db, repo, "image.pushed", digest=digest, tag=reference if _TAG_RE.match(reference) else None, actor_id=actor_id, request=request)
+    await _record_event(
+        db, repo, "image.pushed",
+        digest=digest,
+        tag=reference if _TAG_RE.match(reference) else None,
+        actor_id=actor_id,
+        request=request,
+    )
 
     return Response(
         status_code=201,
@@ -454,7 +507,7 @@ async def put_manifest(
     )
 
 
-@router.delete("/v2/{project_slug}/{repo_name:path}/manifests/{reference}")
+@router.delete("/v2/{project_slug}/{repo_name}/manifests/{reference}")
 async def delete_manifest(
     project_slug: str,
     repo_name: str,
@@ -519,8 +572,8 @@ async def delete_manifest(
 # Blobs — HEAD / GET
 # ---------------------------------------------------------------------------
 
-@router.head("/v2/{project_slug}/{repo_name:path}/blobs/{digest}")
-@router.get("/v2/{project_slug}/{repo_name:path}/blobs/{digest}")
+@router.head("/v2/{project_slug}/{repo_name}/blobs/{digest}")
+@router.get("/v2/{project_slug}/{repo_name}/blobs/{digest}")
 async def get_blob(
     project_slug: str,
     repo_name: str,
@@ -573,7 +626,8 @@ async def get_blob(
 # Blob uploads — POST (initiate) / PATCH (chunk) / PUT (complete) / DELETE
 # ---------------------------------------------------------------------------
 
-@router.post("/v2/{project_slug}/{repo_name:path}/blobs/uploads/")
+@router.post("/v2/{project_slug}/{repo_name}/blobs/uploads")
+@router.post("/v2/{project_slug}/{repo_name}/blobs/uploads/")
 async def start_upload(
     project_slug: str,
     repo_name: str,
@@ -611,7 +665,7 @@ async def start_upload(
     )
 
 
-@router.patch("/v2/{project_slug}/{repo_name:path}/blobs/uploads/{upload_id}")
+@router.patch("/v2/{project_slug}/{repo_name}/blobs/uploads/{upload_id}")
 async def upload_chunk(
     project_slug: str,
     repo_name: str,
@@ -645,7 +699,7 @@ async def upload_chunk(
     )
 
 
-@router.put("/v2/{project_slug}/{repo_name:path}/blobs/uploads/{upload_id}")
+@router.put("/v2/{project_slug}/{repo_name}/blobs/uploads/{upload_id}")
 async def complete_upload(
     project_slug: str,
     repo_name: str,
@@ -677,7 +731,7 @@ async def complete_upload(
     )
 
 
-@router.delete("/v2/{project_slug}/{repo_name:path}/blobs/uploads/{upload_id}")
+@router.delete("/v2/{project_slug}/{repo_name}/blobs/uploads/{upload_id}")
 async def cancel_upload_endpoint(
     project_slug: str,
     repo_name: str,
@@ -690,3 +744,5 @@ async def cancel_upload_endpoint(
 
     storage.cancel_upload(upload_id)
     return Response(status_code=204)
+
+
