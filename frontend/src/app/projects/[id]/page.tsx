@@ -7,6 +7,8 @@ import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  Eye,
+  EyeOff,
   GitBranch,
   Plus,
   KeyRound,
@@ -63,6 +65,7 @@ export default function ProjectDetailPage() {
   const [newSecretName, setNewSecretName] = React.useState("");
   const [newSecretValue, setNewSecretValue] = React.useState("");
   const [creatingSec, setCreatingSec] = React.useState(false);
+  const [showSecValue, setShowSecValue] = React.useState(false);
 
   const [envDialogOpen, setEnvDialogOpen] = React.useState(false);
   const [newEnvName, setNewEnvName] = React.useState("");
@@ -190,6 +193,7 @@ export default function ProjectDetailPage() {
       setSecretDialogOpen(false);
       setNewSecretName("");
       setNewSecretValue("");
+      setShowSecValue(false);
       toast.success("Secret added");
     } catch {
       toast.error("Failed to add secret");
@@ -462,12 +466,30 @@ export default function ProjectDetailPage() {
                       </div>
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Value</label>
-                        <Input
-                          type="password"
-                          placeholder="••••••••"
-                          value={newSecretValue}
-                          onChange={(e) => setNewSecretValue(e.target.value)}
-                        />
+                        <div className="relative">
+                          <Input
+                            type={showSecValue ? "text" : "password"}
+                            placeholder="••••••••"
+                            value={newSecretValue}
+                            onChange={(e) => setNewSecretValue(e.target.value)}
+                            className="pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowSecValue((v) => !v)}
+                            className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
+                            tabIndex={-1}
+                          >
+                            {showSecValue ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                            <span className="sr-only">
+                              {showSecValue ? "Hide value" : "Show value"}
+                            </span>
+                          </button>
+                        </div>
                       </div>
                       <DialogFooter>
                         <Button type="submit" disabled={creatingSec}>

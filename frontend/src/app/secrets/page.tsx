@@ -3,7 +3,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
-import { KeyRound, Plus, Trash2, Variable } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Plus, Trash2, Variable } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { usePermission } from "@/hooks/use-permission";
@@ -47,6 +47,7 @@ export default function SecretsPage() {
   const [secName, setSecName] = React.useState("");
   const [secValue, setSecValue] = React.useState("");
   const [creatingSec, setCreatingSec] = React.useState(false);
+  const [showSecValue, setShowSecValue] = React.useState(false);
 
   const [envDialogOpen, setEnvDialogOpen] = React.useState(false);
   const [envProjectId, setEnvProjectId] = React.useState("");
@@ -112,6 +113,7 @@ export default function SecretsPage() {
       setSecretDialogOpen(false);
       setSecName("");
       setSecValue("");
+      setShowSecValue(false);
       toast.success("Secret added");
       loadData();
     } catch {
@@ -268,12 +270,30 @@ export default function SecretsPage() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Value</label>
-                    <Input
-                      type="password"
-                      placeholder="••••••••"
-                      value={secValue}
-                      onChange={(e) => setSecValue(e.target.value)}
-                    />
+                    <div className="relative">
+                      <Input
+                        type={showSecValue ? "text" : "password"}
+                        placeholder="••••••••"
+                        value={secValue}
+                        onChange={(e) => setSecValue(e.target.value)}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSecValue((v) => !v)}
+                        className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showSecValue ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                        <span className="sr-only">
+                          {showSecValue ? "Hide value" : "Show value"}
+                        </span>
+                      </button>
+                    </div>
                   </div>
                   <DialogFooter>
                     <Button type="submit" disabled={creatingSec}>
