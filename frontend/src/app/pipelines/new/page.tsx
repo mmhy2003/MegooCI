@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { PipelineEditor } from "@/components/pipeline/pipeline-editor";
+import { AiAssistantPanel } from "@/components/pipeline/ai-assistant-panel";
+import { Sheet } from "@/components/ui/sheet";
 import {
   Card,
   CardContent,
@@ -55,6 +57,7 @@ export default function NewPipelinePage() {
   const [defaultBranch, setDefaultBranch] = React.useState("main");
   const [yamlContent, setYamlContent] = React.useState(YAML_STARTER);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [aiOpen, setAiOpen] = React.useState(false);
 
   React.useEffect(() => {
     projectsApi
@@ -131,6 +134,10 @@ export default function NewPipelinePage() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handleApplyYaml(yaml: string) {
+    setYamlContent(yaml);
   }
 
   return (
@@ -243,6 +250,8 @@ export default function NewPipelinePage() {
                 minHeight="320px"
                 placeholder="Enter your YAML pipeline definition..."
                 projectId={projectId || null}
+                aiOpen={aiOpen}
+                onToggleAi={() => setAiOpen((prev) => !prev)}
               />
 
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">
@@ -266,6 +275,16 @@ export default function NewPipelinePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* AI Assistant Drawer */}
+      <Sheet open={aiOpen} onOpenChange={setAiOpen}>
+        <AiAssistantPanel
+          currentYaml={yamlContent}
+          onApplyYaml={handleApplyYaml}
+          projectId={projectId || null}
+          onClose={() => setAiOpen(false)}
+        />
+      </Sheet>
     </AppLayout>
   );
 }

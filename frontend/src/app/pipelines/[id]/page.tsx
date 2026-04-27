@@ -15,6 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Sheet } from "@/components/ui/sheet";
+import { AiAssistantPanel } from "@/components/pipeline/ai-assistant-panel";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
@@ -77,6 +79,7 @@ export default function PipelineDetailPage() {
   const [saving, setSaving] = React.useState(false);
   const [editingName, setEditingName] = React.useState(false);
   const [editName, setEditName] = React.useState("");
+  const [aiOpen, setAiOpen] = React.useState(false);
   const [savingName, setSavingName] = React.useState(false);
 
   React.useEffect(() => {
@@ -527,11 +530,27 @@ export default function PipelineDetailPage() {
                 minHeight="400px"
                 placeholder="No definition yet."
                 projectId={pipeline.project_id}
+                aiOpen={aiOpen}
+                onToggleAi={() => setAiOpen((prev) => !prev)}
               />
             </CardContent>
           </Card>
         )}
       </div>
+
+      {/* AI Assistant Drawer */}
+      <Sheet open={aiOpen} onOpenChange={setAiOpen}>
+        <AiAssistantPanel
+          currentYaml={editing ? editContent : (pipeline.yaml_content || "")}
+          onApplyYaml={
+            editing
+              ? (yaml) => setEditContent(yaml)
+              : undefined
+          }
+          projectId={pipeline.project_id}
+          onClose={() => setAiOpen(false)}
+        />
+      </Sheet>
     </AppLayout>
   );
 }

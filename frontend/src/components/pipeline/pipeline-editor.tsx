@@ -6,9 +6,6 @@ import { BookOpen, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { YamlEditor } from "@/components/ui/yaml-editor";
 import { DocsPanel } from "./docs-panel";
-import { AiAssistantPanel } from "./ai-assistant-panel";
-
-type SidePanel = "docs" | "ai" | null;
 
 interface PipelineEditorProps {
   value: string;
@@ -18,6 +15,10 @@ interface PipelineEditorProps {
   className?: string;
   placeholder?: string;
   projectId?: string | null;
+  /** Whether the external AI drawer is currently open (controls button highlight). */
+  aiOpen?: boolean;
+  /** Called when the user clicks the AI Assistant toolbar button. */
+  onToggleAi?: () => void;
 }
 
 export function PipelineEditor({
@@ -27,24 +28,16 @@ export function PipelineEditor({
   minHeight = "400px",
   className,
   placeholder,
-  projectId,
+  aiOpen = false,
+  onToggleAi,
 }: PipelineEditorProps) {
-  const [sidePanel, setSidePanel] = React.useState<SidePanel>(null);
-
-  function togglePanel(panel: SidePanel) {
-    setSidePanel((prev) => (prev === panel ? null : panel));
-  }
+  const [docsOpen, setDocsOpen] = React.useState(false);
 
   function handleInsert(yaml: string) {
     if (!onChange) return;
     const trimmed = value.trimEnd();
     const newContent = trimmed ? `${trimmed}\n\n${yaml}\n` : `${yaml}\n`;
     onChange(newContent);
-  }
-
-  function handleApplyYaml(yaml: string) {
-    if (!onChange) return;
-    onChange(yaml);
   }
 
   return (
@@ -55,20 +48,20 @@ export function PipelineEditor({
         <div className="flex gap-1.5">
           <Button
             type="button"
-            variant={sidePanel === "docs" ? "default" : "outline"}
+            variant={docsOpen ? "default" : "outline"}
             size="sm"
-            onClick={() => togglePanel("docs")}
+            onClick={() => setDocsOpen((prev) => !prev)}
             className="h-7 gap-1.5 text-xs"
           >
             <BookOpen className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Docs</span>
           </Button>
-          {!readOnly && (
+          {!readOnly && onToggleAi && (
             <Button
               type="button"
-              variant={sidePanel === "ai" ? "default" : "outline"}
+              variant={aiOpen ? "default" : "outline"}
               size="sm"
-              onClick={() => togglePanel("ai")}
+              onClick={onToggleAi}
               className="h-7 gap-1.5 text-xs"
             >
               <Sparkles className="h-3.5 w-3.5" />
@@ -78,10 +71,10 @@ export function PipelineEditor({
         </div>
       </div>
 
-      {/* Editor + Side Panel */}
+      {/* Editor + Docs Panel */}
       <div className="flex gap-4">
         {/* Editor */}
-        <div className={cn("min-w-0", sidePanel ? "flex-1" : "w-full")}>
+        <div className={cn("min-w-0", docsOpen ? "flex-1" : "w-full")}>
           <YamlEditor
             value={value}
             onChange={onChange}
@@ -92,53 +85,35 @@ export function PipelineEditor({
           />
         </div>
 
-        {/* Side Panel */}
-        {sidePanel && (
+        {/* Docs Side Panel (desktop) */}
+        {docsOpen && (
           <div className="hidden w-[380px] shrink-0 rounded-lg border bg-background shadow-sm lg:flex lg:flex-col">
             <div className="relative">
               <button
                 type="button"
-                onClick={() => setSidePanel(null)}
+                onClick={() => setDocsOpen(false)}
                 className="absolute right-2 top-2 z-10 rounded-sm p-0.5 text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="h-4 w-4" />
               </button>
-              {sidePanel === "docs" && (
-                <DocsPanel onInsert={readOnly ? undefined : handleInsert} />
-              )}
-              {sidePanel === "ai" && (
-                <AiAssistantPanel
-                  currentYaml={value}
-                  onApplyYaml={handleApplyYaml}
-                  projectId={projectId}
-                />
-              )}
+              <DocsPanel onInsert={readOnly ? undefined : handleInsert} />
             </div>
           </div>
         )}
       </div>
 
-      {/* Mobile panel as sheet below the editor */}
-      {sidePanel && (
+      {/* Docs panel below editor on mobile */}
+      {docsOpen && (
         <div className="rounded-lg border bg-background shadow-sm lg:hidden">
           <div className="relative">
             <button
               type="button"
-              onClick={() => setSidePanel(null)}
+              onClick={() => setDocsOpen(false)}
               className="absolute right-2 top-2 z-10 rounded-sm p-0.5 text-muted-foreground hover:text-foreground transition-colors"
             >
               <X className="h-4 w-4" />
             </button>
-            {sidePanel === "docs" && (
-              <DocsPanel onInsert={readOnly ? undefined : handleInsert} />
-            )}
-            {sidePanel === "ai" && (
-              <AiAssistantPanel
-                currentYaml={value}
-                onApplyYaml={handleApplyYaml}
-                projectId={projectId}
-              />
-            )}
+            <DocsPanel onInsert={readOnly ? undefined : handleInsert} />
           </div>
         </div>
       )}
