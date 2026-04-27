@@ -29,6 +29,7 @@ Most teams use ~20 % of Jenkins' surface area. MegooCI re-implements that 20 % w
 - **AI pipeline assistant** — chat-based interface that generates and refines YAML from natural-language prompts, with project-context awareness (available secrets / env vars) and one-click apply.
 - **Remote build agents** — self-hosted `megooci-agent` Go binary (~15 MB static binary) connects to the controller over an authenticated WebSocket and runs steps on remote hosts. Falls back to local execution when no agent is online.
 - **Embedded OCI / Docker registry** — OCI Distribution Spec v1.1 compliant. `docker login`, `push`, and `pull` work out of the box. Deploy tokens, anonymous pull, immutable tags, per-project quotas, and automatic garbage collection included.
+- **Build artifacts** — collect outputs from pipeline stages via `artifacts.paths` glob patterns. Browse, download, and manage artifacts from a dedicated `/artifacts` page or per-build detail view. Configurable retention by age.
 
 ### Developer Experience
 
@@ -41,8 +42,8 @@ Most teams use ~20 % of Jenkins' surface area. MegooCI re-implements that 20 % w
 ### Operations & Security
 
 - **Git provider integration** — GitHub / GitLab / generic Git with admin-scoped PAT connections, per-project repository linking, and manual-paste webhooks with HMAC verification. Pushes trigger builds automatically.
-- **RBAC** — three system roles (admin, developer, viewer) with granular permissions, scoped user-role assignments, and permission-gated endpoints + UI.
-- **Secrets & environment management** — Fernet-encrypted at rest, scoped at global / project / pipeline level, referenced by name (`${{ secrets.X }}`), never inlined.
+- **RBAC** — three system roles (admin, developer, viewer) with granular permissions (`projects`, `pipelines`, `builds`, `artifacts`, `secrets`, `agents`, `registry`), scoped user-role assignments, and permission-gated endpoints + UI.
+- **Secrets & environment management** — Fernet-encrypted at rest, scoped at global / project / pipeline level, referenced by name (`${{ secrets.X }}`), never inlined. Visibility toggles and edit support in the UI.
 - **User invitations** — admin-initiated invites with optional SMTP email delivery, configurable expiry, and role pre-assignment.
 - **Long-lived sessions** — 12-hour access tokens with silent refresh up to 30 days.
 
@@ -51,7 +52,7 @@ Most teams use ~20 % of Jenkins' surface area. MegooCI re-implements that 20 % w
 - Docker / SSH / Kubernetes executors (agent-side)
 - Parallel stages, matrix expansion, parameterized builds
 - Notifications (email / Slack / Teams / Discord)
-- Artifacts + JUnit / coverage ingestion
+- JUnit / coverage ingestion
 - OIDC / SAML / LDAP / API tokens
 - Scheduled (cron) pipeline triggers
 - Image signing (cosign) + vulnerability scanning (Trivy)
@@ -133,6 +134,10 @@ stages:
       - docker_push:
           tags:
             - "ghcr.io/org/app:${{ env.VERSION }}"
+    artifacts:
+      paths:
+        - "dist/*"
+        - "coverage/report.html"
 
   - name: deploy
     when:
@@ -258,6 +263,7 @@ MegooCI reads all configuration from environment variables. See [`.env.example`]
 | `MEGOOCI_AI_BASE_URL` | — | OpenAI-compatible API endpoint (OpenAI, Azure, Ollama, vLLM). |
 | `MEGOOCI_REGISTRY_STORAGE_PATH` | — | Path for OCI registry blob storage. |
 | `MEGOOCI_REGISTRY_MAX_UPLOAD_MB` | — | Max image layer upload size. |
+| `MEGOOCI_ARTIFACT_RETENTION_DAYS` | `30` | Days to retain build artifacts before expiry. |
 | `MEGOOCI_MEILISEARCH_URL` | — | Meilisearch connection URL for global search. |
 
 ## Host-Only Development (No Docker Stack)
