@@ -288,6 +288,11 @@ func buildGitCloneCmd(cfg map[string]interface{}) string {
 	if repo == "" {
 		return ""
 	}
+	// Inject token into HTTPS URL for private repo authentication.
+	// The token comes from secret interpolation on the controller side.
+	if token := configStr(cfg, "token"); token != "" && strings.HasPrefix(repo, "https://") {
+		repo = strings.Replace(repo, "https://", "https://x-access-token:"+token+"@", 1)
+	}
 	args := "git clone"
 	if branch := configStr(cfg, "branch"); branch != "" {
 		args += " -b " + shellQuote(branch)

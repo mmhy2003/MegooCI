@@ -68,12 +68,25 @@ definitions in YAML for the MegooCI platform.
 
 ### git_clone — Clone a repository
 ```yaml
+# Public repo
 - git_clone:
     repo: "https://github.com/org/repo.git"
     branch: main
     depth: 1     # optional shallow clone
     path: "."    # optional checkout path
+
+# Private repo — explicit token from a secret
+- git_clone:
+    repo: "https://github.com/org/private-repo.git"
+    token: ${{ secrets.GIT_TOKEN }}
+    branch: main
 ```
+
+Private repo authentication (resolved in priority order):
+1. Explicit `token` field — use `${{ secrets.GIT_TOKEN }}` to inject from secrets.
+2. A secret named `GIT_TOKEN` in the pipeline/project scope.
+3. Auto-inject — if the project has a connected Git provider (Settings → Integrations) \
+whose hostname matches the repo URL, MegooCI injects the stored token automatically.
 
 ### git_pull — Pull latest changes
 ```yaml

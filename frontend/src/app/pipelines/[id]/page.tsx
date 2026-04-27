@@ -530,6 +530,7 @@ export default function PipelineDetailPage() {
                 minHeight="400px"
                 placeholder="No definition yet."
                 projectId={pipeline.project_id}
+                pipelineId={pipeline.id}
                 aiOpen={aiOpen}
                 onToggleAi={() => setAiOpen((prev) => !prev)}
               />

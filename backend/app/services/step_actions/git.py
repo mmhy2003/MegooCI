@@ -6,11 +6,23 @@ Handlers for Git-related step types:
 
 YAML examples:
 
+  # Public repo
   - git_clone:
       repo: "https://github.com/org/repo.git"
       branch: main
       depth: 1
       path: "."
+
+  # Private repo — explicit token via secret interpolation
+  - git_clone:
+      repo: "https://github.com/org/private-repo.git"
+      token: ${{ secrets.GIT_TOKEN }}
+      branch: main
+
+  # Private repo — auto-injects token from connected Git provider
+  - git_clone:
+      repo: "https://github.com/org/private-repo.git"
+      branch: main
 
   - git_pull:
       remote: origin
@@ -25,12 +37,17 @@ YAML examples:
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, AsyncIterator
+from urllib.parse import urlparse
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import register
 from .base import LogLine, StepActionHandler, StepContext, StepResult
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_git_cmd(
@@ -95,6 +112,93 @@ def _inject_token_into_url(repo_url: str, token: str) -> str:
     return repo_url.replace("https://", f"https://x-access-token:{token}@", 1)
 
 
+async def _resolve_git_token(
+    repo_url: str,
+    config: dict[str, Any],
+    ctx: StepContext,
+    db: AsyncSession,
+) -> str:
+    """Resolve a Git authentication token using three strategies in priority order:
+
+    1. Explicit ``token`` field in the step config (supports secret interpolation).
+    2. ``GIT_TOKEN`` secret defined in the pipeline/project scope.
+    3. Auto-inject from a matching ``GitProviderConnection`` linked to the project.
+    """
+    # Strategy 1: explicit token from YAML config
+    explicit_token = config.get("token", "")
+    if explicit_token:
+        return explicit_token
+
+    # Strategy 2: GIT_TOKEN from project/pipeline secrets
+    secret_token = ctx.secrets.get("GIT_TOKEN", "")
+    if secret_token:
+        return secret_token
+
+    # Strategy 3: auto-inject from connected Git provider
+    return await _lookup_provider_token(repo_url, ctx.project_id, db)
+
+
+async def _lookup_provider_token(
+    repo_url: str,
+    project_id: Any,
+    db: AsyncSession,
+) -> str:
+    """Find a matching GitProviderConnection for the repo URL and decrypt its token.
+
+    Matches by comparing the hostname of the repo URL with the base_url of
+    connected providers, or by checking ProjectRepository links for the project.
+    """
+    try:
+        from app.models.git_integration import GitProviderConnection, ProjectRepository
+        from app.core.security import decrypt_secret
+        from app.config import get_settings
+
+        parsed = urlparse(repo_url)
+        repo_host = parsed.hostname or ""
+
+        # First try: find a ProjectRepository linked to this project that
+        # matches the repo URL (or at least the same host).
+        result = await db.execute(
+            select(ProjectRepository)
+            .where(ProjectRepository.project_id == project_id)
+        )
+        for proj_repo in result.scalars().all():
+            proj_host = urlparse(proj_repo.repo_url).hostname or ""
+            if proj_host == repo_host or proj_repo.repo_url.rstrip("/") == repo_url.rstrip("/"):
+                connection = await db.get(GitProviderConnection, proj_repo.connection_id)
+                if connection and connection.encrypted_credential:
+                    settings = get_settings()
+                    return decrypt_secret(
+                        connection.encrypted_credential,
+                        settings.MEGOOCI_SECRET_KEY,
+                    )
+
+        # Fallback: find any connection whose base_url matches the repo host.
+        result = await db.execute(select(GitProviderConnection))
+        for conn in result.scalars().all():
+            conn_host = ""
+            if conn.base_url:
+                conn_host = urlparse(conn.base_url).hostname or ""
+            # Default host for known providers
+            if not conn_host:
+                if conn.provider_type == "github":
+                    conn_host = "github.com"
+                elif conn.provider_type == "gitlab":
+                    conn_host = "gitlab.com"
+
+            if conn_host and conn_host == repo_host and conn.encrypted_credential:
+                settings = get_settings()
+                return decrypt_secret(
+                    conn.encrypted_credential,
+                    settings.MEGOOCI_SECRET_KEY,
+                )
+
+    except Exception as exc:
+        logger.debug("Auto-inject git token lookup failed: %s", exc)
+
+    return ""
+
+
 class GitCloneHandler(StepActionHandler):
 
     async def execute(
@@ -108,7 +212,7 @@ class GitCloneHandler(StepActionHandler):
         depth = config.get("depth")
         path = config.get("path", ".")
 
-        token = ctx.secrets.get("GIT_TOKEN", "")
+        token = await _resolve_git_token(repo, config, ctx, db)
         if token:
             repo = _inject_token_into_url(repo, token)
 
@@ -120,6 +224,12 @@ class GitCloneHandler(StepActionHandler):
         args += [repo, path]
 
         async for item in _run_git_cmd(args, ctx):
+            # Mask the token from log output
+            if token and isinstance(item, LogLine) and token in item.content:
+                item = LogLine(
+                    stream=item.stream,
+                    content=item.content.replace(token, "****"),
+                )
             yield item
 
     def validate_config(self, config: dict[str, Any]) -> list[str]:

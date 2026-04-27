@@ -106,12 +106,19 @@ stages:
     title: "Git Clone",
     icon: <GitBranch className="h-4 w-4" />,
     description:
-      "Clone a repository. Supports branch selection, shallow clones, and custom checkout paths.",
-    yaml: `- git_clone:
+      "Clone a repository. Supports branch selection, shallow clones, and private repo authentication via token. If you have a connected Git provider, the token is auto-injected.",
+    yaml: `# Public repo
+- git_clone:
     repo: "https://github.com/org/repo.git"
     branch: main
     depth: 1
-    path: "."`,
+    path: "."
+
+# Private repo — use a secret token
+- git_clone:
+    repo: "https://github.com/org/private-repo.git"
+    token: \${{ secrets.GIT_TOKEN }}
+    branch: main`,
   },
   {
     id: "git_pull_push",
