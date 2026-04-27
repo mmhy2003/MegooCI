@@ -48,6 +48,7 @@ Or directly with `docker run` — token + ID are CLI flags, never env vars:
 ```bash
 docker run -d --restart=unless-stopped \
   --network megooci_default \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   megooci/agent:latest \
   run \
     --controller http://backend:8000 \

@@ -90,12 +90,18 @@ async def dispatch_step_to_agent(
     *,
     artifact_paths: list[str] | None = None,
     timeout_seconds: int = _DEFAULT_STEP_TIMEOUT_SECONDS,
+    config_override: dict[str, Any] | None = None,
+    command_override: str | None = None,
 ) -> dict[str, Any] | None:
     """Send a run_step message to the given agent and wait for its result.
 
     Returns the result dict (``{"exit_code": int, "status": "success"|"failed"}``)
     or ``None`` on timeout / infrastructure failure. Logs streamed back from
     the agent are handled separately by the WebSocket ingestion handler.
+
+    When *config_override* or *command_override* are provided they replace
+    the raw DB values so that server-side interpolation (secrets, env-vars)
+    and enrichment (token resolution) are reflected in what the agent sees.
     """
     settings = get_settings()
     redis_client = aioredis.from_url(
@@ -110,8 +116,8 @@ async def dispatch_step_to_agent(
         "step_id": str(step.id),
         "step_name": step.name,
         "step_type": step.step_type or "run",
-        "command": step.command or "",
-        "config": step.config_json or {},
+        "command": command_override if command_override is not None else (step.command or ""),
+        "config": config_override if config_override is not None else (step.config_json or {}),
     }
     if artifact_paths:
         payload["artifact_paths"] = artifact_paths

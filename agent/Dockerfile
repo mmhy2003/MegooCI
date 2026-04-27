@@ -66,7 +66,7 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
 
 # ── System packages (Debian repos) ──────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates git curl gnupg \
+      ca-certificates git curl gnupg openssh-client \
       build-essential \
       python3 python3-pip python3-venv \
  && rm -rf /var/lib/apt/lists/*
@@ -83,20 +83,24 @@ RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
 # ── pnpm (via corepack, ships with Node.js) ────────────────────────────────
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# ── Docker CLI (Docker official repo) ───────────────────────────────────────
+# ── Docker CLI + BuildKit (Docker official repo) ───────────────────────────
 RUN curl -fsSL https://download.docker.com/linux/debian/gpg \
       | gpg --dearmor -o /usr/share/keyrings/docker.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker.gpg] \
       https://download.docker.com/linux/debian bookworm stable" \
       > /etc/apt/sources.list.d/docker.list \
- && apt-get update && apt-get install -y --no-install-recommends docker-ce-cli \
+ && apt-get update && apt-get install -y --no-install-recommends \
+      docker-ce-cli docker-buildx-plugin \
  && rm -rf /var/lib/apt/lists/*
 
 # ── uv (Astral official image) ─────────────────────────────────────────────
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # ── Non-root user ──────────────────────────────────────────────────────────
-RUN useradd --create-home --shell /bin/sh --uid 1000 runner
+# Create a 'docker' group so the socket GID can be mapped at runtime via
+# `docker run --group-add`.  The runner user is added to it by default.
+RUN groupadd -g 998 docker \
+ && useradd --create-home --shell /bin/sh --uid 1000 -G docker runner
 USER runner
 WORKDIR /home/runner
 

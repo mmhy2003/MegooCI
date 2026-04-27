@@ -421,6 +421,8 @@ export default function AgentsPage() {
 
           const dockerSnippet = `docker run -d --name megooci-agent \\
   --restart unless-stopped \\${networkFlag}
+  -v /var/run/docker.sock:/var/run/docker.sock \\
+  --group-add $(stat -c '%g' /var/run/docker.sock) \\
   megooci/agent:latest \\
   run \\
     --controller ${controller} \\

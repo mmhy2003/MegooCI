@@ -228,18 +228,34 @@ async def _execute_step(
         )
         return await _run_handler(handler, step_config, ctx, step, db, redis_client, channel, secrets)
 
-    if step.step_type == "run":
-        # Only send artifact_paths for the last step in the stage so files
-        # are collected after all steps have run.
+    # ── Agent dispatch ───────────────────────────────────────────────────
+    # All step types except notify/trigger_pipeline can be executed on a
+    # remote agent.  Infrastructure steps (git_clone, docker_build,
+    # ssh_exec, etc.) MUST run on the agent because the server container
+    # typically lacks the required tools (git, docker, ssh).
+    # Only send artifact_paths on the last step so files are collected
+    # after all steps have run.
+    _SERVER_ONLY_TYPES = {"notify", "trigger_pipeline", "wait_webhook", "wait_input"}
+
+    if step.step_type not in _SERVER_ONLY_TYPES:
         sorted_steps = sorted(stage.steps, key=lambda s: s.sort_order)
         is_last_step = step.id == sorted_steps[-1].id if sorted_steps else False
         art_paths = stage.artifact_paths if is_last_step else None
+
+        # Pre-dispatch config enrichment: resolve server-side secrets
+        # that the agent cannot look up on its own.
+        dispatch_config = dict(step_config)  # already interpolated
+        await _enrich_config_for_agent(
+            step.step_type, dispatch_config, secrets, project_id, db
+        )
 
         agent_result = await _try_dispatch_to_agent(
             step, stage.name, build.id, db,
             artifact_paths=art_paths,
             redis_client=redis_client,
             channel=channel,
+            config_override=dispatch_config,
+            command_override=step_config.get("command") or step.command or "",
         )
         if agent_result is not None:
             await db.refresh(step)
@@ -247,6 +263,9 @@ async def _execute_step(
                 exit_code=step.exit_code or 0,
                 status=step.status,
             )
+
+        # Agent dispatch returned None — no agent online or timeout.
+        # Fall through to server-side handler if one exists.
 
     if handler is None:
         if step.command:
@@ -496,6 +515,8 @@ async def _try_dispatch_to_agent(
     artifact_paths: list[str] | None = None,
     redis_client: aioredis.Redis | None = None,
     channel: str | None = None,
+    config_override: dict | None = None,
+    command_override: str | None = None,
 ) -> dict | None:
     """If a healthy agent is online, run this step there and return its
     result dict. Returns None if no agent picks it up within the timeout,
@@ -527,6 +548,8 @@ async def _try_dispatch_to_agent(
         build_id=build_id,
         agent_id=agent.id,
         artifact_paths=artifact_paths,
+        config_override=config_override,
+        command_override=command_override,
     )
 
     if result is None and redis_client and channel:
@@ -538,6 +561,43 @@ async def _try_dispatch_to_agent(
         )
 
     return result
+
+
+async def _enrich_config_for_agent(
+    step_type: str,
+    config: dict,
+    secrets: dict[str, str],
+    project_id: Any,
+    db: AsyncSession,
+) -> None:
+    """Mutate *config* in-place to resolve server-side secrets that the
+    agent cannot look up on its own.
+
+    Currently handles:
+    - ``git_clone``: resolves the authentication token via the three-tier
+      strategy (explicit → GIT_TOKEN secret → auto-inject from provider).
+    """
+    if step_type == "git_clone":
+        from app.services.step_actions.git import _resolve_git_token
+        from app.services.step_actions.base import StepContext
+
+        # Build a lightweight context for token resolution.
+        mini_ctx = StepContext(
+            build_id=uuid.UUID(int=0),
+            step_id=uuid.UUID(int=0),
+            step_name="",
+            stage_name="",
+            pipeline_id=uuid.UUID(int=0),
+            project_id=project_id,
+            branch=config.get("branch", "main"),
+            commit_sha=None,
+            env={},
+            secrets=secrets,
+        )
+        repo = config.get("repo", "")
+        token = await _resolve_git_token(repo, config, mini_ctx, db)
+        if token:
+            config["token"] = token
 
 
 async def _send_build_finished_notification(

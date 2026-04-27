@@ -333,6 +333,8 @@ agent-up: ## Run the agent container. Usage: make agent-up ID=<uuid> TOKEN=<toke
 		--name $(_AGENT_NAME) \
 		--restart unless-stopped \
 		--network $(_AGENT_NETWORK) \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		--group-add $(shell stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 0) \
 		$(AGENT_IMAGE_LATEST) \
 		run \
 			--controller $(_AGENT_CONTROLLER) \

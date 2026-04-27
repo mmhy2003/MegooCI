@@ -220,7 +220,7 @@ func configStrMap(cfg map[string]interface{}, key string) map[string]string {
 }
 
 func buildDockerBuildCmd(cfg map[string]interface{}) string {
-	args := "docker build"
+	args := "docker buildx build --load"
 	for _, tag := range configStrList(cfg, "tags") {
 		args += " -t " + shellQuote(tag)
 	}
@@ -385,16 +385,59 @@ func (l *Local) resolveWorkdir(step Step) (dir string, cleanup func(), err error
 		}
 		return l.opts.Workdir, nil, nil
 	}
-	// Default: per-step temp dir, removed after completion.
-	base := filepath.Join(os.TempDir(), "megooci-agent")
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		return "", nil, err
-	}
-	dir, err = os.MkdirTemp(base, "step-"+safeID(step.StepID)+"-*")
+	// Default: per-*build* shared directory so all steps in the same build
+	// can see each other's files (e.g. git_clone → docker_build).
+	// The directory is cleaned up when releaseBuildWorkdir is called
+	// after all steps for the build have finished.
+	dir, err = l.acquireBuildWorkdir(step.BuildID)
 	if err != nil {
 		return "", nil, err
 	}
-	return dir, func() { _ = os.RemoveAll(dir) }, nil
+	return dir, nil, nil
+}
+
+// buildWorkspaces tracks per-build workspace directories.
+var (
+	buildWorkspaces   = make(map[string]string)
+	buildWorkspacesMu sync.Mutex
+)
+
+// acquireBuildWorkdir returns (or creates) a shared workspace directory for
+// the given build ID.  Subsequent calls with the same buildID return the
+// same directory.
+func (l *Local) acquireBuildWorkdir(buildID string) (string, error) {
+	buildWorkspacesMu.Lock()
+	defer buildWorkspacesMu.Unlock()
+
+	if dir, ok := buildWorkspaces[buildID]; ok {
+		return dir, nil
+	}
+
+	base := filepath.Join(os.TempDir(), "megooci-agent")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return "", err
+	}
+	dir, err := os.MkdirTemp(base, "build-"+safeID(buildID)+"-*")
+	if err != nil {
+		return "", err
+	}
+	buildWorkspaces[buildID] = dir
+	return dir, nil
+}
+
+// ReleaseBuildWorkdir cleans up the shared workspace for a build.
+// Called by the WS handler after all steps for the build have finished.
+func ReleaseBuildWorkdir(buildID string) {
+	buildWorkspacesMu.Lock()
+	dir, ok := buildWorkspaces[buildID]
+	if ok {
+		delete(buildWorkspaces, buildID)
+	}
+	buildWorkspacesMu.Unlock()
+
+	if ok && dir != "" {
+		_ = os.RemoveAll(dir)
+	}
 }
 
 func safeID(s string) string {
