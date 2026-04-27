@@ -48,13 +48,13 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pipelines", label: "Pipelines", icon: GitBranch, permission: "pipelines.read" },
   { href: "/projects", label: "Projects", icon: FolderKanban, permission: "projects.read" },
+  { href: "/pipelines", label: "Pipelines", icon: GitBranch, permission: "pipelines.read" },
+  { href: "/secrets", label: "Secrets", icon: KeyRound, permission: "secrets.read" },
   { href: "/builds", label: "Builds", icon: Hammer, permission: "builds.read" },
   { href: "/artifacts", label: "Artifacts", icon: FileArchive, permission: "artifacts.read" },
-  { href: "/agents", label: "Agents", icon: Server, permission: "agents.read" },
-  { href: "/secrets", label: "Secrets", icon: KeyRound, permission: "secrets.read" },
   { href: "/registry", label: "Registry", icon: Container, permission: "registry.read" },
+  { href: "/agents", label: "Agents", icon: Server, permission: "agents.read" },
   { href: "/integrations", label: "Integrations", icon: Plug, adminOnly: true },
   { href: "/admin/users", label: "Users", icon: Users, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings },
