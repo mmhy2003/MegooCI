@@ -226,10 +226,91 @@ async def delete_project(
         )
 
     if total_dependents > 0:
-        # Cascade path. Order matters: delete deepest children first so FK
-        # constraints are satisfied at each step. Webhook deliveries belong
-        # to repositories, repositories belong to the project, pipelines are
-        # independent of repos, and secrets/envs are scope-only refs.
+        # Cascade path.  Order matters: delete deepest children first so FK
+        # constraints are satisfied at each step.
+        #
+        # Dependency graph:
+        #   Pipeline ← Build ← Stage ← Step ← LogChunk
+        #   Pipeline ← Trigger
+        #   Pipeline ← WebhookEndpoint
+        #   Pipeline.project_repository_id → ProjectRepository
+        #   ProjectRepository ← WebhookDelivery
+        #   Build  ← Artifact
+        #   Build  ← NotificationDelivery (nullable FK)
+        #
+        # So pipelines MUST be deleted before repos, and all pipeline
+        # children (builds, triggers, etc.) before pipelines.
+
+        from app.models.artifact import Artifact
+        from app.models.build import Build, LogChunk, Stage, Step
+        from app.models.notification import NotificationDelivery
+        from app.models.trigger import Trigger, WebhookEndpoint
+
+        # 1) Collect pipeline IDs scoped to this project.
+        pipe_id_rows = await db.execute(
+            select(Pipeline.id).where(Pipeline.project_id == project_id)
+        )
+        pipe_ids = [row[0] for row in pipe_id_rows.all()]
+
+        if pipe_ids:
+            # 2) Collect build IDs for these pipelines.
+            build_id_rows = await db.execute(
+                select(Build.id).where(Build.pipeline_id.in_(pipe_ids))
+            )
+            build_ids = [row[0] for row in build_id_rows.all()]
+
+            if build_ids:
+                # Null-out notification delivery refs (nullable FK, no cascade).
+                await db.execute(
+                    sa_delete(NotificationDelivery).where(
+                        NotificationDelivery.build_id.in_(build_ids)
+                    )
+                )
+                # Delete artifacts for these builds.
+                await db.execute(
+                    sa_delete(Artifact).where(Artifact.build_id.in_(build_ids))
+                )
+                # Collect stage IDs.
+                stage_id_rows = await db.execute(
+                    select(Stage.id).where(Stage.build_id.in_(build_ids))
+                )
+                stage_ids = [row[0] for row in stage_id_rows.all()]
+                if stage_ids:
+                    # Collect step IDs.
+                    step_id_rows = await db.execute(
+                        select(Step.id).where(Step.stage_id.in_(stage_ids))
+                    )
+                    step_ids = [row[0] for row in step_id_rows.all()]
+                    if step_ids:
+                        await db.execute(
+                            sa_delete(LogChunk).where(LogChunk.step_id.in_(step_ids))
+                        )
+                    await db.execute(
+                        sa_delete(Step).where(Step.stage_id.in_(stage_ids))
+                    )
+                await db.execute(
+                    sa_delete(Stage).where(Stage.build_id.in_(build_ids))
+                )
+                await db.execute(
+                    sa_delete(Build).where(Build.id.in_(build_ids))
+                )
+
+            # Delete pipeline-level children: triggers + webhook endpoints.
+            await db.execute(
+                sa_delete(Trigger).where(Trigger.pipeline_id.in_(pipe_ids))
+            )
+            await db.execute(
+                sa_delete(WebhookEndpoint).where(
+                    WebhookEndpoint.pipeline_id.in_(pipe_ids)
+                )
+            )
+
+            # Now safe to delete pipelines (unblocks repo FK).
+            await db.execute(
+                sa_delete(Pipeline).where(Pipeline.project_id == project_id)
+            )
+
+        # Repos can now be deleted safely since no pipelines reference them.
         repo_ids_rows = await db.execute(
             select(ProjectRepository.id).where(
                 ProjectRepository.project_id == project_id
@@ -248,10 +329,6 @@ async def delete_project(
                 )
             )
 
-        if pipeline_count:
-            await db.execute(
-                sa_delete(Pipeline).where(Pipeline.project_id == project_id)
-            )
         if secret_count:
             await db.execute(
                 sa_delete(Secret).where(
