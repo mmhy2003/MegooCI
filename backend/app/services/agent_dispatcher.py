@@ -88,6 +88,7 @@ async def dispatch_step_to_agent(
     build_id: uuid.UUID,
     agent_id: uuid.UUID,
     *,
+    artifact_paths: list[str] | None = None,
     timeout_seconds: int = _DEFAULT_STEP_TIMEOUT_SECONDS,
 ) -> dict[str, Any] | None:
     """Send a run_step message to the given agent and wait for its result.
@@ -112,6 +113,8 @@ async def dispatch_step_to_agent(
         "command": step.command or "",
         "config": step.config_json or {},
     }
+    if artifact_paths:
+        payload["artifact_paths"] = artifact_paths
 
     result_channel = step_result_channel(step.id)
     pubsub = redis_client.pubsub()

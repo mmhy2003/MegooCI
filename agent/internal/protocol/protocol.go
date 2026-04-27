@@ -9,11 +9,12 @@ package protocol
 // Message type constants so callers don't have to remember string literals.
 const (
 	// Agent -> Controller
-	TypeHello         = "hello"
-	TypeHeartbeat     = "heartbeat"
-	TypeLog           = "log"
-	TypeStepStarted   = "step_started"
-	TypeStepFinished  = "step_finished"
+	TypeHello             = "hello"
+	TypeHeartbeat         = "heartbeat"
+	TypeLog               = "log"
+	TypeStepStarted       = "step_started"
+	TypeStepFinished      = "step_finished"
+	TypeArtifactsUploaded = "artifacts_uploaded"
 
 	// Controller -> Agent
 	TypeRunStep    = "run_step"
@@ -43,6 +44,10 @@ type Frame struct {
 	Config       map[string]interface{} `json:"config,omitempty"`
 	Env          map[string]string      `json:"env,omitempty"`
 	Workdir      string                 `json:"workdir,omitempty"`
+	// ArtifactPaths contains glob patterns of files to collect and upload
+	// after this step completes successfully (populated from the pipeline
+	// YAML's `artifacts.paths` directive on the parent stage).
+	ArtifactPaths []string `json:"artifact_paths,omitempty"`
 }
 
 // Hello is the first frame the agent sends after connect.
@@ -84,4 +89,14 @@ type StepFinished struct {
 	StepID   string `json:"step_id"`
 	ExitCode int    `json:"exit_code"`
 	Status   string `json:"status"`
+}
+
+// ArtifactsUploaded is sent after the agent has finished uploading collected
+// artifact files for a build step.
+type ArtifactsUploaded struct {
+	Type    string `json:"type"`
+	BuildID string `json:"build_id"`
+	StepID  string `json:"step_id"`
+	Count   int    `json:"count"`
+	Errors  int    `json:"errors"`
 }

@@ -221,8 +221,14 @@ async def _execute_step(
         return await _run_handler(handler, step_config, ctx, step, db, redis_client, channel, secrets)
 
     if step.step_type == "run":
+        # Only send artifact_paths for the last step in the stage so files
+        # are collected after all steps have run.
+        sorted_steps = sorted(stage.steps, key=lambda s: s.sort_order)
+        is_last_step = step.id == sorted_steps[-1].id if sorted_steps else False
+        art_paths = stage.artifact_paths if is_last_step else None
+
         agent_result = await _try_dispatch_to_agent(
-            step, stage.name, build.id, db
+            step, stage.name, build.id, db, artifact_paths=art_paths,
         )
         if agent_result is not None:
             await db.refresh(step)
@@ -426,6 +432,8 @@ async def _try_dispatch_to_agent(
     stage_name: str,
     build_id: uuid.UUID,
     db: AsyncSession,
+    *,
+    artifact_paths: list[str] | None = None,
 ) -> dict | None:
     """If a healthy agent is online, run this step there and return its
     result dict. Returns None if no agent picks it up within the timeout,
@@ -439,6 +447,7 @@ async def _try_dispatch_to_agent(
         stage_name=stage_name,
         build_id=build_id,
         agent_id=agent.id,
+        artifact_paths=artifact_paths,
     )
 
 

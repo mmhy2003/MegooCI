@@ -84,6 +84,7 @@ async def trigger_build(
                 name=stage_def["name"],
                 status="pending",
                 sort_order=sort_order,
+                artifact_paths=stage_def.get("artifacts"),
             )
             db.add(stage)
             await db.flush()

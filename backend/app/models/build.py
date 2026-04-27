@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -76,6 +76,9 @@ class Stage(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    artifact_paths: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String(500)), nullable=True,
     )
 
     build: Mapped["Build"] = relationship(back_populates="stages")

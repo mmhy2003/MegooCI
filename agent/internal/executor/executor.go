@@ -15,14 +15,15 @@ type LogLine struct {
 
 // Step is the minimal description the executor needs to run a build step.
 type Step struct {
-	BuildID  string
-	StepID   string
-	Name     string
-	StepType string // "run", "docker_build", etc.; empty treated as "run"
-	Command  string
-	Config   map[string]interface{} // type-specific configuration
-	Env      map[string]string
-	Workdir  string // optional; empty = executor's default
+	BuildID       string
+	StepID        string
+	Name          string
+	StepType      string // "run", "docker_build", etc.; empty treated as "run"
+	Command       string
+	Config        map[string]interface{} // type-specific configuration
+	Env           map[string]string
+	Workdir       string   // optional; empty = executor's default
+	ArtifactPaths []string // glob patterns of files to collect on success
 }
 
 // Result is the terminal outcome of a step.

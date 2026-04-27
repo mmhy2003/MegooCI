@@ -5,15 +5,20 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -266,16 +271,19 @@ func (c *Client) runStep(parent context.Context, f protocol.Frame) {
 		}
 	}()
 
-	result := c.opts.Executor.Run(stepCtx, executor.Step{
-		BuildID:  f.BuildID,
-		StepID:   f.StepID,
-		Name:     f.StepName,
-		StepType: f.StepType,
-		Command:  f.Command,
-		Config:   f.Config,
-		Env:      f.Env,
-		Workdir:  f.Workdir,
-	}, logs)
+	step := executor.Step{
+		BuildID:       f.BuildID,
+		StepID:        f.StepID,
+		Name:          f.StepName,
+		StepType:      f.StepType,
+		Command:       f.Command,
+		Config:        f.Config,
+		Env:           f.Env,
+		Workdir:       f.Workdir,
+		ArtifactPaths: f.ArtifactPaths,
+	}
+
+	result := c.opts.Executor.Run(stepCtx, step, logs)
 
 	// Wait for the log-forwarder to drain the closed channel.
 	<-done
@@ -286,6 +294,12 @@ func (c *Client) runStep(parent context.Context, f protocol.Frame) {
 		ExitCode: result.ExitCode,
 		Status:   result.Status,
 	})
+
+	// After a successful step with artifact patterns, collect and upload files.
+	if result.Status == protocol.StatusSuccess && len(f.ArtifactPaths) > 0 {
+		go c.uploadArtifacts(parent, f.BuildID, f.StepID, step.Workdir, f.ArtifactPaths)
+	}
+
 	if result.Err != nil {
 		c.logger.Warn("step finished with error", "step_id", f.StepID, "error", result.Err)
 	} else {
@@ -377,4 +391,123 @@ func redactURL(raw string) string {
 	}
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// ---- artifact upload ----
+
+// uploadArtifacts collects files matching the given glob patterns relative to
+// `workdir` and uploads each as a multipart POST to the controller's artifact
+// API at `POST /api/v1/builds/{build_id}/artifacts`.
+func (c *Client) uploadArtifacts(ctx context.Context, buildID, stepID, workdir string, patterns []string) {
+	if workdir == "" {
+		c.logger.Debug("artifact upload skipped: no workdir", "step_id", stepID)
+		return
+	}
+
+	var matched []string
+	for _, pattern := range patterns {
+		fullPattern := filepath.Join(workdir, pattern)
+		files, err := filepath.Glob(fullPattern)
+		if err != nil {
+			c.logger.Warn("artifact glob error", "pattern", pattern, "error", err)
+			continue
+		}
+		for _, f := range files {
+			fi, err := os.Stat(f)
+			if err != nil || fi.IsDir() {
+				continue
+			}
+			matched = append(matched, f)
+		}
+	}
+
+	if len(matched) == 0 {
+		c.logger.Debug("no files matched artifact patterns", "step_id", stepID, "patterns", patterns)
+		return
+	}
+
+	c.logger.Info("uploading artifacts", "step_id", stepID, "count", len(matched))
+
+	uploaded, errCount := 0, 0
+	for _, fpath := range matched {
+		rel, _ := filepath.Rel(workdir, fpath)
+		if rel == "" {
+			rel = filepath.Base(fpath)
+		}
+		if err := c.uploadSingleArtifact(ctx, buildID, fpath, rel); err != nil {
+			c.logger.Warn("artifact upload failed", "file", rel, "error", err)
+			errCount++
+		} else {
+			uploaded++
+		}
+	}
+
+	_ = c.sendFrame(protocol.ArtifactsUploaded{
+		Type:    protocol.TypeArtifactsUploaded,
+		BuildID: buildID,
+		StepID:  stepID,
+		Count:   uploaded,
+		Errors:  errCount,
+	})
+	c.logger.Info("artifact upload complete",
+		"step_id", stepID, "uploaded", uploaded, "errors", errCount)
+}
+
+// uploadSingleArtifact sends one file to the controller via multipart POST.
+func (c *Client) uploadSingleArtifact(ctx context.Context, buildID, filePath, relativePath string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return err
+	}
+
+	// Add relative_path field so the controller stores it under the right name.
+	_ = writer.WriteField("relative_path", relativePath)
+
+	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	// Build the upload URL from the controller base URL.
+	uploadURL := strings.TrimRight(c.opts.BaseURL, "/") +
+		"/api/v1/builds/" + buildID + "/artifacts"
+
+	req, err := http.NewRequestWithContext(ctx, "POST", uploadURL, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.opts.Token)
+
+	tlsCfg := &tls.Config{}
+	if c.opts.InsecureTLS {
+		tlsCfg.InsecureSkipVerify = true
+	}
+	client := &http.Client{
+		Timeout:   120 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: tlsCfg},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
 }
