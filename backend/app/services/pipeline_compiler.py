@@ -14,6 +14,7 @@ Supports:
 - env vars at pipeline/stage/step level
 - parameters
 - secret/env interpolation placeholders (${{ secrets.X }}, ${{ env.X }})
+- artifacts collection (stage-level glob paths)
 """
 
 from typing import Any
@@ -106,6 +107,16 @@ def _compile_stage(
     when = stage_def.get("when")
     is_parallel = stage_def.get("parallel", False)
 
+    # Artifacts: list of glob patterns to collect after stage completes.
+    artifacts_raw = stage_def.get("artifacts")
+    artifacts_paths: list[str] | None = None
+    if isinstance(artifacts_raw, dict):
+        paths = artifacts_raw.get("paths", [])
+        if isinstance(paths, list):
+            artifacts_paths = [str(p) for p in paths]
+    elif isinstance(artifacts_raw, list):
+        artifacts_paths = [str(p) for p in artifacts_raw]
+
     steps_raw = stage_def.get("steps", [])
     steps: list[dict[str, Any]] = []
 
@@ -118,6 +129,7 @@ def _compile_stage(
         "env": stage_env,
         "when": when,
         "parallel": is_parallel,
+        "artifacts": artifacts_paths,
         "steps": steps,
     }
 

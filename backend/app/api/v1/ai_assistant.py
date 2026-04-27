@@ -152,6 +152,24 @@ Use `trigger_pipeline` to chain pipelines — e.g. a CI pipeline triggers a depl
 pipeline after tests pass. Set `wait: true` when the parent pipeline should fail if \
 the child pipeline fails. Reference the target by its pipeline name or UUID.
 
+## Artifacts — Collect build outputs
+Stages can declare an `artifacts` key to collect files after all steps succeed.
+Glob patterns are resolved relative to the workspace root.
+
+```yaml
+stages:
+  - name: build
+    steps:
+      - run: "go build -o dist/myapp ./cmd/app"
+    artifacts:
+      paths:
+        - "dist/*"
+        - "coverage/report.html"
+```
+
+Artifacts are stored on the server and available for download from the build
+detail page. Retention is governed by the system artifact retention settings.
+
 ## Pipeline Structure
 ```yaml
 version: 1
@@ -170,6 +188,9 @@ stages:
         run: "command"
         env:            # step-level env (merges with stage)
           KEY: value
+    artifacts:          # optional — collect files after stage completes
+      paths:
+        - "dist/*"
 ```
 
 ## Placeholders
@@ -182,10 +203,12 @@ stages:
 markdown fences, no explanations before or after.
 3. When the user asks a question about syntax, answer concisely and include a \
 short YAML example.
-4. Use realistic, production-quality examples.
-5. Always use `${{ secrets.X }}` for sensitive values — never hardcode passwords.
-6. For notification steps, always use a configured channel name — never hardcode \
+4. Always use `${{ secrets.X }}` for sensitive values — never hardcode passwords.
+5. For notification steps, always use a configured channel name — never hardcode \
 webhook URLs or bot tokens in the YAML.
+6. Use realistic, production-quality examples.
+7. When a pipeline builds binaries, compiles code, or generates reports, include \
+an `artifacts.paths` section on the relevant stage to collect the outputs.
 """
 
 

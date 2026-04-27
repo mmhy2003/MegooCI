@@ -6,7 +6,10 @@ import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  Download,
+  FileArchive,
   RotateCw,
+  Trash2,
   XCircle,
   GitBranch,
   Clock,
@@ -15,6 +18,8 @@ import {
 import { AppLayout } from "@/components/layout/app-layout";
 import {
   buildsApi,
+  artifactsApi,
+  type Artifact,
   type BuildDetail,
   type BuildStatus,
   type BuildStage,
@@ -83,6 +88,8 @@ export default function BuildDetailPage() {
   const [build, setBuild] = React.useState<BuildDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [selectedStageId, setSelectedStageId] = React.useState<string>("");
+  const [artifacts, setArtifacts] = React.useState<Artifact[]>([]);
+  const canManageArtifacts = usePermission("artifacts.manage");
 
   const isRunning = build?.status === "running" || build?.status === "queued";
   const isActive = isRunning || build?.status === "pending";
@@ -114,6 +121,9 @@ export default function BuildDetailPage() {
       })
       .catch(() => toast.error("Failed to load build"))
       .finally(() => setLoading(false));
+
+    // Load artifacts independently.
+    artifactsApi.list(id).then(setArtifacts).catch(() => {});
   }, [id]);
 
   React.useEffect(() => {
@@ -436,6 +446,73 @@ export default function BuildDetailPage() {
                     ))}
                 </div>
               )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Artifacts */}
+        {artifacts.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileArchive className="h-4 w-4" />
+                Artifacts
+                <Badge variant="pending" className="ml-1 text-xs">
+                  {artifacts.length}
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {artifacts.map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-4"
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
+                      <code className="truncate font-medium">{a.relative_path}</code>
+                      <span className="text-xs text-muted-foreground">
+                        {a.size_bytes < 1024
+                          ? `${a.size_bytes} B`
+                          : a.size_bytes < 1048576
+                            ? `${(a.size_bytes / 1024).toFixed(1)} KB`
+                            : `${(a.size_bytes / 1048576).toFixed(1)} MB`}
+                      </span>
+                      <code className="hidden text-xs text-muted-foreground lg:inline">
+                        sha256:{a.checksum_sha256.slice(0, 12)}…
+                      </code>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <a
+                        href={artifactsApi.downloadUrl(a.id)}
+                        download
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                        title="Download"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </a>
+                      {canManageArtifacts && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive"
+                          onClick={async () => {
+                            try {
+                              await artifactsApi.delete(a.id);
+                              setArtifacts((prev) => prev.filter((x) => x.id !== a.id));
+                              toast.success("Artifact deleted");
+                            } catch {
+                              toast.error("Failed to delete artifact");
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}

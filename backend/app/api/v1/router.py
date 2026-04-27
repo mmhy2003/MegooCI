@@ -4,6 +4,7 @@ from app.api.v1 import (
     agents,
     agents_ws,
     ai_assistant,
+    artifacts,
     auth,
     builds,
     gates,
@@ -30,6 +31,7 @@ api_v1_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_v1_router.include_router(projects.router, prefix="/projects", tags=["projects"])
 api_v1_router.include_router(pipelines.router, prefix="/pipelines", tags=["pipelines"])
 api_v1_router.include_router(builds.router, prefix="/builds", tags=["builds"])
+api_v1_router.include_router(artifacts.router, prefix="", tags=["artifacts"])
 api_v1_router.include_router(secrets.router, prefix="/secrets-env", tags=["secrets"])
 api_v1_router.include_router(agents.router, prefix="/agents", tags=["agents"])
 api_v1_router.include_router(system.router, prefix="/system", tags=["system"])

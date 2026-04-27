@@ -14,6 +14,8 @@ VALID_PERMISSIONS: frozenset[str] = frozenset({
     "builds.manage",
     "secrets.read",
     "secrets.manage",
+    "artifacts.read",
+    "artifacts.manage",
     "agents.read",
     "agents.manage",
     "users.read",

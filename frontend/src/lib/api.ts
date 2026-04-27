@@ -402,6 +402,46 @@ export const buildsApi = {
 };
 
 // ------------------------------------------------------------------
+// Artifacts
+// ------------------------------------------------------------------
+export interface Artifact {
+  id: string;
+  build_id: string;
+  relative_path: string;
+  size_bytes: number;
+  checksum_sha256: string;
+  retention_until: string | null;
+  created_at: string;
+}
+
+export interface ArtifactListItem extends Artifact {
+  build_number: number;
+  pipeline_id: string;
+  pipeline_name: string;
+}
+
+export const artifactsApi = {
+  listAll: (params?: { skip?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.skip) qs.set("skip", String(params.skip));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return fetchApi<ArtifactListItem[]>(`/api/v1/artifacts${query ? `?${query}` : ""}`);
+  },
+
+  list: (buildId: string) =>
+    fetchApi<Artifact[]>(`/api/v1/builds/${buildId}/artifacts`),
+
+  downloadUrl: (artifactId: string) => {
+    const base = process.env.NEXT_PUBLIC_API_URL || "";
+    return `${base}/api/v1/artifacts/${artifactId}/download`;
+  },
+
+  delete: (artifactId: string) =>
+    fetchApi<void>(`/api/v1/artifacts/${artifactId}`, { method: "DELETE" }),
+};
+
+// ------------------------------------------------------------------
 // Secrets
 // ------------------------------------------------------------------
 export interface Secret {
