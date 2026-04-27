@@ -4,6 +4,7 @@ from app.api.v1 import (
     agents,
     agents_ws,
     ai_assistant,
+    api_tokens,
     artifacts,
     auth,
     builds,
@@ -61,3 +62,4 @@ api_v1_router.include_router(registry.router, prefix="/registry", tags=["registr
 api_v1_router.include_router(webhooks_git.router, tags=["git-integration"])
 api_v1_router.include_router(websocket.router, tags=["websocket"])
 api_v1_router.include_router(agents_ws.router, tags=["agents"])
+api_v1_router.include_router(api_tokens.router, prefix="", tags=["api-tokens"])

@@ -432,9 +432,16 @@ export const artifactsApi = {
   list: (buildId: string) =>
     fetchApi<Artifact[]>(`/api/v1/builds/${buildId}/artifacts`),
 
-  downloadUrl: (artifactId: string) => {
-    const base = process.env.NEXT_PUBLIC_API_URL || "";
-    return `${base}/api/v1/artifacts/${artifactId}/download`;
+  getSignedUrl: (artifactId: string, ttl?: number) => {
+    const qs = ttl ? `?ttl=${ttl}` : "";
+    return fetchApi<{ url: string; expires_in: number }>(
+      `/api/v1/artifacts/${artifactId}/signed-url${qs}`,
+    );
+  },
+
+  download: async (artifactId: string) => {
+    const { url } = await artifactsApi.getSignedUrl(artifactId);
+    window.open(url, "_blank");
   },
 
   delete: (artifactId: string) =>
@@ -1398,4 +1405,35 @@ export const registryApi = {
       `/api/v1/registry/events${query ? `?${query}` : ""}`,
     );
   },
+};
+
+// ------------------------------------------------------------------
+// API Tokens (Personal Access Tokens)
+// ------------------------------------------------------------------
+export interface ApiToken {
+  id: string;
+  name: string;
+  token_hint: string;
+  scopes: string[] | null;
+  expires_at: string | null;
+  is_active: boolean;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export interface ApiTokenCreated extends ApiToken {
+  token: string;
+}
+
+export const apiTokensApi = {
+  list: () => fetchApi<ApiToken[]>("/api/v1/tokens"),
+
+  create: (data: { name: string; expires_in_days?: number | null; scopes?: string[] | null }) =>
+    fetchApi<ApiTokenCreated>("/api/v1/tokens", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  revoke: (tokenId: string) =>
+    fetchApi<void>(`/api/v1/tokens/${tokenId}`, { method: "DELETE" }),
 };

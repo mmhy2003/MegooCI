@@ -175,3 +175,92 @@ def verify_agent_token(plain: str, hashed: str) -> bool:
         )
     except ValueError:
         return False
+
+
+# ----------------------------------------------------------------------------
+# Signed artifact download URLs
+# ----------------------------------------------------------------------------
+_SIGNED_URL_SEP = ":"
+
+
+def generate_signed_artifact_url(
+    artifact_id: str,
+    secret_key: str,
+    ttl_seconds: int = 300,
+) -> str:
+    """Create a short-lived HMAC-signed token for an artifact download.
+
+    Token format: ``<artifact_id>:<expires_unix>:<hmac_hex>``
+    """
+    import hmac as _hmac
+    import time
+
+    expires = int(time.time()) + ttl_seconds
+    message = f"{artifact_id}{_SIGNED_URL_SEP}{expires}"
+    sig = _hmac.new(
+        secret_key.encode(), message.encode(), "sha256"
+    ).hexdigest()
+    return f"{message}{_SIGNED_URL_SEP}{sig}"
+
+
+def verify_signed_artifact_url(token: str, secret_key: str) -> str | None:
+    """Verify a signed artifact token.
+
+    Returns the artifact_id if valid and not expired, else ``None``.
+    """
+    import hmac as _hmac
+    import time
+
+    parts = token.split(_SIGNED_URL_SEP)
+    if len(parts) != 3:
+        return None
+    artifact_id, expires_str, sig = parts
+    try:
+        expires = int(expires_str)
+    except ValueError:
+        return None
+
+    if time.time() > expires:
+        return None
+
+    message = f"{artifact_id}{_SIGNED_URL_SEP}{expires_str}"
+    expected = _hmac.new(
+        secret_key.encode(), message.encode(), "sha256"
+    ).hexdigest()
+    if not _hmac.compare_digest(sig, expected):
+        return None
+    return artifact_id
+
+
+# ----------------------------------------------------------------------------
+# Personal Access Tokens (PATs)
+# ----------------------------------------------------------------------------
+_PAT_PREFIX = "megci_pat_"
+
+
+def generate_pat() -> str:
+    """Generate a Personal Access Token.
+
+    Format: ``megci_pat_<44-char-urlsafe-random>``
+    """
+    import secrets as _secrets
+
+    return _PAT_PREFIX + _secrets.token_urlsafe(33)
+
+
+def hash_pat(token: str) -> str:
+    """SHA-256 hex digest of a PAT — used for DB lookup."""
+    import hashlib
+
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def pat_hint(token: str) -> str:
+    """Return the first 12 chars of a PAT for UI display."""
+    return token[:12] if len(token) > 12 else token
+
+
+def is_pat(token: str) -> bool:
+    """Check whether a bearer token is a PAT (vs a JWT)."""
+    return token.startswith(_PAT_PREFIX)
+

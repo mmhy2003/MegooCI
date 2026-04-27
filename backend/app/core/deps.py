@@ -1,14 +1,16 @@
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.security import decode_token
+from app.core.security import decode_token, hash_pat, is_pat
 from app.database import get_db
+from app.models.api_token import ApiToken
 from app.models.role import UserRole
 from app.models.user import User
 
@@ -47,6 +49,46 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    # ── PAT path ──────────────────────────────────────────────────────
+    if is_pat(token):
+        token_hash = hash_pat(token)
+        result = await db.execute(
+            select(ApiToken).where(
+                ApiToken.token_hash == token_hash,
+                ApiToken.is_active.is_(True),
+            )
+        )
+        api_token = result.scalar_one_or_none()
+        if api_token is None:
+            raise credentials_exception
+
+        # Check expiry.
+        if (
+            api_token.expires_at is not None
+            and api_token.expires_at < datetime.now(timezone.utc)
+        ):
+            raise credentials_exception
+
+        # Touch last_used_at (fire-and-forget, don't block auth).
+        await db.execute(
+            update(ApiToken)
+            .where(ApiToken.id == api_token.id)
+            .values(last_used_at=datetime.now(timezone.utc))
+        )
+        await db.commit()
+
+        user_result = await db.execute(
+            select(User)
+            .options(selectinload(User.user_roles).selectinload(UserRole.role))
+            .where(User.id == api_token.user_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            raise credentials_exception
+        return user
+
+    # ── JWT path (original) ───────────────────────────────────────────
     try:
         payload = decode_token(token)
     except ValueError:

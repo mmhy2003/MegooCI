@@ -147,14 +147,13 @@ export default function ArtifactsPage() {
                         </td>
                         <td className="py-3">
                           <div className="flex items-center gap-1">
-                            <a
-                              href={artifactsApi.downloadUrl(a.id)}
-                              download
+                            <button
+                              onClick={() => artifactsApi.download(a.id)}
                               className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                               title="Download"
                             >
                               <Download className="h-3.5 w-3.5" />
-                            </a>
+                            </button>
                             {canManage && (
                               <Button
                                 variant="ghost"

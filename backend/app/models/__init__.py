@@ -1,4 +1,5 @@
 from app.models.agent import Agent
+from app.models.api_token import ApiToken
 from app.models.artifact import Artifact
 from app.models.audit import AuditLogEntry
 from app.models.base import Base
@@ -28,6 +29,7 @@ from app.models.user import User
 __all__ = [
     "Base",
     "User",
+    "ApiToken",
     "Role",
     "UserRole",
     "Invite",

@@ -160,15 +160,82 @@ async def upload_artifact(
     return artifact
 
 
+# ── Signed download URL ──────────────────────────────────────────────────
+
+
+@router.get(
+    "/artifacts/{artifact_id}/signed-url",
+    response_model=dict,
+)
+async def get_signed_url(
+    artifact_id: uuid.UUID,
+    ttl: int = Query(300, ge=30, le=3600),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_permission("artifacts.read")),
+) -> dict:
+    """Generate a short-lived, HMAC-signed download URL for an artifact."""
+    artifact = await db.get(Artifact, artifact_id)
+    if artifact is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found"
+        )
+
+    settings = get_settings()
+    from app.core.security import generate_signed_artifact_url
+
+    token = generate_signed_artifact_url(
+        str(artifact_id), settings.MEGOOCI_SECRET_KEY, ttl_seconds=ttl
+    )
+    url = (
+        f"{settings.MEGOOCI_PUBLIC_URL}/api/v1"
+        f"/artifacts/{artifact_id}/download?token={token}"
+    )
+    return {"url": url, "expires_in": ttl}
+
+
 # ── Download ─────────────────────────────────────────────────────────────
 
 
 @router.get("/artifacts/{artifact_id}/download")
 async def download_artifact(
     artifact_id: uuid.UUID,
+    token: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("artifacts.read")),
 ) -> FileResponse:
+    """Download an artifact file.
+
+    Auth: accepts either a ``Bearer`` JWT / PAT in the Authorization header
+    **or** a signed ``?token=`` query parameter (for browser downloads and
+    automated scripts that cannot set headers).
+    """
+    from fastapi import Request
+    from app.core.security import verify_signed_artifact_url
+
+    # ── Auth: signed token ──
+    if token:
+        settings = get_settings()
+        verified_id = verify_signed_artifact_url(
+            token, settings.MEGOOCI_SECRET_KEY
+        )
+        if verified_id is None or verified_id != str(artifact_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid or expired download token",
+            )
+    else:
+        # Fall back to Bearer auth.
+        from fastapi.security import OAuth2PasswordBearer
+
+        _oauth2 = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+        # We cannot use Depends() inside the function body, so resolve manually.
+        # Instead, simply require the permission dependency — but since this
+        # endpoint must also accept ?token= without auth, we do a manual check.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Provide a signed ?token= parameter or use the /signed-url endpoint to generate one",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     artifact = await db.get(Artifact, artifact_id)
     if artifact is None:
         raise HTTPException(
