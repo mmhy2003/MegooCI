@@ -260,7 +260,7 @@ async def _handle_log(frame: dict, redis_client: aioredis.Redis) -> None:
 
     build_id = frame.get("build_id")
     stream = frame.get("stream") or "stdout"
-    if stream not in ("stdout", "stderr"):
+    if stream not in ("stdout", "stderr", "system"):
         stream = "stdout"
     seq = int(frame.get("seq") or 0)
     content = str(frame.get("content") or "")

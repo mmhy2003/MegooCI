@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 export interface LogLine {
   timestamp?: string;
   text: string;
-  stream?: "stdout" | "stderr";
+  stream?: "stdout" | "stderr" | "system";
 }
 
 interface BuildLogViewerProps {
@@ -177,12 +177,14 @@ export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
                   {line.timestamp}
                 </span>
               )}
-              <span
+                <span
                 className={cn(
                   "flex-1 whitespace-pre-wrap break-all",
                   line.stream === "stderr"
                     ? "text-red-400"
-                    : "text-[#c9d1d9]",
+                    : line.stream === "system"
+                      ? "text-cyan-400 italic"
+                      : "text-[#c9d1d9]",
                 )}
               >
                 {searchTerm ? highlightSearch(line.text, searchTerm) : line.text}

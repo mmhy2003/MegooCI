@@ -394,6 +394,17 @@ export const buildsApi = {
 
   get: (id: string) => fetchApi<BuildDetail>(`/api/v1/builds/${id}`),
 
+  logs: (id: string) =>
+    fetchApi<Array<{
+      step_id: string;
+      seq: number;
+      timestamp: string | null;
+      stream: string;
+      content: string;
+      stage_name?: string;
+      step_name?: string;
+    }>>(`/api/v1/builds/${id}/logs`),
+
   cancel: (id: string) =>
     fetchApi<Build>(`/api/v1/builds/${id}/cancel`, { method: "POST" }),
 

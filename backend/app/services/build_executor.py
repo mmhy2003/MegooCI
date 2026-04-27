@@ -117,6 +117,14 @@ async def execute_build(
                     channel=channel,
                 )
 
+                # Persist error messages as visible log lines so users
+                # see exactly why a step failed in the build UI.
+                if step_result.error:
+                    await _emit_system_log(
+                        step, db, redis_client, channel,
+                        f"\u274c {step_result.error}",
+                    )
+
                 step.exit_code = step_result.exit_code
                 step.status = step_result.status
                 step.finished_at = datetime.now(timezone.utc)
@@ -228,7 +236,10 @@ async def _execute_step(
         art_paths = stage.artifact_paths if is_last_step else None
 
         agent_result = await _try_dispatch_to_agent(
-            step, stage.name, build.id, db, artifact_paths=art_paths,
+            step, stage.name, build.id, db,
+            artifact_paths=art_paths,
+            redis_client=redis_client,
+            channel=channel,
         )
         if agent_result is not None:
             await db.refresh(step)
@@ -239,6 +250,11 @@ async def _execute_step(
 
     if handler is None:
         if step.command:
+            await _emit_system_log(
+                step, db, redis_client, channel,
+                "No build agent is online. Falling back to server-side execution.\n"
+                "To run steps on a dedicated agent, register one under Settings \u2192 Agents.",
+            )
             exit_code = await _run_command_legacy(step, db, redis_client, channel, secrets)
             return StepResult(
                 exit_code=exit_code,
@@ -247,7 +263,8 @@ async def _execute_step(
         return StepResult(
             exit_code=1,
             status="failed",
-            error=f"No handler for step type '{step.step_type}'",
+            error=f"No handler registered for step type '{step.step_type}' and no build agent is online.\n"
+                  f"Check your pipeline YAML or register an agent under Settings \u2192 Agents.",
         )
 
     ctx = StepContext(
@@ -427,6 +444,49 @@ async def _publish(
     await redis_client.publish(channel, json.dumps(data))
 
 
+async def _emit_system_log(
+    step: Step,
+    db: AsyncSession,
+    redis_client: aioredis.Redis,
+    channel: str,
+    message: str,
+) -> None:
+    """Write a system-level log line visible in the build UI.
+
+    Persists a LogChunk row and publishes to Redis so the real-time feed
+    picks it up immediately.
+    """
+    from sqlalchemy import func as sa_func
+
+    # Determine the next seq value for this step.
+    max_seq = await db.scalar(
+        select(sa_func.coalesce(sa_func.max(LogChunk.seq), 0))
+        .where(LogChunk.step_id == step.id)
+    )
+    seq = (max_seq or 0) + 1
+    now = datetime.now(timezone.utc)
+
+    content = message if message.endswith("\n") else f"{message}\n"
+
+    log_chunk = LogChunk(
+        step_id=step.id,
+        seq=seq,
+        timestamp=now,
+        stream="system",
+        content=content,
+    )
+    db.add(log_chunk)
+    await db.commit()
+
+    await _publish(redis_client, channel, {
+        "event": "log",
+        "step_id": str(step.id),
+        "stream": "system",
+        "seq": seq,
+        "content": content,
+    })
+
+
 async def _try_dispatch_to_agent(
     step: Step,
     stage_name: str,
@@ -434,21 +494,50 @@ async def _try_dispatch_to_agent(
     db: AsyncSession,
     *,
     artifact_paths: list[str] | None = None,
+    redis_client: aioredis.Redis | None = None,
+    channel: str | None = None,
 ) -> dict | None:
     """If a healthy agent is online, run this step there and return its
     result dict. Returns None if no agent picks it up within the timeout,
     so the caller can transparently fall back to local execution.
+
+    Emits descriptive system log lines visible in the build UI when the
+    agent lookup or dispatch fails.
     """
     agent = await pick_online_agent(db)
     if agent is None:
+        if redis_client and channel:
+            await _emit_system_log(
+                step, db, redis_client, channel,
+                "\u26a0\ufe0f No build agent is currently online. "
+                "Register and start an agent under Settings \u2192 Agents, "
+                "or the step will run on the server (if supported).",
+            )
         return None
-    return await dispatch_step_to_agent(
+
+    if redis_client and channel:
+        await _emit_system_log(
+            step, db, redis_client, channel,
+            f"\u2192 Dispatching to agent \u2018{agent.name}\u2019 ({str(agent.id)[:8]}\u2026)",
+        )
+
+    result = await dispatch_step_to_agent(
         step=step,
         stage_name=stage_name,
         build_id=build_id,
         agent_id=agent.id,
         artifact_paths=artifact_paths,
     )
+
+    if result is None and redis_client and channel:
+        await _emit_system_log(
+            step, db, redis_client, channel,
+            f"\u26a0\ufe0f Agent \u2018{agent.name}\u2019 did not respond within the timeout. "
+            "The agent may have disconnected or the step took too long. "
+            "Falling back to server-side execution.",
+        )
+
+    return result
 
 
 async def _send_build_finished_notification(

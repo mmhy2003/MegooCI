@@ -118,6 +118,21 @@ export default function BuildDetailPage() {
         if (data.stages?.length > 0) {
           setSelectedStageId(data.stages[0].id);
         }
+        // For completed builds, load persisted logs from the REST API
+        // since there's no live WebSocket stream to connect to.
+        const isFinished = ["success", "failed", "cancelled"].includes(data.status);
+        if (isFinished) {
+          buildsApi.logs(id).then((chunks) => {
+            const lines: LogLine[] = chunks.map((c) => ({
+              text: c.content.replace(/\n$/, ""),
+              timestamp: c.timestamp ?? undefined,
+              stream: (c.stream as LogLine["stream"]) || "stdout",
+            }));
+            if (lines.length > 0) {
+              setLogLines(lines);
+            }
+          }).catch(() => {});
+        }
       })
       .catch(() => toast.error("Failed to load build"))
       .finally(() => setLoading(false));

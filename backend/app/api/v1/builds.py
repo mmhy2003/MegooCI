@@ -267,3 +267,76 @@ async def retry_build(
     run_build.delay(str(new_build.id))
 
     return new_build
+
+
+# ------------------------------------------------------------------
+# Build Logs (persisted LogChunks)
+# ------------------------------------------------------------------
+@router.get("/{build_id}/logs")
+async def get_build_logs(
+    build_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_permission("builds.read")),
+) -> list[dict]:
+    """Return persisted log lines for a completed build.
+
+    Returns a flat list of log entries across all steps, ordered by
+    stage sort_order, step sort_order, then chunk seq.
+    """
+    from app.models.build import LogChunk, Step
+
+    build = await db.get(Build, build_id)
+    if build is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
+        )
+
+    # Load all stages → steps → log chunks in one query.
+    result = await db.execute(
+        select(Stage)
+        .where(Stage.build_id == build_id)
+        .options(selectinload(Stage.steps))
+        .order_by(Stage.sort_order)
+    )
+    stages = result.scalars().all()
+
+    step_ids: list[uuid.UUID] = []
+    step_meta: dict[uuid.UUID, dict] = {}
+    for stage in stages:
+        for step in sorted(stage.steps, key=lambda s: s.sort_order):
+            step_ids.append(step.id)
+            step_meta[step.id] = {
+                "stage_name": stage.name,
+                "step_name": step.name,
+                "step_type": step.step_type,
+            }
+
+    if not step_ids:
+        return []
+
+    chunks_result = await db.execute(
+        select(LogChunk)
+        .where(LogChunk.step_id.in_(step_ids))
+        .order_by(LogChunk.step_id, LogChunk.seq)
+    )
+    chunks = chunks_result.scalars().all()
+
+    # Build output in step order (matching stage/step sort_order).
+    step_order = {sid: idx for idx, sid in enumerate(step_ids)}
+    sorted_chunks = sorted(
+        chunks,
+        key=lambda c: (step_order.get(c.step_id, 9999), c.seq),
+    )
+
+    return [
+        {
+            "step_id": str(c.step_id),
+            "seq": c.seq,
+            "timestamp": c.timestamp.isoformat() if c.timestamp else None,
+            "stream": c.stream or "stdout",
+            "content": c.content or "",
+            **step_meta.get(c.step_id, {}),
+        }
+        for c in sorted_chunks
+    ]
+
