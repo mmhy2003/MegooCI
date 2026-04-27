@@ -24,6 +24,11 @@ class SecretResponse(BaseModel):
     updated_at: datetime | None
 
 
+class SecretUpdate(BaseModel):
+    name: str | None = None
+    value: str | None = None
+
+
 class EnvVarCreate(BaseModel):
     scope_type: str
     scope_id: uuid.UUID | None = None

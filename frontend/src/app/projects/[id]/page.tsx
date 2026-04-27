@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   GitBranch,
+  Pencil,
   Plus,
   KeyRound,
   Trash2,
@@ -71,6 +72,21 @@ export default function ProjectDetailPage() {
   const [newEnvName, setNewEnvName] = React.useState("");
   const [newEnvValue, setNewEnvValue] = React.useState("");
   const [creatingEnv, setCreatingEnv] = React.useState(false);
+
+  // Edit Secret dialog
+  const [editSecretDialogOpen, setEditSecretDialogOpen] = React.useState(false);
+  const [editSecretId, setEditSecretId] = React.useState("");
+  const [editSecName, setEditSecName] = React.useState("");
+  const [editSecValue, setEditSecValue] = React.useState("");
+  const [showEditSecValue, setShowEditSecValue] = React.useState(false);
+  const [savingSec, setSavingSec] = React.useState(false);
+
+  // Edit Env Var dialog
+  const [editEnvDialogOpen, setEditEnvDialogOpen] = React.useState(false);
+  const [editEnvId, setEditEnvId] = React.useState("");
+  const [editEnvName, setEditEnvName] = React.useState("");
+  const [editEnvValue, setEditEnvValue] = React.useState("");
+  const [savingEnv, setSavingEnv] = React.useState(false);
 
   React.useEffect(() => {
     async function load() {
@@ -202,6 +218,41 @@ export default function ProjectDetailPage() {
     }
   }
 
+  function openEditSecret(secret: Secret) {
+    setEditSecretId(secret.id);
+    setEditSecName(secret.name);
+    setEditSecValue("");
+    setShowEditSecValue(false);
+    setEditSecretDialogOpen(true);
+  }
+
+  async function handleEditSecret(e: React.FormEvent) {
+    e.preventDefault();
+    const updates: { name?: string; value?: string } = {};
+    const original = secrets.find((s) => s.id === editSecretId);
+    if (editSecName.trim() && editSecName !== original?.name) {
+      updates.name = editSecName.trim();
+    }
+    if (editSecValue.trim()) {
+      updates.value = editSecValue.trim();
+    }
+    if (Object.keys(updates).length === 0) {
+      setEditSecretDialogOpen(false);
+      return;
+    }
+    setSavingSec(true);
+    try {
+      const updated = await secretsApi.update(editSecretId, updates);
+      setSecrets((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      setEditSecretDialogOpen(false);
+      toast.success("Secret updated");
+    } catch {
+      toast.error("Failed to update secret");
+    } finally {
+      setSavingSec(false);
+    }
+  }
+
   async function handleDeleteSecret(secretId: string) {
     const secret = secrets.find((s) => s.id === secretId);
     const ok = await confirm({
@@ -252,6 +303,32 @@ export default function ProjectDetailPage() {
       toast.error("Failed to add environment variable");
     } finally {
       setCreatingEnv(false);
+    }
+  }
+
+  function openEditEnv(envVar: EnvVar) {
+    setEditEnvId(envVar.id);
+    setEditEnvName(envVar.name);
+    setEditEnvValue(envVar.value);
+    setEditEnvDialogOpen(true);
+  }
+
+  async function handleEditEnv(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editEnvValue.trim()) {
+      toast.error("Value is required");
+      return;
+    }
+    setSavingEnv(true);
+    try {
+      const updated = await envVarsApi.update(editEnvId, { value: editEnvValue.trim() });
+      setEnvVars((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+      setEditEnvDialogOpen(false);
+      toast.success("Variable updated");
+    } catch {
+      toast.error("Failed to update variable");
+    } finally {
+      setSavingEnv(false);
     }
   }
 
@@ -522,14 +599,24 @@ export default function ProjectDetailPage() {
                             })}
                           </span>
                           {canManageSecrets && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-destructive"
-                              onClick={() => handleDeleteSecret(secret.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => openEditSecret(secret)}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-destructive"
+                                onClick={() => handleDeleteSecret(secret.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -607,14 +694,24 @@ export default function ProjectDetailPage() {
                           </span>
                         </div>
                         {canManageSecrets && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 shrink-0 text-destructive"
-                            onClick={() => handleDeleteEnv(v.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => openEditEnv(v)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive"
+                              onClick={() => handleDeleteEnv(v.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         )}
                       </div>
                     ))}
@@ -625,6 +722,111 @@ export default function ProjectDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Edit Secret Dialog */}
+      <Dialog open={editSecretDialogOpen} onOpenChange={setEditSecretDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Secret</DialogTitle>
+            <DialogDescription>
+              Update the name or replace the encrypted value.
+              Leave the value blank to keep the existing one.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleEditSecret} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Name</label>
+              <Input
+                placeholder="SECRET_NAME"
+                value={editSecName}
+                onChange={(e) => setEditSecName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                New value{" "}
+                <span className="text-muted-foreground">(optional)</span>
+              </label>
+              <div className="relative">
+                <Input
+                  type={showEditSecValue ? "text" : "password"}
+                  placeholder="Leave blank to keep current value"
+                  value={editSecValue}
+                  onChange={(e) => setEditSecValue(e.target.value)}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowEditSecValue((v) => !v)}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
+                  tabIndex={-1}
+                >
+                  {showEditSecValue ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                  <span className="sr-only">
+                    {showEditSecValue ? "Hide value" : "Show value"}
+                  </span>
+                </button>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditSecretDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={savingSec}>
+                {savingSec ? "Saving…" : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Env Var Dialog */}
+      <Dialog open={editEnvDialogOpen} onOpenChange={setEditEnvDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Variable</DialogTitle>
+            <DialogDescription>
+              Update the value for{" "}
+              <code className="font-mono text-foreground">{editEnvName}</code>.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleEditEnv} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Name</label>
+              <Input value={editEnvName} readOnly className="bg-muted" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Value</label>
+              <Input
+                placeholder="value"
+                value={editEnvValue}
+                onChange={(e) => setEditEnvValue(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditEnvDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={savingEnv}>
+                {savingEnv ? "Saving…" : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

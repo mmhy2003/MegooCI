@@ -16,6 +16,7 @@ from app.schemas.secret import (
     EnvVarUpdate,
     SecretCreate,
     SecretResponse,
+    SecretUpdate,
 )
 
 router = APIRouter()
@@ -57,6 +58,30 @@ async def create_secret(
         created_by=current_user.id,
     )
     db.add(secret)
+    await db.commit()
+    await db.refresh(secret)
+    return secret
+
+
+@router.put("/secrets/{secret_id}", response_model=SecretResponse)
+async def update_secret(
+    secret_id: uuid.UUID,
+    body: SecretUpdate,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_permission("secrets.manage")),
+) -> Secret:
+    settings = get_settings()
+    secret = await db.get(Secret, secret_id)
+    if secret is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Secret not found"
+        )
+
+    if body.name is not None:
+        secret.name = body.name
+    if body.value is not None:
+        secret.encrypted_payload = encrypt_secret(body.value, settings.MEGOOCI_SECRET_KEY)
+
     await db.commit()
     await db.refresh(secret)
     return secret

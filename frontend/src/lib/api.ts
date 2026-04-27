@@ -435,6 +435,12 @@ export const secretsApi = {
       body: JSON.stringify(data),
     }),
 
+  update: (secretId: string, data: { name?: string; value?: string }) =>
+    fetchApi<Secret>(`/api/v1/secrets-env/secrets/${secretId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
   delete: (secretId: string) =>
     fetchApi<void>(`/api/v1/secrets-env/secrets/${secretId}`, {
       method: "DELETE",
