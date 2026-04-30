@@ -224,7 +224,20 @@ func buildDockerBuildCmd(cfg map[string]interface{}) string {
 	for _, tag := range configStrList(cfg, "tags") {
 		args += " -t " + shellQuote(tag)
 	}
+	context := configStr(cfg, "context")
+	if context == "" {
+		context = "."
+	}
 	if df := configStr(cfg, "dockerfile"); df != "" {
+		// Docker's -f flag resolves relative to the CWD, not the build
+		// context.  When the user specifies a relative dockerfile path
+		// (e.g. "Dockerfile") with a non-"." context (e.g. "./frontend"),
+		// we must join them so Docker finds the correct file
+		// (e.g. "./frontend/Dockerfile") instead of a same-named file in
+		// the workspace root.
+		if !filepath.IsAbs(df) && context != "." {
+			df = filepath.Join(context, df)
+		}
 		args += " -f " + shellQuote(df)
 	}
 	if target := configStr(cfg, "target"); target != "" {
@@ -238,10 +251,6 @@ func buildDockerBuildCmd(cfg map[string]interface{}) string {
 	}
 	for k, v := range configStrMap(cfg, "build_args") {
 		args += " --build-arg " + shellQuote(k+"="+v)
-	}
-	context := configStr(cfg, "context")
-	if context == "" {
-		context = "."
 	}
 	args += " " + shellQuote(context)
 	return args

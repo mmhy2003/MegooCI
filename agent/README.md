@@ -49,6 +49,7 @@ Or directly with `docker run` — token + ID are CLI flags, never env vars:
 docker run -d --restart=unless-stopped \
   --network megooci_default \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add $(stat -c '%g' /var/run/docker.sock) \
   megooci/agent:latest \
   run \
     --controller http://backend:8000 \
@@ -63,7 +64,8 @@ token out of your shell history — pass them with `-e` to `docker run` or
 `export` them before running the binary directly.
 
 For Docker-in-Docker pipelines, mount `/var/run/docker.sock` into the
-container and run it as the `docker` group.
+container and pass `--group-add $(stat -c '%g' /var/run/docker.sock)` so
+the agent process can access the socket (the GID varies across hosts).
 
 ## CLI reference
 

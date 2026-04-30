@@ -12,6 +12,8 @@
 #
 #   docker run -d --restart=unless-stopped \
 #     --network megooci_default \
+#     -v /var/run/docker.sock:/var/run/docker.sock \
+#     --group-add $(stat -c '%g' /var/run/docker.sock) \
 #     megooci/agent:dev \
 #     run \
 #       --controller http://backend:8000 \
