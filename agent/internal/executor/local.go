@@ -266,6 +266,34 @@ func buildDockerPushCmd(cfg map[string]interface{}) string {
 	if len(tags) == 0 {
 		return ""
 	}
+
+	internalReg := configStr(cfg, "_internal_registry")
+	publicReg := configStr(cfg, "_public_registry")
+
+	// When the backend supplies an internal registry address, re-tag
+	// images so `docker push` goes through the Docker network directly
+	// (e.g. backend:8000) instead of an external reverse-proxy / CDN
+	// that may enforce upload-size limits (Cloudflare = 100 MB).
+	if internalReg != "" && publicReg != "" {
+		var parts []string
+		var internalTags []string
+		for _, tag := range tags {
+			intTag := strings.Replace(tag, publicReg, internalReg, 1)
+			internalTags = append(internalTags, intTag)
+			parts = append(parts,
+				"docker tag "+shellQuote(tag)+" "+shellQuote(intTag),
+			)
+		}
+		for _, intTag := range internalTags {
+			parts = append(parts, "docker push "+shellQuote(intTag))
+		}
+		// Clean up the temporary internal tags.
+		for _, intTag := range internalTags {
+			parts = append(parts, "docker rmi "+shellQuote(intTag)+" 2>/dev/null || true")
+		}
+		return strings.Join(parts, " && ")
+	}
+
 	parts := make([]string, len(tags))
 	for i, tag := range tags {
 		parts[i] = "docker push " + shellQuote(tag)
@@ -283,7 +311,15 @@ func buildDockerLoginCmd(cfg map[string]interface{}) string {
 		args += " -u " + shellQuote(user)
 	}
 	args += " --password-stdin"
-	if reg := configStr(cfg, "registry"); reg != "" {
+
+	// Prefer the internal registry address (injected by the backend)
+	// so auth goes through the Docker network directly.  Falls back to
+	// the user-specified public registry.
+	reg := configStr(cfg, "_internal_registry")
+	if reg == "" {
+		reg = configStr(cfg, "registry")
+	}
+	if reg != "" {
 		args += " " + shellQuote(reg)
 	}
 	if pw := configStr(cfg, "password"); pw != "" {

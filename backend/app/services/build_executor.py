@@ -576,7 +576,14 @@ async def _enrich_config_for_agent(
     Currently handles:
     - ``git_clone``: resolves the authentication token via the three-tier
       strategy (explicit → GIT_TOKEN secret → auto-inject from provider).
+    - ``docker_login`` / ``docker_push``: when the target registry matches
+      the built-in MegooCI registry host, injects ``_internal_registry``
+      so the agent can push via the internal Docker network and bypass
+      external reverse proxies (Cloudflare, Nginx) that impose upload
+      size limits.
     """
+    settings = get_settings()
+
     if step_type == "git_clone":
         from app.services.step_actions.git import _resolve_git_token
         from app.services.step_actions.base import StepContext
@@ -598,6 +605,34 @@ async def _enrich_config_for_agent(
         token = await _resolve_git_token(repo, config, mini_ctx, db)
         if token:
             config["token"] = token
+
+    # Inject internal registry address for docker_login / docker_push
+    # steps that target the built-in MegooCI registry.  The agent can
+    # then push directly via the Docker network (e.g. backend:8000)
+    # instead of going through an external reverse proxy / CDN that may
+    # impose upload-size limits (Cloudflare free = 100 MB).
+    registry_host = settings.MEGOOCI_REGISTRY_HOST
+    if settings.MEGOOCI_REGISTRY_ENABLED and registry_host:
+        # Use localhost:8000 because `docker push` runs on the Docker
+        # daemon (host-side), which cannot resolve Compose service names.
+        # The backend's port 8000 is published to the host, and localhost
+        # is already in Docker's default insecure-registries list.
+        internal_addr = "localhost:8000"
+
+        if step_type == "docker_login":
+            reg = config.get("registry", "")
+            if reg == registry_host or reg.startswith(f"{registry_host}:"):
+                config["_internal_registry"] = internal_addr
+
+        elif step_type == "docker_push":
+            tags = config.get("tags") or []
+            if isinstance(tags, str):
+                tags = [tags]
+            image = config.get("image", "")
+            targets = tags or ([image] if image else [])
+            if any(t.startswith(f"{registry_host}/") for t in targets):
+                config["_internal_registry"] = internal_addr
+                config["_public_registry"] = registry_host
 
 
 async def _send_build_finished_notification(
