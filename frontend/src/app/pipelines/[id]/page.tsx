@@ -17,6 +17,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Sheet } from "@/components/ui/sheet";
 import { AiAssistantPanel } from "@/components/pipeline/ai-assistant-panel";
+import { DocsPanel } from "@/components/pipeline/docs-panel";
+import { VarsPanel } from "@/components/pipeline/vars-panel";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
@@ -80,6 +82,8 @@ export default function PipelineDetailPage() {
   const [editingName, setEditingName] = React.useState(false);
   const [editName, setEditName] = React.useState("");
   const [aiOpen, setAiOpen] = React.useState(false);
+  const [docsOpen, setDocsOpen] = React.useState(false);
+  const [varsOpen, setVarsOpen] = React.useState(false);
   const [savingName, setSavingName] = React.useState(false);
 
   React.useEffect(() => {
@@ -529,10 +533,12 @@ export default function PipelineDetailPage() {
                 readOnly={!editing}
                 minHeight="400px"
                 placeholder="No definition yet."
-                projectId={pipeline.project_id}
-                pipelineId={pipeline.id}
                 aiOpen={aiOpen}
                 onToggleAi={() => setAiOpen((prev) => !prev)}
+                docsOpen={docsOpen}
+                onToggleDocs={() => setDocsOpen((prev) => !prev)}
+                varsOpen={varsOpen}
+                onToggleVars={() => setVarsOpen((prev) => !prev)}
               />
             </CardContent>
           </Card>
@@ -550,6 +556,38 @@ export default function PipelineDetailPage() {
           }
           projectId={pipeline.project_id}
           onClose={() => setAiOpen(false)}
+        />
+      </Sheet>
+
+      {/* Docs Drawer */}
+      <Sheet open={docsOpen} onOpenChange={setDocsOpen}>
+        <DocsPanel
+          onInsert={
+            editing
+              ? (yaml) => {
+                  const trimmed = editContent.trimEnd();
+                  setEditContent(trimmed ? `${trimmed}\n\n${yaml}\n` : `${yaml}\n`);
+                }
+              : undefined
+          }
+          onClose={() => setDocsOpen(false)}
+        />
+      </Sheet>
+
+      {/* Vars Drawer */}
+      <Sheet open={varsOpen} onOpenChange={setVarsOpen}>
+        <VarsPanel
+          projectId={pipeline.project_id}
+          pipelineId={pipeline.id}
+          onInsert={
+            editing
+              ? (snippet) => {
+                  const trimmed = editContent.trimEnd();
+                  setEditContent(trimmed ? `${trimmed} ${snippet}` : snippet);
+                }
+              : undefined
+          }
+          onClose={() => setVarsOpen(false)}
         />
       </Sheet>
     </AppLayout>

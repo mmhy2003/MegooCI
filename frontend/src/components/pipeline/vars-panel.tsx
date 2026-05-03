@@ -11,7 +11,9 @@ import {
   ChevronRight,
   Loader2,
   AlertCircle,
+  X,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { secretsApi, envVarsApi, type Secret, type EnvVar } from "@/lib/api";
 
@@ -20,6 +22,8 @@ interface VarsPanelProps {
   projectId?: string | null;
   pipelineId?: string | null;
   onInsert?: (text: string) => void;
+  /** Called when the user clicks the close button in the header. */
+  onClose?: () => void;
 }
 
 function CopySnippet({
@@ -64,7 +68,7 @@ function CopySnippet({
   );
 }
 
-export function VarsPanel({ className, projectId, pipelineId, onInsert }: VarsPanelProps) {
+export function VarsPanel({ className, projectId, pipelineId, onInsert, onClose }: VarsPanelProps) {
   const [secrets, setSecrets] = React.useState<Secret[]>([]);
   const [envVars, setEnvVars] = React.useState<EnvVar[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -142,10 +146,29 @@ export function VarsPanel({ className, projectId, pipelineId, onInsert }: VarsPa
   };
 
   return (
-    <div className={cn("flex flex-col", className)}>
-      <div className="flex items-center gap-2 border-b px-4 py-3">
-        <Variable className="h-4 w-4 text-primary" />
-        <h3 className="text-sm font-semibold">Variables & Secrets</h3>
+    <div className={cn("flex h-full flex-col", className)}>
+      <div className="flex items-center justify-between border-b px-5 py-3.5">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+            <Variable className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold leading-none">Variables & Secrets</h3>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">Pipeline variables</p>
+          </div>
+        </div>
+        {onClose && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -242,7 +265,9 @@ export function VarsPanel({ className, projectId, pipelineId, onInsert }: VarsPa
                             <span className="text-xs font-medium">{e.name}</span>
                             <div className="flex items-center gap-1.5">
                               {e.is_secret_ref && (
-                                <Lock className="h-3 w-3 text-amber-500" title="References a secret" />
+                                <span title="References a secret">
+                                  <Lock className="h-3 w-3 text-amber-500" />
+                                </span>
                               )}
                               <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
                                 {scopeLabel(e.scope_type)}

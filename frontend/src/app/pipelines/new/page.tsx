@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { PipelineEditor } from "@/components/pipeline/pipeline-editor";
 import { AiAssistantPanel } from "@/components/pipeline/ai-assistant-panel";
+import { DocsPanel } from "@/components/pipeline/docs-panel";
+import { VarsPanel } from "@/components/pipeline/vars-panel";
 import { Sheet } from "@/components/ui/sheet";
 import {
   Card,
@@ -58,6 +60,8 @@ export default function NewPipelinePage() {
   const [yamlContent, setYamlContent] = React.useState(YAML_STARTER);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [aiOpen, setAiOpen] = React.useState(false);
+  const [docsOpen, setDocsOpen] = React.useState(false);
+  const [varsOpen, setVarsOpen] = React.useState(false);
 
   React.useEffect(() => {
     projectsApi
@@ -249,9 +253,12 @@ export default function NewPipelinePage() {
                 onChange={setYamlContent}
                 minHeight="320px"
                 placeholder="Enter your YAML pipeline definition..."
-                projectId={projectId || null}
                 aiOpen={aiOpen}
                 onToggleAi={() => setAiOpen((prev) => !prev)}
+                docsOpen={docsOpen}
+                onToggleDocs={() => setDocsOpen((prev) => !prev)}
+                varsOpen={varsOpen}
+                onToggleVars={() => setVarsOpen((prev) => !prev)}
               />
 
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">
@@ -283,6 +290,29 @@ export default function NewPipelinePage() {
           onApplyYaml={handleApplyYaml}
           projectId={projectId || null}
           onClose={() => setAiOpen(false)}
+        />
+      </Sheet>
+
+      {/* Docs Drawer */}
+      <Sheet open={docsOpen} onOpenChange={setDocsOpen}>
+        <DocsPanel
+          onInsert={(yaml) => {
+            const trimmed = yamlContent.trimEnd();
+            setYamlContent(trimmed ? `${trimmed}\n\n${yaml}\n` : `${yaml}\n`);
+          }}
+          onClose={() => setDocsOpen(false)}
+        />
+      </Sheet>
+
+      {/* Vars Drawer */}
+      <Sheet open={varsOpen} onOpenChange={setVarsOpen}>
+        <VarsPanel
+          projectId={projectId || null}
+          onInsert={(snippet) => {
+            const trimmed = yamlContent.trimEnd();
+            setYamlContent(trimmed ? `${trimmed} ${snippet}` : snippet);
+          }}
+          onClose={() => setVarsOpen(false)}
         />
       </Sheet>
     </AppLayout>

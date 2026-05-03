@@ -17,7 +17,9 @@ import {
   Copy,
   Check,
   Play,
+  X,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface DocSection {
@@ -278,16 +280,37 @@ function InsertButton({
 interface DocsPanelProps {
   className?: string;
   onInsert?: (yaml: string) => void;
+  /** Called when the user clicks the close button in the header. */
+  onClose?: () => void;
 }
 
-export function DocsPanel({ className, onInsert }: DocsPanelProps) {
+export function DocsPanel({ className, onInsert, onClose }: DocsPanelProps) {
   const [expanded, setExpanded] = React.useState<string | null>("structure");
 
   return (
-    <div className={cn("flex flex-col", className)}>
-      <div className="flex items-center gap-2 border-b px-4 py-3">
-        <BookOpen className="h-4 w-4 text-primary" />
-        <h3 className="text-sm font-semibold">Pipeline Reference</h3>
+    <div className={cn("flex h-full flex-col", className)}>
+      <div className="flex items-center justify-between border-b px-5 py-3.5">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+            <BookOpen className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold leading-none">Pipeline Reference</h3>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">Step documentation</p>
+          </div>
+        </div>
+        {onClose && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </Button>
+        )}
       </div>
       <ScrollArea maxHeight="calc(100vh - 200px)" className="flex-1">
         <div className="divide-y">
