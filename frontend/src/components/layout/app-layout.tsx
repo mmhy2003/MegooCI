@@ -21,9 +21,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     if (!isLoading && !accessToken) {
-      router.replace("/login");
+      const redirectParam = pathname && pathname !== "/" ? `?redirect=${encodeURIComponent(pathname)}` : "";
+      router.replace(`/login${redirectParam}`);
     }
-  }, [isLoading, accessToken, router]);
+  }, [isLoading, accessToken, router, pathname]);
 
   React.useEffect(() => {
     setMobileOpen(false);
