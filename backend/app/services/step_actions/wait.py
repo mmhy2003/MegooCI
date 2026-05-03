@@ -196,17 +196,24 @@ class WaitInputHandler(StepActionHandler):
                         payload = {}
 
                     user = payload.get("user", "unknown")
+                    email = payload.get("email", "")
                     approved = payload.get("approved", False)
 
-                    if allowed_users and user not in allowed_users:
-                        yield LogLine(
-                            stream="system",
-                            content=f"User '{user}' is not in the allowed approvers list. Ignoring.\n",
+                    if allowed_users:
+                        allowed_lower = [u.lower() for u in allowed_users]
+                        user_matches = (
+                            user.lower() in allowed_lower
+                            or email.lower() in allowed_lower
                         )
-                        await redis_client.delete(key)
-                        await asyncio.sleep(_POLL_INTERVAL)
-                        elapsed += _POLL_INTERVAL
-                        continue
+                        if not user_matches:
+                            yield LogLine(
+                                stream="system",
+                                content=f"User '{user}' ({email}) is not in the allowed approvers list. Ignoring.\n",
+                            )
+                            await redis_client.delete(key)
+                            await asyncio.sleep(_POLL_INTERVAL)
+                            elapsed += _POLL_INTERVAL
+                            continue
 
                     await redis_client.delete(key)
 

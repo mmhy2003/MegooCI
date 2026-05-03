@@ -127,7 +127,8 @@ async def resolve_input_gate(
     try:
         payload = {
             "approved": body.approved,
-            "user": current_user.username if hasattr(current_user, "username") else str(current_user.id),
+            "user": current_user.name,
+            "email": current_user.email,
         }
         await redis_client.set(
             _gate_key(str(step_id), "input"),

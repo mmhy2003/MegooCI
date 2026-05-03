@@ -413,6 +413,18 @@ export const buildsApi = {
 };
 
 // ------------------------------------------------------------------
+// Gates (Pipeline approval / webhook resolution)
+// ------------------------------------------------------------------
+export const gatesApi = {
+  /** Approve or reject a wait_input step. */
+  resolveInput: (stepId: string, approved: boolean) =>
+    fetchApi<{ status: string; step_id: string }>(
+      `/api/v1/gates/input/${stepId}`,
+      { method: "POST", body: JSON.stringify({ approved }) },
+    ),
+};
+
+// ------------------------------------------------------------------
 // Artifacts
 // ------------------------------------------------------------------
 export interface Artifact {

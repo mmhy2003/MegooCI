@@ -14,11 +14,15 @@ import {
   GitBranch,
   Clock,
   Hash,
+  ShieldCheck,
+  ShieldX,
+  Loader2,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import {
   buildsApi,
   artifactsApi,
+  gatesApi,
   type Artifact,
   type BuildDetail,
   type BuildStatus,
@@ -89,6 +93,7 @@ export default function BuildDetailPage() {
   const [loading, setLoading] = React.useState(true);
   const [selectedStageId, setSelectedStageId] = React.useState<string>("");
   const [artifacts, setArtifacts] = React.useState<Artifact[]>([]);
+  const [approvingSteps, setApprovingSteps] = React.useState<Set<string>>(new Set());
   const canManageArtifacts = usePermission("artifacts.manage");
 
   const isRunning = build?.status === "running" || build?.status === "queued";
@@ -259,6 +264,22 @@ export default function BuildDetailPage() {
     }
   }
 
+  async function handleGateResponse(stepId: string, approved: boolean) {
+    setApprovingSteps((prev) => new Set(prev).add(stepId));
+    try {
+      await gatesApi.resolveInput(stepId, approved);
+      toast.success(approved ? "Step approved" : "Step rejected");
+    } catch {
+      toast.error(`Failed to ${approved ? "approve" : "reject"} step`);
+    } finally {
+      setApprovingSteps((prev) => {
+        const next = new Set(prev);
+        next.delete(stepId);
+        return next;
+      });
+    }
+  }
+
   const stages = build?.stages ? buildStagesToGraphStages(build.stages) : [];
   const selectedStage = build?.stages?.find((s) => s.id === selectedStageId);
   const selectedSteps = selectedStage?.steps || [];
@@ -424,39 +445,90 @@ export default function BuildDetailPage() {
                     .map((step) => (
                       <div
                         key={step.id}
-                        className="flex flex-col gap-2 rounded-lg border px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-4"
+                        className="flex flex-col gap-2 rounded-lg border px-3 py-3 text-sm sm:px-4"
                       >
-                        <div className="flex min-w-0 items-start gap-3 sm:items-center">
-                          <span
-                            className={`shrink-0 text-lg font-bold ${statusColor[toStageStatus(step.status)]}`}
-                          >
-                            {statusIcon[toStageStatus(step.status)]}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <span className="font-medium">{step.name}</span>
-                            {step.command && (
-                              <code className="ml-0 mt-1 block break-all text-xs text-muted-foreground sm:ml-2 sm:mt-0 sm:inline">
-                                {step.command}
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex min-w-0 items-start gap-3 sm:items-center">
+                            <span
+                              className={`shrink-0 text-lg font-bold ${statusColor[toStageStatus(step.status)]}`}
+                            >
+                              {statusIcon[toStageStatus(step.status)]}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <span className="font-medium">{step.name}</span>
+                              {step.command && (
+                                <code className="ml-0 mt-1 block break-all text-xs text-muted-foreground sm:ml-2 sm:mt-0 sm:inline">
+                                  {step.command}
+                                </code>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 pl-7 text-xs text-muted-foreground sm:gap-4 sm:pl-0 sm:text-sm">
+                            <span>
+                              {formatDuration(step.started_at, step.finished_at)}
+                            </span>
+                            {step.exit_code !== null && (
+                              <code
+                                className={`rounded px-1.5 py-0.5 text-xs ${
+                                  step.exit_code === 0
+                                    ? "bg-emerald-500/10 text-emerald-600"
+                                    : "bg-red-500/10 text-red-600"
+                                }`}
+                              >
+                                exit {step.exit_code}
                               </code>
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-3 pl-7 text-xs text-muted-foreground sm:gap-4 sm:pl-0 sm:text-sm">
-                          <span>
-                            {formatDuration(step.started_at, step.finished_at)}
-                          </span>
-                          {step.exit_code !== null && (
-                            <code
-                              className={`rounded px-1.5 py-0.5 text-xs ${
-                                step.exit_code === 0
-                                  ? "bg-emerald-500/10 text-emerald-600"
-                                  : "bg-red-500/10 text-red-600"
-                              }`}
-                            >
-                              exit {step.exit_code}
-                            </code>
-                          )}
-                        </div>
+
+                        {/* Approval gate for wait_input steps */}
+                        {step.step_type === "wait_input" && step.status === "running" && canManageBuilds && (
+                          <div className="ml-7 flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 sm:ml-8">
+                            <div className="flex items-center gap-2">
+                              <span className="relative flex h-2.5 w-2.5">
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
+                              </span>
+                              <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                                Waiting for approval
+                              </span>
+                            </div>
+                            {typeof step.config_json?.prompt === "string" && step.config_json.prompt && (
+                              <p className="text-sm text-muted-foreground">
+                                {step.config_json.prompt}
+                              </p>
+                            )}
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                className="gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700"
+                                disabled={approvingSteps.has(step.id)}
+                                onClick={() => handleGateResponse(step.id, true)}
+                              >
+                                {approvingSteps.has(step.id) ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <ShieldCheck className="h-3.5 w-3.5" />
+                                )}
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1.5 border-red-500/30 text-red-600 hover:bg-red-500/10 hover:text-red-700"
+                                disabled={approvingSteps.has(step.id)}
+                                onClick={() => handleGateResponse(step.id, false)}
+                              >
+                                {approvingSteps.has(step.id) ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <ShieldX className="h-3.5 w-3.5" />
+                                )}
+                                Reject
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                 </div>
