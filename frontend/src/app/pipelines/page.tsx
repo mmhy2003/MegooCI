@@ -5,9 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
-import { Plus, GitBranch, ExternalLink } from "lucide-react";
+import { Plus, GitBranch, ExternalLink, FolderKanban } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
-import { pipelinesApi, type Pipeline } from "@/lib/api";
+import { pipelinesApi, projectsApi, type Pipeline, type Project } from "@/lib/api";
 import { usePermission } from "@/hooks/use-permission";
 import {
   Card,
@@ -24,14 +24,27 @@ export default function PipelinesPage() {
   const router = useRouter();
   const canManage = usePermission("pipelines.manage");
   const [pipelines, setPipelines] = React.useState<Pipeline[]>([]);
+  const [projectMap, setProjectMap] = React.useState<Record<string, Project>>({});
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    pipelinesApi
-      .list()
-      .then((data) => setPipelines(data))
-      .catch(() => toast.error("Failed to load pipelines"))
-      .finally(() => setLoading(false));
+    async function load() {
+      try {
+        const [pips, projects] = await Promise.all([
+          pipelinesApi.list(),
+          projectsApi.list({ limit: 100 }),
+        ]);
+        setPipelines(pips);
+        const pMap: Record<string, Project> = {};
+        for (const p of projects) pMap[p.id] = p;
+        setProjectMap(pMap);
+      } catch {
+        toast.error("Failed to load pipelines");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, []);
 
   return (
@@ -115,6 +128,12 @@ export default function PipelinesPage() {
                     )}
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm text-muted-foreground">
+                    {projectMap[pipeline.project_id] && (
+                      <div className="flex items-center gap-1.5">
+                        <FolderKanban className="h-3.5 w-3.5" />
+                        <span className="truncate">{projectMap[pipeline.project_id].name}</span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-1.5">
                       <GitBranch className="h-3.5 w-3.5" />
                       <span>{pipeline.default_branch}</span>

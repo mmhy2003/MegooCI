@@ -62,6 +62,11 @@ type Client struct {
 	// from the controller can stop the corresponding subprocess.
 	cancelsMu       sync.Mutex
 	inFlightCancels map[string]context.CancelFunc
+
+	// buildStepCounts tracks how many in-flight steps exist per build ID.
+	// When the count drops to zero the shared workspace is released.
+	buildMu         sync.Mutex
+	buildStepCounts map[string]int
 }
 
 func NewClient(opts Options) *Client {
@@ -81,6 +86,7 @@ func NewClient(opts Options) *Client {
 		opts:            opts,
 		logger:          opts.Logger,
 		inFlightCancels: make(map[string]context.CancelFunc),
+		buildStepCounts: make(map[string]int),
 	}
 }
 
@@ -251,6 +257,9 @@ func (c *Client) runStep(parent context.Context, f protocol.Frame) {
 		StepID: f.StepID,
 	})
 
+	// Track per-build step counts for workspace cleanup.
+	c.trackBuildStep(f.BuildID)
+
 	logs := make(chan executor.LogLine, 64)
 
 	// Forward log lines over the WS in order.
@@ -306,6 +315,10 @@ func (c *Client) runStep(parent context.Context, f protocol.Frame) {
 		c.logger.Info("step finished",
 			"step_id", f.StepID, "status", result.Status, "exit_code", result.ExitCode)
 	}
+
+	// Release the shared build workspace when no more steps are in-flight
+	// for this build, preventing temp directory pile-up.
+	c.untrackBuildStep(f.BuildID)
 }
 
 // ---- small helpers ----
@@ -336,6 +349,36 @@ func (c *Client) inFlightCount() int {
 	c.cancelsMu.Lock()
 	defer c.cancelsMu.Unlock()
 	return len(c.inFlightCancels)
+}
+
+// trackBuildStep increments the in-flight step count for a build.
+func (c *Client) trackBuildStep(buildID string) {
+	if buildID == "" {
+		return
+	}
+	c.buildMu.Lock()
+	c.buildStepCounts[buildID]++
+	c.buildMu.Unlock()
+}
+
+// untrackBuildStep decrements the in-flight step count for a build.
+// When the count reaches zero the shared workspace directory is released.
+func (c *Client) untrackBuildStep(buildID string) {
+	if buildID == "" {
+		return
+	}
+	c.buildMu.Lock()
+	c.buildStepCounts[buildID]--
+	remaining := c.buildStepCounts[buildID]
+	if remaining <= 0 {
+		delete(c.buildStepCounts, buildID)
+	}
+	c.buildMu.Unlock()
+
+	if remaining <= 0 {
+		c.logger.Debug("releasing build workspace", "build_id", buildID)
+		executor.ReleaseBuildWorkdir(buildID)
+	}
 }
 
 func (c *Client) sendFrame(frame any) error {

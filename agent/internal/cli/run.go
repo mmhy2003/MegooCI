@@ -21,16 +21,17 @@ import (
 
 // runOptions captures the flags users pass to `megooci-agent run`.
 type runOptions struct {
-	controllerURL string
-	agentID       string
-	token         string
-	capacity      int
-	workdir       string
-	heartbeatSec  int
-	reconnectMin  time.Duration
-	reconnectMax  time.Duration
-	logLevel      string
-	insecure      bool
+	controllerURL   string
+	agentID         string
+	token           string
+	capacity        int
+	workdir         string
+	heartbeatSec    int
+	reconnectMin    time.Duration
+	reconnectMax    time.Duration
+	logLevel        string
+	insecure        bool
+	dockerCleanupHrs int
 }
 
 func newRunCmd() *cobra.Command {
@@ -82,6 +83,9 @@ UI and re-run the agent with the new value.`,
 		"Log level: debug | info | warn | error")
 	cmd.Flags().BoolVar(&opts.insecure, "insecure-skip-verify", false,
 		"Skip TLS certificate verification when connecting (dev only)")
+	cmd.Flags().IntVar(&opts.dockerCleanupHrs, "docker-cleanup-hours",
+		envInt("MEGOOCI_AGENT_DOCKER_CLEANUP_HOURS", 6),
+		"Hours between Docker prune runs (0 to disable)")
 
 	return cmd
 }
@@ -129,6 +133,10 @@ func runAgent(ctx context.Context, opts runOptions) error {
 		Executor:          exec,
 		Logger:            logger,
 	})
+
+	// Start periodic Docker cleanup to prevent build junk from piling up.
+	cleanupInterval := time.Duration(opts.dockerCleanupHrs) * time.Hour
+	controller.StartDockerCleanup(runCtx, cleanupInterval, logger)
 
 	if err := client.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
 		return err

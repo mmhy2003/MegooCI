@@ -46,8 +46,7 @@ export function PipelineEditor({
   return (
     <div className={cn("space-y-2", className)}>
       {/* Toolbar */}
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-medium">Pipeline definition</label>
+      <div className="flex items-center justify-end">
         <div className="flex gap-1.5">
           {onToggleDocs && (
             <Button

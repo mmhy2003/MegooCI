@@ -75,12 +75,13 @@ the agent process can access the socket (the GID varies across hosts).
 | `--agent-id` | `MEGOOCI_AGENT_ID` | — | UUID shown in the UI after registration. |
 | `--token` | `MEGOOCI_AGENT_TOKEN` | — | Persistent bearer token. |
 | `--capacity` | `MEGOOCI_AGENT_CAPACITY` | `1` | Max concurrent steps. |
-| `--workdir` | `MEGOOCI_AGENT_WORKDIR` | auto | Cwd for subprocesses (auto = per-step temp dir). |
+| `--workdir` | `MEGOOCI_AGENT_WORKDIR` | auto | Cwd for subprocesses (auto = per-build shared temp dir). |
 | `--heartbeat-seconds` | `MEGOOCI_AGENT_HEARTBEAT_SECONDS` | `15` | Heartbeat interval. |
 | `--reconnect-min` | — | `1s` | Initial backoff after connection loss. |
 | `--reconnect-max` | — | `30s` | Backoff ceiling. |
 | `--log-level` | `MEGOOCI_AGENT_LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error`. |
 | `--insecure-skip-verify` | — | `false` | Skip TLS verification (dev only). |
+| `--docker-cleanup-hours` | `MEGOOCI_AGENT_DOCKER_CLEANUP_HOURS` | `6` | Hours between Docker prune runs (0 = disabled). |
 
 ## What the agent does
 
