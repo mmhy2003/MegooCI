@@ -13,6 +13,7 @@ import {
   Clock,
   Check,
   X,
+  FolderKanban,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Sheet } from "@/components/ui/sheet";
@@ -23,8 +24,10 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   pipelinesApi,
+  projectsApi,
   buildsApi,
   type Pipeline,
+  type Project,
   type Build,
   type BuildStatus,
 } from "@/lib/api";
@@ -73,6 +76,7 @@ export default function PipelineDetailPage() {
   const canManageBuilds = usePermission("builds.manage");
 
   const [pipeline, setPipeline] = React.useState<Pipeline | null>(null);
+  const [project, setProject] = React.useState<Project | null>(null);
   const [builds, setBuilds] = React.useState<Build[]>([]);
   const [activeTab, setActiveTab] = React.useState<Tab>("overview");
   const [loading, setLoading] = React.useState(true);
@@ -96,6 +100,10 @@ export default function PipelineDetailPage() {
         setPipeline(p);
         setBuilds(b);
         setEditContent(p.yaml_content || "");
+        // Fetch project info for the breadcrumb
+        if (p.project_id) {
+          projectsApi.get(p.project_id).then(setProject).catch(() => {});
+        }
       } catch {
         toast.error("Failed to load pipeline");
       } finally {
@@ -291,6 +299,19 @@ export default function PipelineDetailPage() {
               <p className="mt-1 break-all text-xs text-muted-foreground sm:text-sm">
                 {pipeline.source_repo_url}
               </p>
+            )}
+            {project && (
+              <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground sm:text-sm">
+                <FolderKanban className="h-3.5 w-3.5" />
+                <span>Project:</span>
+                <button
+                  type="button"
+                  className="font-medium text-primary hover:underline"
+                  onClick={() => router.push(`/projects/${project.id}`)}
+                >
+                  {project.name}
+                </button>
+              </div>
             )}
           </div>
           <div className="flex flex-wrap gap-2">

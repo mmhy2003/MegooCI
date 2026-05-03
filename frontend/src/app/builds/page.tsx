@@ -4,9 +4,17 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
-import { Hammer } from "lucide-react";
+import { Hammer, FolderKanban } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
-import { buildsApi, type Build, type BuildStatus } from "@/lib/api";
+import {
+  buildsApi,
+  pipelinesApi,
+  projectsApi,
+  type Build,
+  type BuildStatus,
+  type Pipeline,
+  type Project,
+} from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,17 +57,35 @@ const STATUS_TABS: { label: string; value: BuildStatus | "all" }[] = [
 export default function BuildsPage() {
   const router = useRouter();
   const [allBuilds, setAllBuilds] = React.useState<Build[]>([]);
+  const [pipelineMap, setPipelineMap] = React.useState<Record<string, Pipeline>>({});
+  const [projectMap, setProjectMap] = React.useState<Record<string, Project>>({});
   const [statusFilter, setStatusFilter] = React.useState<
     BuildStatus | "all"
   >("all");
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    buildsApi
-      .list({ limit: 100 })
-      .then(setAllBuilds)
-      .catch(() => toast.error("Failed to load builds"))
-      .finally(() => setLoading(false));
+    async function load() {
+      try {
+        const [builds, pipelines, projects] = await Promise.all([
+          buildsApi.list({ limit: 100 }),
+          pipelinesApi.list({ limit: 100 }),
+          projectsApi.list({ limit: 100 }),
+        ]);
+        setAllBuilds(builds);
+        const pMap: Record<string, Pipeline> = {};
+        for (const p of pipelines) pMap[p.id] = p;
+        setPipelineMap(pMap);
+        const prjMap: Record<string, Project> = {};
+        for (const p of projects) prjMap[p.id] = p;
+        setProjectMap(prjMap);
+      } catch {
+        toast.error("Failed to load builds");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, []);
 
   const builds =
@@ -129,6 +155,9 @@ export default function BuildsPage() {
                       <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
                         Pipeline
                       </th>
+                      <th className="hidden pb-3 pr-4 font-medium lg:table-cell">
+                        Project
+                      </th>
                       <th className="hidden pb-3 pr-4 font-medium md:table-cell">
                         Branch
                       </th>
@@ -136,14 +165,17 @@ export default function BuildsPage() {
                       <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
                         Duration
                       </th>
-                      <th className="hidden pb-3 pr-4 font-medium lg:table-cell">
+                      <th className="hidden pb-3 pr-4 font-medium xl:table-cell">
                         Trigger
                       </th>
                       <th className="pb-3 font-medium text-right">Time</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {builds.map((build) => (
+                    {builds.map((build) => {
+                      const pl = pipelineMap[build.pipeline_id];
+                      const prj = pl ? projectMap[pl.project_id] : undefined;
+                      return (
                       <tr
                         key={build.id}
                         className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
@@ -160,8 +192,24 @@ export default function BuildsPage() {
                               router.push(`/pipelines/${build.pipeline_id}`);
                             }}
                           >
-                            {build.pipeline_id.slice(0, 8)}…
+                            {pl?.name || build.pipeline_id.slice(0, 8) + "…"}
                           </button>
+                        </td>
+                        <td className="hidden py-3 pr-4 lg:table-cell">
+                          {prj ? (
+                            <button
+                              className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/projects/${prj.id}`);
+                              }}
+                            >
+                              <FolderKanban className="h-3.5 w-3.5" />
+                              {prj.name}
+                            </button>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="hidden py-3 pr-4 md:table-cell">
                           <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
@@ -176,7 +224,7 @@ export default function BuildsPage() {
                         <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
                           {formatDuration(build.started_at, build.finished_at)}
                         </td>
-                        <td className="hidden py-3 pr-4 text-muted-foreground lg:table-cell">
+                        <td className="hidden py-3 pr-4 text-muted-foreground xl:table-cell">
                           {build.trigger_type}
                         </td>
                         <td className="py-3 text-right text-muted-foreground">
@@ -185,7 +233,8 @@ export default function BuildsPage() {
                           })}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -17,16 +17,21 @@ import {
   ShieldCheck,
   ShieldX,
   Loader2,
+  FolderKanban,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import {
   buildsApi,
   artifactsApi,
   gatesApi,
+  pipelinesApi,
+  projectsApi,
   type Artifact,
   type BuildDetail,
   type BuildStatus,
   type BuildStage,
+  type Pipeline,
+  type Project,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -90,6 +95,8 @@ export default function BuildDetailPage() {
   const { accessToken } = useAuthStore();
 
   const [build, setBuild] = React.useState<BuildDetail | null>(null);
+  const [pipeline, setPipeline] = React.useState<Pipeline | null>(null);
+  const [project, setProject] = React.useState<Project | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [selectedStageId, setSelectedStageId] = React.useState<string>("");
   const [artifacts, setArtifacts] = React.useState<Artifact[]>([]);
@@ -123,6 +130,13 @@ export default function BuildDetailPage() {
         if (data.stages?.length > 0) {
           setSelectedStageId(data.stages[0].id);
         }
+        // Fetch pipeline + project info for the header
+        pipelinesApi.get(data.pipeline_id).then((pl) => {
+          setPipeline(pl);
+          if (pl.project_id) {
+            projectsApi.get(pl.project_id).then(setProject).catch(() => {});
+          }
+        }).catch(() => {});
         // For completed builds, load persisted logs from the REST API
         // since there's no live WebSocket stream to connect to.
         const isFinished = ["success", "failed", "cancelled"].includes(data.status);
@@ -357,10 +371,24 @@ export default function BuildDetailPage() {
               </Badge>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground sm:text-sm">
-              <span className="flex items-center gap-1">
+              <button
+                type="button"
+                className="flex items-center gap-1 hover:text-foreground transition-colors"
+                onClick={() => router.push(`/pipelines/${build.pipeline_id}`)}
+              >
                 <Hash className="h-3.5 w-3.5" />
-                {build.pipeline_id.slice(0, 8)}…
-              </span>
+                {pipeline?.name || build.pipeline_id.slice(0, 8) + "…"}
+              </button>
+              {project && (
+                <button
+                  type="button"
+                  className="flex items-center gap-1 hover:text-foreground transition-colors"
+                  onClick={() => router.push(`/projects/${project.id}`)}
+                >
+                  <FolderKanban className="h-3.5 w-3.5" />
+                  {project.name}
+                </button>
+              )}
               {build.branch && (
                 <span className="flex items-center gap-1">
                   <GitBranch className="h-3.5 w-3.5" />
