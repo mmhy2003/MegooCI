@@ -30,9 +30,15 @@ import secrets
 from typing import Any, AsyncIterator
 
 import redis.asyncio as aioredis
+from sqlalchemy import func as sa_func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.models.user import User
+from app.services.in_app_notifications import (
+    get_admin_user_ids,
+    notify_users,
+)
 
 from . import register
 from .base import LogLine, StepActionHandler, StepContext, StepResult
@@ -50,6 +56,37 @@ def _gate_key(step_id: str, gate_type: str) -> str:
 def _gate_token_key(step_id: str) -> str:
     """Redis key where the per-step gate auth token is stored."""
     return f"gate:token:{step_id}"
+
+
+async def _resolve_approver_user_ids(
+    db: AsyncSession,
+    allowed_users: list[str],
+) -> list:
+    """Resolve allowed_users names/emails to user IDs.
+
+    Falls back to all admin users if the list is empty or no matches found.
+    """
+    if not allowed_users:
+        return await get_admin_user_ids(db)
+
+    # Match by name or email (case-insensitive)
+    lower_names = [u.lower() for u in allowed_users]
+    result = await db.execute(
+        select(User.id).where(
+            User.is_active.is_(True),
+            or_(
+                sa_func.lower(User.name).in_(lower_names),
+                sa_func.lower(User.email).in_(lower_names),
+            ),
+        )
+    )
+    user_ids = list(result.scalars().all())
+
+    # If none matched, fall back to admins so someone gets notified
+    if not user_ids:
+        return await get_admin_user_ids(db)
+
+    return user_ids
 
 
 class WaitWebhookHandler(StepActionHandler):
@@ -183,6 +220,25 @@ class WaitInputHandler(StepActionHandler):
         settings = get_settings()
         redis_client = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
         key = _gate_key(str(ctx.step_id), "input")
+
+        # Send in-app notifications to approvers
+        try:
+            approver_ids = await _resolve_approver_user_ids(db, allowed_users)
+            if approver_ids:
+                await notify_users(
+                    db,
+                    redis_client,
+                    user_ids=approver_ids,
+                    type="approval_required",
+                    title=f"Approval required: {ctx.step_name}",
+                    body=prompt,
+                    entity_type="build",
+                    entity_id=ctx.build_id,
+                )
+                await db.commit()
+        except Exception:
+            # Don't fail the gate if notification delivery fails
+            await db.rollback()
 
         try:
             elapsed = 0.0

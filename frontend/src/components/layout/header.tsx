@@ -12,6 +12,7 @@ import {
   ServerOff,
   BellOff,
   CheckCheck,
+  ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +44,8 @@ function notifIcon(type: string) {
       return <Ban className="h-4 w-4 shrink-0 text-yellow-500" />;
     case "agent_offline":
       return <ServerOff className="h-4 w-4 shrink-0 text-red-500" />;
+    case "approval_required":
+      return <ShieldAlert className="h-4 w-4 shrink-0 text-amber-500" />;
     default:
       return <Bell className="h-4 w-4 shrink-0 text-muted-foreground" />;
   }
