@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     MEGOOCI_JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     MEGOOCI_SIGNUP_ENABLED: bool = True
     MEGOOCI_DEFAULT_ROLE: str = "viewer"
+
+    # Admin seed — create an admin user on first startup if the DB is empty.
+    # Both must be set for seeding to activate. Ignored if users already exist.
+    MEGOOCI_ADMIN_EMAIL: str = ""
+    MEGOOCI_ADMIN_PASSWORD: str = ""
     MEGOOCI_STORAGE_ROOT: str = "/var/lib/megooci"
     MEGOOCI_ARTIFACT_RETENTION_BUILDS: int = 50
     MEGOOCI_ARTIFACT_RETENTION_DAYS: int = 30

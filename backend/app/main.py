@@ -16,6 +16,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
 
+    # Seed initial admin user from env vars (only on clean first startup).
+    try:
+        from app.services.seed import seed_admin_user
+
+        async with async_session() as db:
+            await seed_admin_user(db)
+    except Exception:
+        logger.warning("Admin seed failed", exc_info=True)
+
     # Meilisearch: create indexes then bulk-sync existing data.
     try:
         from app.services.search import ensure_indexes, sync_all
