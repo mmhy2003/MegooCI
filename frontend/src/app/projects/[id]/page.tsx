@@ -34,6 +34,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -234,7 +235,7 @@ export default function ProjectDetailPage() {
       updates.name = editSecName.trim();
     }
     if (editSecValue.trim()) {
-      updates.value = editSecValue.trim();
+      updates.value = editSecValue;
     }
     if (Object.keys(updates).length === 0) {
       setEditSecretDialogOpen(false);
@@ -544,17 +545,18 @@ export default function ProjectDetailPage() {
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Value</label>
                         <div className="relative">
-                          <Input
-                            type={showSecValue ? "text" : "password"}
-                            placeholder="••••••••"
+                          <Textarea
+                            placeholder="Paste secret value (supports multiline, e.g. SSH keys)"
                             value={newSecretValue}
                             onChange={(e) => setNewSecretValue(e.target.value)}
-                            className="pr-10"
+                            rows={4}
+                            className={`resize-y pr-10 font-mono text-xs ${!showSecValue ? "text-security-disc" : ""}`}
+                            style={!showSecValue ? { WebkitTextSecurity: "disc", textSecurity: "disc" } as React.CSSProperties : undefined}
                           />
                           <button
                             type="button"
                             onClick={() => setShowSecValue((v) => !v)}
-                            className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
+                            className="absolute right-0 top-0 flex items-center px-3 py-2 text-muted-foreground hover:text-foreground transition-colors"
                             tabIndex={-1}
                           >
                             {showSecValue ? (
@@ -748,17 +750,18 @@ export default function ProjectDetailPage() {
                 <span className="text-muted-foreground">(optional)</span>
               </label>
               <div className="relative">
-                <Input
-                  type={showEditSecValue ? "text" : "password"}
-                  placeholder="Leave blank to keep current value"
+                <Textarea
+                  placeholder="Leave blank to keep current value (supports multiline)"
                   value={editSecValue}
                   onChange={(e) => setEditSecValue(e.target.value)}
-                  className="pr-10"
+                  rows={4}
+                  className={`resize-y pr-10 font-mono text-xs ${!showEditSecValue ? "text-security-disc" : ""}`}
+                  style={!showEditSecValue ? { WebkitTextSecurity: "disc", textSecurity: "disc" } as React.CSSProperties : undefined}
                 />
                 <button
                   type="button"
                   onClick={() => setShowEditSecValue((v) => !v)}
-                  className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
+                  className="absolute right-0 top-0 flex items-center px-3 py-2 text-muted-foreground hover:text-foreground transition-colors"
                   tabIndex={-1}
                 >
                   {showEditSecValue ? (
