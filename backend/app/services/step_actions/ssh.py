@@ -2,11 +2,16 @@
 Handler for ``ssh_exec`` steps — connect to a remote server over SSH and
 execute commands.
 
-Requires ``asyncssh`` in the backend environment.  Falls back to the
-``ssh`` CLI binary if asyncssh is unavailable.
+Supports two authentication methods:
+  1. **Private key** (recommended) — via ``private_key`` config.
+  2. **Password** — via ``password`` config using ``sshpass``.
 
-YAML example:
+Falls back to the ``ssh`` CLI binary.  When using password auth, the
+``sshpass`` utility must be installed in the execution environment.
 
+YAML examples:
+
+  # Key-based auth (recommended)
   - ssh_exec:
       host: deploy.example.com
       port: 22
@@ -17,6 +22,14 @@ YAML example:
         - "docker compose up -d"
       env:
         APP_VERSION: "1.2.3"
+
+  # Password-based auth
+  - ssh_exec:
+      host: deploy.example.com
+      user: deploy
+      password: ${{ secrets.SSH_PASSWORD }}
+      commands:
+        - "systemctl restart myapp"
 """
 
 from __future__ import annotations
@@ -60,38 +73,70 @@ class SSHExecHandler(StepActionHandler):
         combined = " && ".join(commands)
         remote_script = f"{env_prefix}{combined}"
 
-        yield LogLine(stream="system", content=f"Connecting to {user}@{host}:{port}\n")
+        auth_mode = "key" if private_key else ("password" if password else "none")
+        yield LogLine(
+            stream="system",
+            content=f"Connecting to {user}@{host}:{port} (auth: {auth_mode})\n",
+        )
 
         key_file = None
+        password_file = None
+        extra_env: dict[str, str] = {}
         try:
+            # ── Build the ssh argument list ──
+            ssh_args = ["ssh", "-o", "StrictHostKeyChecking=no"]
+
             if private_key:
+                # Key-based auth — write key to a temp file.
                 fd, key_file = tempfile.mkstemp(prefix="megooci_ssh_", suffix=".key")
                 os.write(fd, private_key.encode())
                 os.close(fd)
                 os.chmod(key_file, 0o600)
-
-            args = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes"]
-            if key_file:
-                args += ["-i", key_file]
-            args += ["-p", str(port)]
-            if user:
-                args.append(f"{user}@{host}")
+                ssh_args += ["-o", "BatchMode=yes", "-i", key_file]
+            elif password:
+                # Password auth — use sshpass via environment variable.
+                # SSHPASS env var avoids leaking the password in /proc/cmdline.
+                fd, password_file = tempfile.mkstemp(prefix="megooci_sshpw_", suffix=".txt")
+                os.write(fd, password.encode())
+                os.close(fd)
+                os.chmod(password_file, 0o600)
+                extra_env["SSHPASS"] = password
+                ssh_args = [
+                    "sshpass", "-e",  # read password from $SSHPASS
+                    "ssh",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "PubkeyAuthentication=no",
+                ]
             else:
-                args.append(host)
-            args.append(remote_script)
+                # No credentials — will rely on ssh-agent or fail.
+                ssh_args += ["-o", "BatchMode=yes"]
 
-            yield LogLine(stream="system", content=f"$ ssh {user}@{host} ...\n")
+            ssh_args += ["-p", str(port)]
+            if user:
+                ssh_args.append(f"{user}@{host}")
+            else:
+                ssh_args.append(host)
+            ssh_args.append(remote_script)
+
+            display_target = f"{user}@{host}" if user else host
+            yield LogLine(stream="system", content=f"$ ssh {display_target} ...\n")
 
             try:
                 process = await asyncio.create_subprocess_exec(
-                    *args,
+                    *ssh_args,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     stdin=asyncio.subprocess.DEVNULL,
+                    env={**os.environ, **extra_env} if extra_env else None,
                 )
-            except FileNotFoundError:
-                yield LogLine(stream="stderr", content="'ssh' client not found.\n")
-                yield StepResult(exit_code=1, status="failed", error="ssh not found")
+            except FileNotFoundError as fnf:
+                missing = ssh_args[0]  # "ssh" or "sshpass"
+                yield LogLine(
+                    stream="stderr",
+                    content=f"'{missing}' not found. "
+                    + ("Install 'sshpass' for password auth.\n" if missing == "sshpass" else "Install an SSH client.\n"),
+                )
+                yield StepResult(exit_code=1, status="failed", error=f"{missing} not found")
                 return
             except Exception as exc:
                 yield LogLine(stream="stderr", content=f"SSH failed: {exc}\n")
@@ -123,11 +168,12 @@ class SSHExecHandler(StepActionHandler):
                 status="success" if exit_code == 0 else "failed",
             )
         finally:
-            if key_file:
-                try:
-                    os.unlink(key_file)
-                except OSError:
-                    pass
+            for f in (key_file, password_file):
+                if f:
+                    try:
+                        os.unlink(f)
+                    except OSError:
+                        pass
 
     def validate_config(self, config: dict[str, Any]) -> list[str]:
         errors: list[str] = []
@@ -148,3 +194,4 @@ def _shell_quote(s: str) -> str:
 
 
 register("ssh_exec", SSHExecHandler())
+

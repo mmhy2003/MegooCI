@@ -105,6 +105,7 @@ whose hostname matches the repo URL, MegooCI injects the stored token automatica
 
 ### ssh_exec — Execute commands on a remote server via SSH
 ```yaml
+# Key-based auth (recommended)
 - ssh_exec:
     host: deploy.example.com
     port: 22
@@ -115,7 +116,20 @@ whose hostname matches the repo URL, MegooCI injects the stored token automatica
       - "docker compose up -d"
     env:
       APP_VERSION: "1.2.3"
+
+# Password-based auth (uses sshpass)
+- ssh_exec:
+    host: deploy.example.com
+    user: deploy
+    password: ${{ secrets.SSH_PASSWORD }}
+    commands:
+      - "systemctl restart myapp"
 ```
+
+Authentication is resolved in order: `private_key` → `password` → ssh-agent. \
+For password auth, `sshpass` must be installed in the agent environment (included \
+by default in the official MegooCI agent image). Always use `${{ secrets.X }}` for \
+credentials — never hardcode passwords or keys in the YAML.
 
 ### wait_webhook — Pause until an external webhook callback
 ```yaml

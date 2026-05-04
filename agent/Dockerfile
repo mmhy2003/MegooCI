@@ -68,7 +68,7 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
 
 # ── System packages (Debian repos) ──────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates git curl gnupg openssh-client \
+      ca-certificates git curl gnupg openssh-client sshpass \
       build-essential \
       python3 python3-pip python3-venv \
  && rm -rf /var/lib/apt/lists/*

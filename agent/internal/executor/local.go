@@ -390,6 +390,7 @@ func buildSSHExecCmd(cfg map[string]interface{}) string {
 	if port == "" {
 		port = "22"
 	}
+	password := configStr(cfg, "password")
 	commands := configStrList(cfg, "commands")
 	if len(commands) == 0 {
 		return ""
@@ -405,11 +406,18 @@ func buildSSHExecCmd(cfg map[string]interface{}) string {
 		remoteScript += " && " + c
 	}
 
-	args := "ssh -o StrictHostKeyChecking=no -o BatchMode=yes"
-	args += " -p " + port
-	args += " " + target
-	args += " " + shellQuote(remoteScript)
-	return args
+	var cmd string
+	if password != "" {
+		// Password auth: use sshpass -e (reads $SSHPASS env var).
+		// Prepend SSHPASS= inline so /bin/sh sets it for the child process.
+		cmd = "SSHPASS=" + shellQuote(password) + " sshpass -e ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no"
+	} else {
+		cmd = "ssh -o StrictHostKeyChecking=no -o BatchMode=yes"
+	}
+	cmd += " -p " + port
+	cmd += " " + target
+	cmd += " " + shellQuote(remoteScript)
+	return cmd
 }
 
 func shellQuote(s string) string {
