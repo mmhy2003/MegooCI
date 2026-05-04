@@ -143,8 +143,9 @@ stages:
     title: "SSH Remote Execute",
     icon: <MonitorSmartphone className="h-4 w-4" />,
     description:
-      "Connect to a remote server via SSH and run commands. Use secrets for the private key.",
-    yaml: `- ssh_exec:
+      "Connect to a remote server via SSH and run commands. Supports key-based auth (recommended) and password-based auth via sshpass. Always use secrets for credentials.",
+    yaml: `# Key-based auth (recommended)
+- ssh_exec:
     host: deploy.example.com
     port: 22
     user: deploy
@@ -153,7 +154,15 @@ stages:
       - "cd /opt/app && docker compose pull"
       - "docker compose up -d"
     env:
-      APP_VERSION: "1.2.3"`,
+      APP_VERSION: "1.2.3"
+
+# Password-based auth
+- ssh_exec:
+    host: deploy.example.com
+    user: deploy
+    password: \${{ secrets.SSH_PASSWORD }}
+    commands:
+      - "systemctl restart myapp"`,
   },
   {
     id: "wait_webhook",
