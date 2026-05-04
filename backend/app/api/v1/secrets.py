@@ -81,6 +81,9 @@ async def update_secret(
         secret.name = body.name
     if body.value is not None:
         secret.encrypted_payload = encrypt_secret(body.value, settings.MEGOOCI_SECRET_KEY)
+    if body.scope_type is not None:
+        secret.scope_type = body.scope_type
+        secret.scope_id = body.scope_id  # None for global
 
     await db.commit()
     await db.refresh(secret)

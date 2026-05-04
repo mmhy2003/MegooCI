@@ -3,7 +3,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
-import { Eye, EyeOff, KeyRound, Pencil, Plus, Trash2, Variable } from "lucide-react";
+import { Eye, EyeOff, Globe, KeyRound, Pencil, Plus, Trash2, Variable } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { usePermission } from "@/hooks/use-permission";
@@ -15,9 +15,11 @@ import {
   type Secret,
   type EnvVar,
 } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -29,22 +31,27 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-interface ProjectSecrets {
-  project: Project;
-  secrets: Secret[];
-  envVars: EnvVar[];
+const GLOBAL_SCOPE = "__global__";
+
+interface FlatSecret extends Secret {
+  projectName: string;
+}
+
+interface FlatEnvVar extends EnvVar {
+  projectName: string;
 }
 
 export default function SecretsPage() {
   const confirm = useConfirm();
   const canManage = usePermission("secrets.manage");
-  const [projectData, setProjectData] = React.useState<ProjectSecrets[]>([]);
   const [projects, setProjects] = React.useState<Project[]>([]);
+  const [allSecrets, setAllSecrets] = React.useState<FlatSecret[]>([]);
+  const [allEnvVars, setAllEnvVars] = React.useState<FlatEnvVar[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   // Add Secret dialog
   const [secretDialogOpen, setSecretDialogOpen] = React.useState(false);
-  const [secProjectId, setSecProjectId] = React.useState("");
+  const [secProjectId, setSecProjectId] = React.useState(GLOBAL_SCOPE);
   const [secName, setSecName] = React.useState("");
   const [secValue, setSecValue] = React.useState("");
   const [creatingSec, setCreatingSec] = React.useState(false);
@@ -55,12 +62,13 @@ export default function SecretsPage() {
   const [editSecretId, setEditSecretId] = React.useState("");
   const [editSecName, setEditSecName] = React.useState("");
   const [editSecValue, setEditSecValue] = React.useState("");
+  const [editSecScope, setEditSecScope] = React.useState(GLOBAL_SCOPE);
   const [showEditSecValue, setShowEditSecValue] = React.useState(false);
   const [savingSec, setSavingSec] = React.useState(false);
 
   // Add Env Var dialog
   const [envDialogOpen, setEnvDialogOpen] = React.useState(false);
-  const [envProjectId, setEnvProjectId] = React.useState("");
+  const [envProjectId, setEnvProjectId] = React.useState(GLOBAL_SCOPE);
   const [envName, setEnvName] = React.useState("");
   const [envValue, setEnvValue] = React.useState("");
   const [creatingEnv, setCreatingEnv] = React.useState(false);
@@ -70,6 +78,7 @@ export default function SecretsPage() {
   const [editEnvId, setEditEnvId] = React.useState("");
   const [editEnvName, setEditEnvName] = React.useState("");
   const [editEnvValue, setEditEnvValue] = React.useState("");
+  const [editEnvScope, setEditEnvScope] = React.useState(GLOBAL_SCOPE);
   const [savingEnv, setSavingEnv] = React.useState(false);
 
   async function loadData() {
@@ -77,24 +86,34 @@ export default function SecretsPage() {
       const allProjects = await projectsApi.list();
       setProjects(allProjects);
 
-      const data = await Promise.all(
-        allProjects.map(async (project) => {
-          const [secs, vars] = await Promise.all([
-            secretsApi.list("project", project.id).catch(() => []),
-            envVarsApi.list("project", project.id).catch(() => []),
-          ]);
-          return {
-            project,
-            secrets: secs as Secret[],
-            envVars: vars as EnvVar[],
-          };
-        }),
-      );
-      setProjectData(data);
-      if (allProjects.length > 0) {
-        setSecProjectId(allProjects[0].id);
-        setEnvProjectId(allProjects[0].id);
+      // Fetch global + per-project secrets and env vars in parallel.
+      const [globalSecs, globalVars, ...perProject] = await Promise.all([
+        secretsApi.list("global").catch(() => [] as Secret[]),
+        envVarsApi.list("global").catch(() => [] as EnvVar[]),
+        ...allProjects.flatMap((project) => [
+          secretsApi.list("project", project.id).catch(() => [] as Secret[]),
+          envVarsApi.list("project", project.id).catch(() => [] as EnvVar[]),
+        ]),
+      ]);
+
+      // Build flat lists with project name annotations.
+      const secrets: FlatSecret[] = [
+        ...globalSecs.map((s) => ({ ...s, projectName: "Global" })),
+      ];
+      const envVars: FlatEnvVar[] = [
+        ...globalVars.map((v) => ({ ...v, projectName: "Global" })),
+      ];
+
+      for (let i = 0; i < allProjects.length; i++) {
+        const project = allProjects[i];
+        const projSecrets = perProject[i * 2] as Secret[];
+        const projVars = perProject[i * 2 + 1] as EnvVar[];
+        secrets.push(...projSecrets.map((s) => ({ ...s, projectName: project.name })));
+        envVars.push(...projVars.map((v) => ({ ...v, projectName: project.name })));
       }
+
+      setAllSecrets(secrets);
+      setAllEnvVars(envVars);
     } catch {
       toast.error("Failed to load secrets data");
     } finally {
@@ -106,26 +125,20 @@ export default function SecretsPage() {
     loadData();
   }, []);
 
-  const allSecrets = projectData.flatMap((pd) =>
-    pd.secrets.map((s) => ({ ...s, projectName: pd.project.name })),
-  );
-  const allEnvVars = projectData.flatMap((pd) =>
-    pd.envVars.map((v) => ({ ...v, projectName: pd.project.name })),
-  );
-
   // ── Secret handlers ────────────────────────────────────────────────
 
   async function handleAddSecret(e: React.FormEvent) {
     e.preventDefault();
-    if (!secName.trim() || !secValue.trim() || !secProjectId) {
-      toast.error("All fields are required");
+    if (!secName.trim() || !secValue.trim()) {
+      toast.error("Name and value are required");
       return;
     }
     setCreatingSec(true);
     try {
+      const isGlobal = secProjectId === GLOBAL_SCOPE;
       await secretsApi.create({
-        scope_type: "project",
-        scope_id: secProjectId,
+        scope_type: isGlobal ? "global" : "project",
+        ...(isGlobal ? {} : { scope_id: secProjectId }),
         name: secName,
         value: secValue,
       });
@@ -142,23 +155,31 @@ export default function SecretsPage() {
     }
   }
 
-  function openEditSecret(secret: Secret & { projectName: string }) {
+  function openEditSecret(secret: FlatSecret) {
     setEditSecretId(secret.id);
     setEditSecName(secret.name);
     setEditSecValue("");
+    setEditSecScope(secret.scope_id ?? GLOBAL_SCOPE);
     setShowEditSecValue(false);
     setEditSecretDialogOpen(true);
   }
 
   async function handleEditSecret(e: React.FormEvent) {
     e.preventDefault();
-    const updates: { name?: string; value?: string } = {};
+    const updates: { name?: string; value?: string; scope_type?: string; scope_id?: string | null } = {};
     const original = allSecrets.find((s) => s.id === editSecretId);
     if (editSecName.trim() && editSecName !== original?.name) {
       updates.name = editSecName.trim();
     }
     if (editSecValue.trim()) {
-      updates.value = editSecValue.trim();
+      updates.value = editSecValue;
+    }
+    // Check if scope changed.
+    const origScope = original?.scope_id ?? GLOBAL_SCOPE;
+    if (editSecScope !== origScope) {
+      const isGlobal = editSecScope === GLOBAL_SCOPE;
+      updates.scope_type = isGlobal ? "global" : "project";
+      updates.scope_id = isGlobal ? null : editSecScope;
     }
     if (Object.keys(updates).length === 0) {
       setEditSecretDialogOpen(false);
@@ -186,11 +207,18 @@ export default function SecretsPage() {
           <code className="font-mono text-foreground">
             {secret?.name ?? "This secret"}
           </code>{" "}
-          will be permanently removed from{" "}
-          <span className="font-medium text-foreground">
-            {secret?.projectName ?? "the project"}
-          </span>
-          . Pipelines using it will fail until it&apos;s recreated.
+          will be permanently removed
+          {secret?.projectName === "Global"
+            ? " from the global scope. All projects using it will be affected."
+            : (
+                <>
+                  {" "}from{" "}
+                  <span className="font-medium text-foreground">
+                    {secret?.projectName ?? "the project"}
+                  </span>
+                  . Pipelines using it will fail until it&apos;s recreated.
+                </>
+              )}
         </>
       ),
       confirmText: "Delete secret",
@@ -211,15 +239,16 @@ export default function SecretsPage() {
 
   async function handleAddEnv(e: React.FormEvent) {
     e.preventDefault();
-    if (!envName.trim() || !envValue.trim() || !envProjectId) {
-      toast.error("All fields are required");
+    if (!envName.trim() || !envValue.trim()) {
+      toast.error("Name and value are required");
       return;
     }
     setCreatingEnv(true);
     try {
+      const isGlobal = envProjectId === GLOBAL_SCOPE;
       await envVarsApi.create({
-        scope_type: "project",
-        scope_id: envProjectId,
+        scope_type: isGlobal ? "global" : "project",
+        ...(isGlobal ? {} : { scope_id: envProjectId }),
         name: envName,
         value: envValue,
       });
@@ -235,10 +264,11 @@ export default function SecretsPage() {
     }
   }
 
-  function openEditEnv(envVar: EnvVar & { projectName: string }) {
+  function openEditEnv(envVar: FlatEnvVar) {
     setEditEnvId(envVar.id);
     setEditEnvName(envVar.name);
     setEditEnvValue(envVar.value);
+    setEditEnvScope(envVar.scope_id ?? GLOBAL_SCOPE);
     setEditEnvDialogOpen(true);
   }
 
@@ -248,9 +278,25 @@ export default function SecretsPage() {
       toast.error("Value is required");
       return;
     }
+    const updates: { value?: string; scope_type?: string; scope_id?: string | null } = {};
+    const original = allEnvVars.find((v) => v.id === editEnvId);
+    if (editEnvValue.trim() !== original?.value) {
+      updates.value = editEnvValue.trim();
+    }
+    // Check if scope changed.
+    const origScope = original?.scope_id ?? GLOBAL_SCOPE;
+    if (editEnvScope !== origScope) {
+      const isGlobal = editEnvScope === GLOBAL_SCOPE;
+      updates.scope_type = isGlobal ? "global" : "project";
+      updates.scope_id = isGlobal ? null : editEnvScope;
+    }
+    if (Object.keys(updates).length === 0) {
+      setEditEnvDialogOpen(false);
+      return;
+    }
     setSavingEnv(true);
     try {
-      await envVarsApi.update(editEnvId, { value: editEnvValue.trim() });
+      await envVarsApi.update(editEnvId, updates);
       setEditEnvDialogOpen(false);
       toast.success("Variable updated");
       loadData();
@@ -270,11 +316,18 @@ export default function SecretsPage() {
           <code className="font-mono text-foreground">
             {envVar?.name ?? "This variable"}
           </code>{" "}
-          will be removed from{" "}
-          <span className="font-medium text-foreground">
-            {envVar?.projectName ?? "the project"}
-          </span>
-          .
+          will be removed
+          {envVar?.projectName === "Global"
+            ? " from the global scope."
+            : (
+                <>
+                  {" "}from{" "}
+                  <span className="font-medium text-foreground">
+                    {envVar?.projectName ?? "the project"}
+                  </span>
+                  .
+                </>
+              )}
         </>
       ),
       confirmText: "Delete variable",
@@ -291,10 +344,10 @@ export default function SecretsPage() {
     }
   }
 
-  const projectOptions = projects.map((p) => ({
-    value: p.id,
-    label: p.name,
-  }));
+  const scopeOptions = [
+    { value: GLOBAL_SCOPE, label: "🌐 Global (all projects)" },
+    ...projects.map((p) => ({ value: p.id, label: p.name })),
+  ];
 
   return (
     <AppLayout>
@@ -304,7 +357,9 @@ export default function SecretsPage() {
             Secrets &amp; Variables
           </h1>
           <p className="text-sm text-muted-foreground sm:text-base">
-            Manage secrets and environment variables across your projects.
+            Manage secrets and environment variables. Global items are available
+            to every project; project-scoped items are only visible to that
+            project&apos;s pipelines.
           </p>
         </div>
 
@@ -320,7 +375,6 @@ export default function SecretsPage() {
                 <Button
                   size="sm"
                   onClick={() => setSecretDialogOpen(true)}
-                  disabled={projects.length === 0}
                 >
                   <Plus className="mr-1.5 h-4 w-4" />
                   Add Secret
@@ -331,15 +385,16 @@ export default function SecretsPage() {
                   <DialogTitle>Add Secret</DialogTitle>
                   <DialogDescription>
                     Secrets are encrypted and cannot be viewed after creation.
+                    Choose &quot;Global&quot; to make it available to all projects.
                   </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleAddSecret} className="space-y-4">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Project</label>
+                    <label className="text-sm font-medium">Scope</label>
                     <Select
                       value={secProjectId}
                       onChange={(e) => setSecProjectId(e.target.value)}
-                      options={projectOptions}
+                      options={scopeOptions}
                     />
                   </div>
                   <div className="space-y-2">
@@ -353,17 +408,18 @@ export default function SecretsPage() {
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Value</label>
                     <div className="relative">
-                      <Input
-                        type={showSecValue ? "text" : "password"}
-                        placeholder="••••••••"
+                      <Textarea
+                        placeholder="Paste secret value (supports multiline, e.g. SSH keys)"
                         value={secValue}
                         onChange={(e) => setSecValue(e.target.value)}
-                        className="pr-10"
+                        rows={4}
+                        className={`resize-y pr-10 font-mono text-xs ${!showSecValue ? "text-security-disc" : ""}`}
+                        style={!showSecValue ? { WebkitTextSecurity: "disc", textSecurity: "disc" } as React.CSSProperties : undefined}
                       />
                       <button
                         type="button"
                         onClick={() => setShowSecValue((v) => !v)}
-                        className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
+                        className="absolute right-0 top-0 flex items-center px-3 py-2 text-muted-foreground hover:text-foreground transition-colors"
                         tabIndex={-1}
                       >
                         {showSecValue ? (
@@ -403,10 +459,7 @@ export default function SecretsPage() {
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
                       <th className="pb-3 pr-4 font-medium">Name</th>
-                      <th className="hidden pb-3 pr-4 font-medium md:table-cell">
-                        Type
-                      </th>
-                      <th className="pb-3 pr-4 font-medium">Project</th>
+                      <th className="pb-3 pr-4 font-medium">Scope</th>
                       <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
                         Created
                       </th>
@@ -421,11 +474,17 @@ export default function SecretsPage() {
                             {secret.name}
                           </code>
                         </td>
-                        <td className="hidden py-3 pr-4 text-muted-foreground md:table-cell">
-                          {secret.secret_type}
-                        </td>
-                        <td className="py-3 pr-4 text-muted-foreground">
-                          {secret.projectName}
+                        <td className="py-3 pr-4">
+                          {secret.projectName === "Global" ? (
+                            <Badge variant="secondary" className="gap-1">
+                              <Globe className="h-3 w-3" />
+                              Global
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">
+                              {secret.projectName}
+                            </span>
+                          )}
                         </td>
                         <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
                           {formatDistanceToNow(new Date(secret.created_at), {
@@ -475,6 +534,14 @@ export default function SecretsPage() {
             </DialogHeader>
             <form onSubmit={handleEditSecret} className="space-y-4">
               <div className="space-y-2">
+                <label className="text-sm font-medium">Scope</label>
+                <Select
+                  value={editSecScope}
+                  onChange={(e) => setEditSecScope(e.target.value)}
+                  options={scopeOptions}
+                />
+              </div>
+              <div className="space-y-2">
                 <label className="text-sm font-medium">Name</label>
                 <Input
                   placeholder="SECRET_NAME"
@@ -488,17 +555,18 @@ export default function SecretsPage() {
                   <span className="text-muted-foreground">(optional)</span>
                 </label>
                 <div className="relative">
-                  <Input
-                    type={showEditSecValue ? "text" : "password"}
-                    placeholder="Leave blank to keep current value"
+                  <Textarea
+                    placeholder="Leave blank to keep current value (supports multiline)"
                     value={editSecValue}
                     onChange={(e) => setEditSecValue(e.target.value)}
-                    className="pr-10"
+                    rows={4}
+                    className={`resize-y pr-10 font-mono text-xs ${!showEditSecValue ? "text-security-disc" : ""}`}
+                    style={!showEditSecValue ? { WebkitTextSecurity: "disc", textSecurity: "disc" } as React.CSSProperties : undefined}
                   />
                   <button
                     type="button"
                     onClick={() => setShowEditSecValue((v) => !v)}
-                    className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground transition-colors"
+                    className="absolute right-0 top-0 flex items-center px-3 py-2 text-muted-foreground hover:text-foreground transition-colors"
                     tabIndex={-1}
                   >
                     {showEditSecValue ? (
@@ -540,7 +608,6 @@ export default function SecretsPage() {
                 <Button
                   size="sm"
                   onClick={() => setEnvDialogOpen(true)}
-                  disabled={projects.length === 0}
                 >
                   <Plus className="mr-1.5 h-4 w-4" />
                   Add Variable
@@ -549,14 +616,17 @@ export default function SecretsPage() {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Add Environment Variable</DialogTitle>
+                  <DialogDescription>
+                    Choose &quot;Global&quot; to make this variable available to all projects.
+                  </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleAddEnv} className="space-y-4">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Project</label>
+                    <label className="text-sm font-medium">Scope</label>
                     <Select
                       value={envProjectId}
                       onChange={(e) => setEnvProjectId(e.target.value)}
-                      options={projectOptions}
+                      options={scopeOptions}
                     />
                   </div>
                   <div className="space-y-2">
@@ -604,7 +674,7 @@ export default function SecretsPage() {
                       <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
                         Value
                       </th>
-                      <th className="pb-3 pr-4 font-medium">Project</th>
+                      <th className="pb-3 pr-4 font-medium">Scope</th>
                       <th className="pb-3 font-medium w-20"></th>
                     </tr>
                   </thead>
@@ -621,8 +691,17 @@ export default function SecretsPage() {
                             {v.is_secret_ref ? "••••••" : v.value}
                           </span>
                         </td>
-                        <td className="py-3 pr-4 text-muted-foreground">
-                          {v.projectName}
+                        <td className="py-3 pr-4">
+                          {v.projectName === "Global" ? (
+                            <Badge variant="secondary" className="gap-1">
+                              <Globe className="h-3 w-3" />
+                              Global
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">
+                              {v.projectName}
+                            </span>
+                          )}
                         </td>
                         {canManage && (
                           <td className="py-3">
@@ -666,6 +745,14 @@ export default function SecretsPage() {
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleEditEnv} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Scope</label>
+                <Select
+                  value={editEnvScope}
+                  onChange={(e) => setEditEnvScope(e.target.value)}
+                  options={scopeOptions}
+                />
+              </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Name</label>
                 <Input value={editEnvName} readOnly className="bg-muted" />

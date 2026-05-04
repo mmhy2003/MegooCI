@@ -511,7 +511,7 @@ export const secretsApi = {
       body: JSON.stringify(data),
     }),
 
-  update: (secretId: string, data: { name?: string; value?: string }) =>
+  update: (secretId: string, data: { name?: string; value?: string; scope_type?: string; scope_id?: string | null }) =>
     fetchApi<Secret>(`/api/v1/secrets-env/secrets/${secretId}`, {
       method: "PUT",
       body: JSON.stringify(data),
@@ -557,7 +557,7 @@ export const envVarsApi = {
       body: JSON.stringify(data),
     }),
 
-  update: (envVarId: string, data: { value: string }) =>
+  update: (envVarId: string, data: { value?: string; name?: string; scope_type?: string; scope_id?: string | null }) =>
     fetchApi<EnvVar>(`/api/v1/secrets-env/env-vars/${envVarId}`, {
       method: "PUT",
       body: JSON.stringify(data),

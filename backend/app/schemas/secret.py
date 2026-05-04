@@ -27,6 +27,8 @@ class SecretResponse(BaseModel):
 class SecretUpdate(BaseModel):
     name: str | None = None
     value: str | None = None
+    scope_type: str | None = None
+    scope_id: uuid.UUID | None = None
 
 
 class EnvVarCreate(BaseModel):
@@ -38,6 +40,9 @@ class EnvVarCreate(BaseModel):
 
 class EnvVarUpdate(BaseModel):
     value: str | None = None
+    name: str | None = None
+    scope_type: str | None = None
+    scope_id: uuid.UUID | None = None
 
 
 class EnvVarResponse(BaseModel):
