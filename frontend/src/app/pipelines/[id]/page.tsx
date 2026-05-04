@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   Play,
   Pencil,
+  Power,
   Trash2,
   GitBranch,
   Clock,
@@ -146,6 +147,24 @@ export default function PipelineDetailPage() {
       router.push("/pipelines");
     } catch {
       toast.error("Failed to delete pipeline");
+    }
+  }
+
+  const [togglingEnabled, setTogglingEnabled] = React.useState(false);
+
+  async function handleToggleEnabled() {
+    if (!pipeline) return;
+    setTogglingEnabled(true);
+    try {
+      const updated = await pipelinesApi.update(id, {
+        enabled: !pipeline.enabled,
+      });
+      setPipeline(updated);
+      toast.success(updated.enabled ? "Pipeline enabled" : "Pipeline disabled");
+    } catch {
+      toast.error("Failed to update pipeline");
+    } finally {
+      setTogglingEnabled(false);
     }
   }
 
@@ -291,9 +310,27 @@ export default function PipelineDetailPage() {
                 </div>
               )}
               <Badge variant="secondary">YAML</Badge>
-              <Badge variant={pipeline.enabled ? "success" : "pending"}>
-                {pipeline.enabled ? "Active" : "Inactive"}
-              </Badge>
+              <button
+                type="button"
+                onClick={canManagePipelines ? handleToggleEnabled : undefined}
+                disabled={togglingEnabled || !canManagePipelines}
+                title={
+                  canManagePipelines
+                    ? pipeline.enabled
+                      ? "Click to disable — webhook triggers will be paused"
+                      : "Click to enable — webhook triggers will resume"
+                    : undefined
+                }
+                className={canManagePipelines ? "cursor-pointer" : ""}
+              >
+                <Badge
+                  variant={pipeline.enabled ? "success" : "cancelled"}
+                  className="gap-1"
+                >
+                  <Power className="h-3 w-3" />
+                  {pipeline.enabled ? "Active" : "Disabled"}
+                </Badge>
+              </button>
             </div>
             {pipeline.source_repo_url && (
               <p className="mt-1 break-all text-xs text-muted-foreground sm:text-sm">

@@ -138,12 +138,12 @@ export default function PipelinesPage() {
                       <GitBranch className="h-3.5 w-3.5" />
                       <span>{pipeline.default_branch}</span>
                     </div>
-                    {pipeline.enabled && (
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5">
                         <ExternalLink className="h-3.5 w-3.5" />
-                        <span>Active</span>
+                        <span className={pipeline.enabled ? "text-emerald-500" : "text-muted-foreground"}>
+                          {pipeline.enabled ? "Active" : "Disabled"}
+                        </span>
                       </div>
-                    )}
                     <p className="text-xs">
                       Created{" "}
                       {formatDistanceToNow(new Date(pipeline.created_at), {

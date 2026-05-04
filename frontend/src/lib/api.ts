@@ -309,7 +309,7 @@ export const pipelinesApi = {
 
   get: (id: string) => fetchApi<Pipeline>(`/api/v1/pipelines/${id}`),
 
-  update: (id: string, data: Partial<CreatePipelineRequest>) =>
+  update: (id: string, data: Partial<CreatePipelineRequest> & { enabled?: boolean }) =>
     fetchApi<Pipeline>(`/api/v1/pipelines/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
