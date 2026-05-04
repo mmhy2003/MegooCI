@@ -2,7 +2,7 @@
  * Caches the app shell so the app is installable and works offline.
  * Bump CACHE_VERSION whenever you ship new assets.
  */
-const CACHE_VERSION = "megooci-v1";
+const CACHE_VERSION = "megooci-v2";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -33,7 +33,20 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
 
-  // Network-first for navigations; cache-first for everything else.
+  const url = new URL(req.url);
+
+  // NEVER cache API calls, WebSocket paths, or Next.js data fetches.
+  // Let them pass straight through to the network.
+  if (
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/ws/") ||
+    url.pathname.startsWith("/_next/data/")
+  ) {
+    return;
+  }
+
+  // Network-first for navigations (HTML pages).
+  // Fallback to cached "/" (app shell) if offline.
   if (req.mode === "navigate") {
     event.respondWith(
       fetch(req)
@@ -47,12 +60,29 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Cache-first for static assets only (JS, CSS, images, fonts).
+  // Everything else goes straight to the network.
+  const isStaticAsset =
+    url.pathname.startsWith("/_next/static/") ||
+    url.pathname.startsWith("/icons/") ||
+    url.pathname.endsWith(".js") ||
+    url.pathname.endsWith(".css") ||
+    url.pathname.endsWith(".png") ||
+    url.pathname.endsWith(".svg") ||
+    url.pathname.endsWith(".ico") ||
+    url.pathname.endsWith(".woff2") ||
+    url.pathname.endsWith(".webmanifest");
+
+  if (!isStaticAsset) return;
+
   event.respondWith(
     caches.match(req).then((cached) =>
       cached ||
       fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_VERSION).then((c) => c.put(req, copy));
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE_VERSION).then((c) => c.put(req, copy));
+        }
         return res;
       })
     )
