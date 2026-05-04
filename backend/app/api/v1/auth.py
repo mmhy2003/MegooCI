@@ -27,6 +27,7 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     SignupRequest,
     TokenResponse,
+    UpdateProfileRequest,
     UserResponse,
 )
 
@@ -236,6 +237,53 @@ async def change_password(
     current_user.hashed_password = hash_password(body.new_password)
     await db.commit()
     return {"message": "Password changed successfully"}
+
+
+@router.put("/update-profile", response_model=UserResponse)
+async def update_profile(
+    body: UpdateProfileRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> dict:
+    """Update the current user's name and/or email."""
+    if body.name is not None:
+        stripped = body.name.strip()
+        if not stripped:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Name cannot be empty",
+            )
+        current_user.name = stripped
+
+    if body.email is not None:
+        normalised = body.email.strip().lower()
+        if normalised != current_user.email:
+            existing = await db.execute(
+                select(User).where(User.email == normalised)
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A user with this email already exists",
+                )
+            current_user.email = normalised
+
+    await db.commit()
+    await db.refresh(current_user)
+
+    from app.core.deps import _collect_permissions, get_user_primary_role_name
+
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "name": current_user.name,
+        "is_admin": current_user.is_admin,
+        "is_active": current_user.is_active,
+        "auth_provider": current_user.auth_provider,
+        "created_at": current_user.created_at,
+        "role": get_user_primary_role_name(current_user),
+        "permissions": sorted(_collect_permissions(current_user)),
+    }
 
 
 @router.post("/forgot-password")

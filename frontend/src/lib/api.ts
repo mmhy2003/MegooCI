@@ -201,6 +201,12 @@ export const authApi = {
       method: "POST",
       body: JSON.stringify({ token, new_password }),
     }),
+
+  updateProfile: (data: { name?: string; email?: string }) =>
+    fetchApi<User>("/api/v1/auth/update-profile", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
 };
 
 // ------------------------------------------------------------------

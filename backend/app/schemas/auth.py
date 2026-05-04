@@ -33,6 +33,11 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class UpdateProfileRequest(BaseModel):
+    name: str | None = None
+    email: EmailStr | None = None
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
