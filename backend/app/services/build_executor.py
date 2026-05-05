@@ -27,6 +27,7 @@ from app.services.in_app_notifications import notify_user, get_admin_user_ids
 from app.services.agent_dispatcher import (
     dispatch_step_to_agent,
     pick_online_agent,
+    send_build_finished,
 )
 from app.services.step_actions import get_handler
 from app.services.step_actions.base import LogLine, StepContext, StepResult
@@ -74,6 +75,7 @@ async def execute_build(
         secrets, env_vars = await _load_scope_context(db, build)
 
         build_failed = False
+        build_agent_ids: set[uuid.UUID] = set()
 
         for stage in sorted(build.stages, key=lambda s: s.sort_order):
             if build.status == "cancelled":
@@ -115,6 +117,7 @@ async def execute_build(
                     db=db,
                     redis_client=redis_client,
                     channel=channel,
+                    build_agent_ids=build_agent_ids,
                 )
 
                 # Persist error messages as visible log lines so users
@@ -173,6 +176,14 @@ async def execute_build(
             "status": final_status,
         })
 
+        # Tell every agent that participated in this build to release its
+        # shared workspace directory.
+        for agent_id in build_agent_ids:
+            try:
+                await send_build_finished(agent_id, build_id)
+            except Exception:
+                pass  # best-effort; the agent has a safety-net timer
+
         await _send_build_finished_notification(
             db, redis_client, build, final_status
         )
@@ -189,6 +200,7 @@ async def _execute_step(
     db: AsyncSession,
     redis_client: aioredis.Redis,
     channel: str,
+    build_agent_ids: set[uuid.UUID] | None = None,
 ) -> StepResult:
     """Dispatch a step to the correct handler.
 
@@ -249,7 +261,7 @@ async def _execute_step(
             step.step_type, dispatch_config, secrets, project_id, db
         )
 
-        agent_result = await _try_dispatch_to_agent(
+        agent_result, agent_id = await _try_dispatch_to_agent(
             step, stage.name, build.id, db,
             artifact_paths=art_paths,
             redis_client=redis_client,
@@ -258,6 +270,8 @@ async def _execute_step(
             command_override=step_config.get("command") or step.command or "",
         )
         if agent_result is not None:
+            if agent_id is not None and build_agent_ids is not None:
+                build_agent_ids.add(agent_id)
             await db.refresh(step)
             return StepResult(
                 exit_code=step.exit_code or 0,
@@ -517,10 +531,11 @@ async def _try_dispatch_to_agent(
     channel: str | None = None,
     config_override: dict | None = None,
     command_override: str | None = None,
-) -> dict | None:
-    """If a healthy agent is online, run this step there and return its
-    result dict. Returns None if no agent picks it up within the timeout,
-    so the caller can transparently fall back to local execution.
+) -> tuple[dict | None, uuid.UUID | None]:
+    """If a healthy agent is online, run this step there and return
+    ``(result_dict, agent_id)``. Returns ``(None, None)`` if no agent picks
+    it up within the timeout, so the caller can transparently fall back to
+    local execution.
 
     Emits descriptive system log lines visible in the build UI when the
     agent lookup or dispatch fails.
@@ -534,7 +549,7 @@ async def _try_dispatch_to_agent(
                 "Register and start an agent under Settings \u2192 Agents, "
                 "or the step will run on the server (if supported).",
             )
-        return None
+        return None, None
 
     if redis_client and channel:
         await _emit_system_log(
@@ -560,7 +575,7 @@ async def _try_dispatch_to_agent(
             "Falling back to server-side execution.",
         )
 
-    return result
+    return result, agent.id if result is not None else None
 
 
 async def _enrich_config_for_agent(

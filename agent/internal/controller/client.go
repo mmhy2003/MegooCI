@@ -226,6 +226,8 @@ func (c *Client) handleFrame(ctx context.Context, f protocol.Frame) {
 		go c.runStep(ctx, f)
 	case protocol.TypeCancelStep:
 		c.cancelStep(f.StepID)
+	case protocol.TypeBuildFinished:
+		c.finishBuild(f.BuildID)
 	case protocol.TypePing:
 		// No reply required; the heartbeat loop provides liveness.
 	default:
@@ -362,7 +364,11 @@ func (c *Client) trackBuildStep(buildID string) {
 }
 
 // untrackBuildStep decrements the in-flight step count for a build.
-// When the count reaches zero the shared workspace directory is released.
+// Workspace cleanup is NOT done here — the controller sends an explicit
+// build_finished frame when the entire build (all stages) is complete.
+// A safety-net timer is started the first time the count drops to zero
+// to handle cases where the build_finished frame is never received
+// (e.g., controller crash).
 func (c *Client) untrackBuildStep(buildID string) {
 	if buildID == "" {
 		return
@@ -371,14 +377,43 @@ func (c *Client) untrackBuildStep(buildID string) {
 	c.buildStepCounts[buildID]--
 	remaining := c.buildStepCounts[buildID]
 	if remaining <= 0 {
-		delete(c.buildStepCounts, buildID)
+		c.buildStepCounts[buildID] = 0
 	}
 	c.buildMu.Unlock()
 
+	// Safety net: if the count hits zero and stays there for 5 minutes
+	// (i.e., no build_finished arrived and no new steps started), clean up
+	// to prevent temp directory pile-up.
 	if remaining <= 0 {
-		c.logger.Debug("releasing build workspace", "build_id", buildID)
-		executor.ReleaseBuildWorkdir(buildID)
+		go func() {
+			time.Sleep(5 * time.Minute)
+			c.buildMu.Lock()
+			count := c.buildStepCounts[buildID]
+			if count <= 0 {
+				delete(c.buildStepCounts, buildID)
+			}
+			c.buildMu.Unlock()
+
+			if count <= 0 {
+				c.logger.Debug("safety-net: releasing orphaned build workspace", "build_id", buildID)
+				executor.ReleaseBuildWorkdir(buildID)
+			}
+		}()
 	}
+}
+
+// finishBuild is called when the controller sends a build_finished frame,
+// signalling that all stages and steps for the build have completed.
+// This is the authoritative trigger for workspace cleanup.
+func (c *Client) finishBuild(buildID string) {
+	if buildID == "" {
+		return
+	}
+	c.logger.Info("build finished, releasing workspace", "build_id", buildID)
+	c.buildMu.Lock()
+	delete(c.buildStepCounts, buildID)
+	c.buildMu.Unlock()
+	executor.ReleaseBuildWorkdir(buildID)
 }
 
 func (c *Client) sendFrame(frame any) error {

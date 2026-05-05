@@ -166,3 +166,27 @@ async def signal_cancel_step(agent_id: uuid.UUID, step_id: uuid.UUID) -> None:
         )
     finally:
         await redis_client.aclose()
+
+
+async def send_build_finished(agent_id: uuid.UUID, build_id: uuid.UUID) -> None:
+    """Tell the agent that a build is fully complete so it can release the
+    shared workspace directory.
+
+    Pushes a ``build_finished`` frame onto the agent's task queue — the same
+    queue the dispatcher loop reads from — so it is delivered over the WS
+    connection in order after any pending step assignments.
+    """
+    settings = get_settings()
+    redis_client = aioredis.from_url(
+        settings.MEGOOCI_REDIS_URL, decode_responses=True
+    )
+    try:
+        await redis_client.rpush(
+            tasks_list_key(agent_id),
+            json.dumps({
+                "type": "build_finished",
+                "build_id": str(build_id),
+            }),
+        )
+    finally:
+        await redis_client.aclose()

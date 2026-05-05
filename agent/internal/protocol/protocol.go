@@ -17,9 +17,10 @@ const (
 	TypeArtifactsUploaded = "artifacts_uploaded"
 
 	// Controller -> Agent
-	TypeRunStep    = "run_step"
-	TypeCancelStep = "cancel_step"
-	TypePing       = "ping"
+	TypeRunStep       = "run_step"
+	TypeCancelStep    = "cancel_step"
+	TypeBuildFinished = "build_finished"
+	TypePing          = "ping"
 
 	StreamStdout = "stdout"
 	StreamStderr = "stderr"
