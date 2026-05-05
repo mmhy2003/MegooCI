@@ -178,10 +178,32 @@ func resolveCommand(step Step) string {
 }
 
 func configStr(cfg map[string]interface{}, key string) string {
-	if v, ok := cfg[key].(string); ok {
-		return v
+	v, ok := cfg[key]
+	if !ok {
+		return ""
 	}
-	return ""
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		// JSON numbers arrive as float64. If it looks like an integer,
+		// format without the decimal point (e.g. depth: 1 → "1").
+		if val == float64(int64(val)) {
+			return fmt.Sprintf("%d", int64(val))
+		}
+		return fmt.Sprintf("%g", val)
+	case int:
+		return fmt.Sprintf("%d", val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
 
 func configStrList(cfg map[string]interface{}, key string) []string {
@@ -212,8 +234,17 @@ func configStrMap(cfg map[string]interface{}, key string) map[string]string {
 	}
 	out := make(map[string]string, len(m))
 	for k, v := range m {
-		if s, ok := v.(string); ok {
-			out[k] = s
+		switch val := v.(type) {
+		case string:
+			out[k] = val
+		case float64:
+			if val == float64(int64(val)) {
+				out[k] = fmt.Sprintf("%d", int64(val))
+			} else {
+				out[k] = fmt.Sprintf("%g", val)
+			}
+		default:
+			out[k] = fmt.Sprintf("%v", v)
 		}
 	}
 	return out
@@ -228,18 +259,17 @@ func buildDockerBuildCmd(cfg map[string]interface{}) string {
 	if context == "" {
 		context = "."
 	}
-	if df := configStr(cfg, "dockerfile"); df != "" {
-		// Docker's -f flag resolves relative to the CWD, not the build
-		// context.  When the user specifies a relative dockerfile path
-		// (e.g. "Dockerfile") with a non-"." context (e.g. "./frontend"),
-		// we must join them so Docker finds the correct file
-		// (e.g. "./frontend/Dockerfile") instead of a same-named file in
-		// the workspace root.
+
+	// Resolve the Dockerfile path the same way Docker's -f does.
+	df := configStr(cfg, "dockerfile")
+	resolvedDf := df
+	if df != "" {
 		if !filepath.IsAbs(df) && context != "." {
-			df = filepath.Join(context, df)
+			resolvedDf = filepath.Join(context, df)
 		}
-		args += " -f " + shellQuote(df)
+		args += " -f " + shellQuote(resolvedDf)
 	}
+
 	if target := configStr(cfg, "target"); target != "" {
 		args += " --target " + shellQuote(target)
 	}
@@ -253,7 +283,21 @@ func buildDockerBuildCmd(cfg map[string]interface{}) string {
 		args += " --build-arg " + shellQuote(k+"="+v)
 	}
 	args += " " + shellQuote(context)
-	return args
+
+	// Pre-flight check: verify the Dockerfile exists before invoking
+	// docker buildx. If it doesn't, print a diagnostic directory listing
+	// so the user can see exactly which files are present in the workspace
+	// instead of Docker's cryptic "no such file or directory" error.
+	checkPath := resolvedDf
+	if checkPath == "" {
+		checkPath = filepath.Join(context, "Dockerfile")
+	}
+	preCheck := fmt.Sprintf(
+		`if [ ! -f %s ]; then echo "ERROR: Dockerfile not found at '%s'"; echo "Working directory: $(pwd)"; echo "Files in context directory '%s':"; ls -la %s 2>/dev/null || echo "(directory does not exist)"; exit 1; fi`,
+		shellQuote(checkPath), checkPath, context, shellQuote(context),
+	)
+
+	return preCheck + " && " + args
 }
 
 func buildDockerPushCmd(cfg map[string]interface{}) string {
