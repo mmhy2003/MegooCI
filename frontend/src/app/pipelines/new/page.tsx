@@ -289,6 +289,8 @@ export default function NewPipelinePage() {
           currentYaml={yamlContent}
           onApplyYaml={handleApplyYaml}
           projectId={projectId || null}
+          repoUrl={sourceRepo || null}
+          branch={defaultBranch || null}
           onClose={() => setAiOpen(false)}
         />
       </Sheet>

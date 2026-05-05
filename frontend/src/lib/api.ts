@@ -1202,6 +1202,9 @@ export interface AiAssistantRequest {
   prompt: string;
   current_yaml?: string | null;
   project_id?: string | null;
+  pipeline_id?: string | null;
+  repo_url?: string | null;
+  branch?: string | null;
   history?: AiChatMessage[];
 }
 

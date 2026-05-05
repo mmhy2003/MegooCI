@@ -613,6 +613,9 @@ export default function PipelineDetailPage() {
               : undefined
           }
           projectId={pipeline.project_id}
+          pipelineId={pipeline.id}
+          repoUrl={pipeline.source_repo_url}
+          branch={pipeline.default_branch}
           onClose={() => setAiOpen(false)}
         />
       </Sheet>

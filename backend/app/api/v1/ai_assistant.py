@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.deps import require_permission
 from app.database import get_db
+from app.models.git_integration import ProjectRepository
+from app.models.pipeline import Pipeline
 from app.models.secret import EnvVar, Secret
 from app.models.user import User
 
@@ -248,6 +250,9 @@ class AssistantRequest(BaseModel):
     prompt: str
     current_yaml: str | None = None
     project_id: str | None = None
+    pipeline_id: str | None = None
+    repo_url: str | None = None
+    branch: str | None = None
     history: list[ChatMessage] | None = None
 
 
@@ -315,6 +320,68 @@ async def _build_project_context(
     return "\n\n".join(parts)
 
 
+async def _build_repo_context(
+    db: AsyncSession,
+    *,
+    repo_url: str | None = None,
+    branch: str | None = None,
+    pipeline_id: str | None = None,
+) -> str | None:
+    """Build a system-prompt section describing the current repository and branch.
+
+    Priority:
+    1. Explicit ``repo_url`` / ``branch`` passed from the frontend form fields.
+    2. If a ``pipeline_id`` is provided, look up the Pipeline row. If it links
+       to a ``ProjectRepository`` (via ``project_repository_id``), use the repo
+       data from there — including ``display_name``. Otherwise fall back to the
+       Pipeline's own ``source_repo_url`` / ``default_branch``.
+    """
+
+    display_name: str | None = None
+
+    # ── Try to resolve from the Pipeline row when explicit values are missing ──
+    if pipeline_id and (not repo_url):
+        try:
+            pid = uuid.UUID(pipeline_id)
+        except ValueError:
+            pid = None
+
+        if pid is not None:
+            pipeline = await db.get(Pipeline, pid)
+            if pipeline is not None:
+                # Prefer the linked ProjectRepository for richer data.
+                if pipeline.project_repository_id:
+                    proj_repo = await db.get(ProjectRepository, pipeline.project_repository_id)
+                    if proj_repo is not None:
+                        repo_url = repo_url or proj_repo.repo_url
+                        branch = branch or proj_repo.default_branch
+                        display_name = proj_repo.display_name
+
+                # Fall back to the pipeline's own fields.
+                repo_url = repo_url or pipeline.source_repo_url
+                branch = branch or pipeline.default_branch
+
+    if not repo_url and not branch:
+        return None
+
+    parts: list[str] = ["\n\n## Repository Context"]
+
+    if display_name:
+        parts.append(f"Repository display name: **{display_name}**")
+    if repo_url:
+        parts.append(
+            f"Repository URL: `{repo_url}` — when generating `git_clone` steps, "
+            "use this URL instead of a placeholder."
+        )
+    if branch:
+        parts.append(
+            f"Default branch: `{branch}` — use this as the branch in `git_clone`, "
+            "`when.branch`, and similar fields unless the user specifies otherwise."
+        )
+
+    return "\n".join(parts)
+
+
 @router.post("/assistant", response_model=AssistantResponse)
 async def pipeline_assistant(
     body: AssistantRequest,
@@ -353,6 +420,16 @@ async def pipeline_assistant(
                 "instead of generic placeholders.\n\n"
                 + project_ctx
             )
+
+    # ----- Repository & Branch context -----
+    repo_ctx = await _build_repo_context(
+        db,
+        repo_url=body.repo_url,
+        branch=body.branch,
+        pipeline_id=body.pipeline_id,
+    )
+    if repo_ctx:
+        system_content += repo_ctx
 
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_content},

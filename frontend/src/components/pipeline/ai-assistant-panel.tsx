@@ -31,6 +31,9 @@ interface AiAssistantPanelProps {
   currentYaml: string;
   onApplyYaml?: (yaml: string) => void;
   projectId?: string | null;
+  pipelineId?: string | null;
+  repoUrl?: string | null;
+  branch?: string | null;
   /** Called when the user clicks the close button in the header. */
   onClose?: () => void;
 }
@@ -99,6 +102,9 @@ export function AiAssistantPanel({
   currentYaml,
   onApplyYaml,
   projectId,
+  pipelineId,
+  repoUrl,
+  branch,
   onClose,
 }: AiAssistantPanelProps) {
   const [messages, setMessages] = React.useState<Message[]>([]);
@@ -139,6 +145,9 @@ export function AiAssistantPanel({
         prompt: prompt.trim(),
         current_yaml: latestYaml || null,
         project_id: projectId || null,
+        pipeline_id: pipelineId || null,
+        repo_url: repoUrl || null,
+        branch: branch || null,
         history: history.length > 0 ? history : undefined,
       });
 
