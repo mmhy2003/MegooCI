@@ -46,7 +46,7 @@ definitions in YAML for the MegooCI platform.
     username: ${{ secrets.GHCR_USER }}
     password: ${{ secrets.GHCR_TOKEN }}
 
-# Option 2: MegooCI registry deploy token
+# Option 2: MegooCI built-in registry deploy token
 # Create a global deploy token under Registry → Deploy Tokens.
 # Store the token value as a secret (e.g. REGISTRY_TOKEN).
 - docker_login:
@@ -82,6 +82,19 @@ password is the token value. Store the token in a secret for safety.
 - docker_push:
     tags:
       - "ghcr.io/org/app:latest"
+```
+
+For the **MegooCI built-in registry**, image names can be:
+- **Single-segment**: `registry-host/project-slug:tag` — stored under a default \
+repository automatically.
+- **Two-segment**: `registry-host/project-slug/repo-name:tag` — stored under \
+the named repository.
+
+Example built-in registry push:
+```yaml
+- docker_push:
+    tags:
+      - "megooci-registry.example.com/my-project:latest"
 ```
 
 ### git_clone — Clone a repository

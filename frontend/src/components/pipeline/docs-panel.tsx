@@ -76,7 +76,7 @@ stages:
     username: \${{ secrets.GHCR_USER }}
     password: \${{ secrets.GHCR_TOKEN }}
 
-# Option 2: MegooCI registry deploy token
+# Option 2: MegooCI built-in registry deploy token
 # Create a global deploy token under Registry → Deploy Tokens.
 # Store the token value as a secret (e.g. REGISTRY_TOKEN).
 - docker_login:
@@ -106,11 +106,22 @@ stages:
     id: "docker_push",
     title: "Docker Push",
     icon: <Container className="h-4 w-4" />,
-    description: "Push one or more image tags to a registry.",
-    yaml: `- docker_push:
+    description: "Push one or more image tags to a registry. For the MegooCI built-in registry, images can use a single-segment name (registry/project-slug:tag) or two segments (registry/project-slug/repo-name:tag). Single-segment names are stored under a default repository.",
+    yaml: `# Push to any registry
+- docker_push:
     tags:
       - "ghcr.io/org/app:latest"
-      - "ghcr.io/org/app:v1.2.3"`,
+      - "ghcr.io/org/app:v1.2.3"
+
+# Push to MegooCI built-in registry (single-segment)
+- docker_push:
+    tags:
+      - "megooci-registry.example.com/my-project:latest"
+
+# Push to MegooCI built-in registry (two-segment)
+- docker_push:
+    tags:
+      - "megooci-registry.example.com/my-project/api:latest"`,
   },
   {
     id: "git_clone",
