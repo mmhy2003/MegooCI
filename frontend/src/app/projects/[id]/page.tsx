@@ -7,6 +7,7 @@ import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  Check,
   Eye,
   EyeOff,
   GitBranch,
@@ -15,6 +16,7 @@ import {
   KeyRound,
   Trash2,
   Settings,
+  X,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -88,6 +90,11 @@ export default function ProjectDetailPage() {
   const [editEnvName, setEditEnvName] = React.useState("");
   const [editEnvValue, setEditEnvValue] = React.useState("");
   const [savingEnv, setSavingEnv] = React.useState(false);
+
+  // Inline project name editing
+  const [editingName, setEditingName] = React.useState(false);
+  const [editName, setEditName] = React.useState("");
+  const [savingName, setSavingName] = React.useState(false);
 
   React.useEffect(() => {
     async function load() {
@@ -189,6 +196,25 @@ export default function ProjectDetailPage() {
             (err2 instanceof Error ? err2.message : "Failed to delete project"),
         );
       }
+    }
+  }
+
+  async function handleRenameProject() {
+    const trimmed = editName.trim();
+    if (!trimmed || trimmed === project?.name) {
+      setEditingName(false);
+      return;
+    }
+    setSavingName(true);
+    try {
+      const updated = await projectsApi.update(id, { name: trimmed });
+      setProject(updated);
+      setEditingName(false);
+      toast.success("Project renamed");
+    } catch {
+      toast.error("Failed to rename project");
+    } finally {
+      setSavingName(false);
     }
   }
 
@@ -411,9 +437,61 @@ export default function ProjectDetailPage() {
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h1 className="break-all text-xl font-bold sm:text-2xl">
-              {project.name}
-            </h1>
+            {editingName ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="h-9 text-xl font-bold sm:text-2xl"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleRenameProject();
+                    if (e.key === "Escape") setEditingName(false);
+                  }}
+                  disabled={savingName}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={handleRenameProject}
+                  disabled={savingName}
+                  title="Save"
+                >
+                  <Check className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => setEditingName(false)}
+                  disabled={savingName}
+                  title="Cancel"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h1 className="break-all text-xl font-bold sm:text-2xl">
+                  {project.name}
+                </h1>
+                {canManageProjects && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setEditName(project.name);
+                      setEditingName(true);
+                    }}
+                    title="Rename project"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            )}
             {project.description && (
               <p className="mt-1 text-sm text-muted-foreground sm:text-base">
                 {project.description}
