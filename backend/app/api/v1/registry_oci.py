@@ -19,7 +19,10 @@ compatibility:
 - ``DELETE /v2/<name>/blobs/uploads/<uuid>``  — cancel upload
 - ``POST /v2/<name>/blobs/uploads/?mount=``   — cross-repo blob mount
 
-Image names follow the format ``<project_slug>/<repo_name>`` (two segments).
+Image names may be one segment (``<project_slug>``) or two segments
+(``<project_slug>/<repo_name>``).  A single-segment push like
+``docker push registry/myproject:latest`` is treated as
+``project_slug=myproject, repo_name=_default``.
 """
 
 from __future__ import annotations
@@ -62,6 +65,10 @@ _OCI_MANIFEST_TYPES = {
 }
 
 _TAG_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$")
+
+# When a user pushes a single-segment image (e.g. ``registry/myproject:tag``)
+# we map it to ``project_slug=myproject, repo_name=_default``.
+_DEFAULT_REPO = "_default"
 
 
 # ---------------------------------------------------------------------------
@@ -749,3 +756,83 @@ async def cancel_upload_endpoint(
     return Response(status_code=204)
 
 
+# ---------------------------------------------------------------------------
+# Single-segment routes  (e.g. ``/v2/website-staging/blobs/uploads/``)
+#
+# Docker allows repository names with only one path segment. These thin
+# wrappers forward to the two-segment handlers with ``repo_name=_DEFAULT_REPO``.
+# ---------------------------------------------------------------------------
+
+@router.get("/v2/{project_slug}/tags/list")
+async def list_tags_single(
+    project_slug: str, request: Request,
+    n: int = Query(100, ge=1, le=10000), last: str = Query(""),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await list_tags(project_slug, _DEFAULT_REPO, request, n, last, db)
+
+
+@router.head("/v2/{project_slug}/manifests/{reference}")
+@router.get("/v2/{project_slug}/manifests/{reference}")
+async def get_manifest_single(
+    project_slug: str, reference: str, request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    return await get_manifest(project_slug, _DEFAULT_REPO, reference, request, db)
+
+
+@router.put("/v2/{project_slug}/manifests/{reference}")
+async def put_manifest_single(
+    project_slug: str, reference: str, request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    return await put_manifest(project_slug, _DEFAULT_REPO, reference, request, db)
+
+
+@router.delete("/v2/{project_slug}/manifests/{reference}")
+async def delete_manifest_single(
+    project_slug: str, reference: str, request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    return await delete_manifest(project_slug, _DEFAULT_REPO, reference, request, db)
+
+
+@router.head("/v2/{project_slug}/blobs/{digest}")
+@router.get("/v2/{project_slug}/blobs/{digest}")
+async def get_blob_single(
+    project_slug: str, digest: str, request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    return await get_blob(project_slug, _DEFAULT_REPO, digest, request, db)
+
+
+@router.post("/v2/{project_slug}/blobs/uploads")
+@router.post("/v2/{project_slug}/blobs/uploads/")
+async def start_upload_single(
+    project_slug: str, request: Request,
+    mount: str = Query(""), from_repo: str = Query("", alias="from"),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    return await start_upload(project_slug, _DEFAULT_REPO, request, mount, from_repo, db)
+
+
+@router.patch("/v2/{project_slug}/blobs/uploads/{upload_id}")
+async def upload_chunk_single(
+    project_slug: str, upload_id: str, request: Request,
+) -> Response:
+    return await upload_chunk(project_slug, _DEFAULT_REPO, upload_id, request)
+
+
+@router.put("/v2/{project_slug}/blobs/uploads/{upload_id}")
+async def complete_upload_single(
+    project_slug: str, upload_id: str, request: Request,
+    digest: str = Query(...),
+) -> Response:
+    return await complete_upload(project_slug, _DEFAULT_REPO, upload_id, request, digest)
+
+
+@router.delete("/v2/{project_slug}/blobs/uploads/{upload_id}")
+async def cancel_upload_single(
+    project_slug: str, upload_id: str, request: Request,
+) -> Response:
+    return await cancel_upload_endpoint(project_slug, _DEFAULT_REPO, upload_id, request)
