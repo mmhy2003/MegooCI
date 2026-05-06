@@ -276,15 +276,17 @@ async def list_deploy_tokens(
 )
 async def create_deploy_token(
     body: DeployTokenCreate,
-    project_id: uuid.UUID = Query(...),
+    project_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("registry.manage")),
 ) -> dict:
-    project = (await db.execute(
-        select(Project).where(Project.id == project_id)
-    )).scalar_one_or_none()
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Validate the project exists when scoped to a project.
+    if project_id is not None:
+        project = (await db.execute(
+            select(Project).where(Project.id == project_id)
+        )).scalar_one_or_none()
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
 
     if body.scope not in ("pull", "push"):
         raise HTTPException(status_code=400, detail="Scope must be 'pull' or 'push'")
@@ -297,7 +299,7 @@ async def create_deploy_token(
         expires_at = datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)
 
     dt = RegistryDeployToken(
-        project_id=project_id,
+        project_id=project_id,  # None = global token
         name=body.name,
         token_hash=hashed,
         token_hint=credential_hint(raw_token),
@@ -313,13 +315,13 @@ async def create_deploy_token(
     data["token"] = raw_token
     return data
 
-
-@router.delete("/deploy-tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.patch("/deploy-tokens/{token_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_deploy_token(
     token_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(require_permission("registry.manage")),
 ) -> None:
+    """Soft-revoke: deactivates the token but keeps the record for auditing."""
     result = await db.execute(
         select(RegistryDeployToken).where(RegistryDeployToken.id == token_id)
     )
@@ -327,6 +329,23 @@ async def revoke_deploy_token(
     if dt is None:
         raise HTTPException(status_code=404)
     dt.is_active = False
+    await db.flush()
+
+
+@router.delete("/deploy-tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_deploy_token(
+    token_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_permission("registry.manage")),
+) -> None:
+    """Hard-delete: permanently removes the token from the database."""
+    result = await db.execute(
+        select(RegistryDeployToken).where(RegistryDeployToken.id == token_id)
+    )
+    dt = result.scalar_one_or_none()
+    if dt is None:
+        raise HTTPException(status_code=404)
+    await db.delete(dt)
     await db.flush()
 
 

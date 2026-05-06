@@ -40,11 +40,27 @@ definitions in YAML for the MegooCI platform.
 
 ### docker_login — Authenticate with a container registry
 ```yaml
+# Option 1: User credentials via secrets
 - docker_login:
     registry: ghcr.io
     username: ${{ secrets.GHCR_USER }}
     password: ${{ secrets.GHCR_TOKEN }}
+
+# Option 2: MegooCI registry deploy token
+# Create a global deploy token under Registry → Deploy Tokens.
+# Store the token value as a secret (e.g. REGISTRY_TOKEN).
+- docker_login:
+    registry: megooci-registry.example.com
+    username: deploy-token
+    password: ${{ secrets.REGISTRY_TOKEN }}
 ```
+
+Authentication options:
+1. **User credentials** — standard username/password stored as secrets.
+2. **Deploy tokens** — created under Container Registry → Deploy Tokens. \
+Deploy tokens can be **global** (access all projects) or scoped to a single \
+project. The username is always the literal string `deploy-token` and the \
+password is the token value. Store the token in a secret for safety.
 
 ### docker_build — Build a Docker image
 ```yaml

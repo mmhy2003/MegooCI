@@ -5,6 +5,8 @@ Supports:
 - stages with sequential steps
 - run commands (shell)
 - docker_login / docker_build / docker_push
+  (docker_login supports both user credentials via secrets and deploy tokens;
+   deploy tokens use the fixed username 'deploy-token' and a token value)
 - git_clone / git_pull / git_push
 - ssh_exec (remote commands)
 - wait_webhook / wait_input (pipeline gates)

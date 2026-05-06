@@ -349,6 +349,16 @@ func buildDockerPushCmd(cfg map[string]interface{}) string {
 	return result
 }
 
+// buildDockerLoginCmd constructs a shell command for `docker login`.
+//
+// Supports two authentication modes:
+//  1. User credentials — username and password provided via ${{ secrets.X }}.
+//  2. Deploy tokens — the fixed username "deploy-token" and a token value
+//     created under Container Registry → Deploy Tokens (can be global or
+//     project-scoped).
+//
+// If either credential is empty the secret interpolation likely failed
+// (typo, wrong scope, or secret not created).
 func buildDockerLoginCmd(cfg map[string]interface{}) string {
 	user := configStr(cfg, "username")
 	pw := configStr(cfg, "password")

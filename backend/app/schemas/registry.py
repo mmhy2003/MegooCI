@@ -79,7 +79,7 @@ class DeployTokenResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None
     name: str
     token_hint: str
     scope: str

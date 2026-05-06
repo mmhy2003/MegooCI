@@ -122,13 +122,16 @@ export default function RegistryPage() {
   };
 
   const handleCreateToken = async () => {
-    if (!tokenName.trim() || !tokenProjectId) return;
+    if (!tokenName.trim()) return;
     try {
-      const created = await registryApi.createDeployToken(tokenProjectId, {
-        name: tokenName.trim(),
-        scope: tokenScope,
-        expires_in_days: tokenExpiryDays ? parseInt(tokenExpiryDays) : undefined,
-      });
+      const created = await registryApi.createDeployToken(
+        {
+          name: tokenName.trim(),
+          scope: tokenScope,
+          expires_in_days: tokenExpiryDays ? parseInt(tokenExpiryDays) : undefined,
+        },
+        tokenProjectId || null,  // empty string → null → global token
+      );
       setCreatedToken(created);
       toast.success("Deploy token created");
       loadData();
@@ -140,7 +143,7 @@ export default function RegistryPage() {
   const handleRevokeToken = async (token: DeployToken) => {
     const ok = await confirm({
       title: "Revoke deploy token?",
-      description: `"${token.name}" will be immediately disabled.`,
+      description: `"${token.name}" will be immediately disabled but kept for auditing.`,
       confirmText: "Revoke",
       tone: "destructive",
     });
@@ -151,6 +154,23 @@ export default function RegistryPage() {
       loadData();
     } catch {
       toast.error("Failed to revoke token");
+    }
+  };
+
+  const handleDeleteToken = async (token: DeployToken) => {
+    const ok = await confirm({
+      title: "Delete deploy token?",
+      description: `"${token.name}" will be permanently removed. This action cannot be undone.`,
+      confirmText: "Delete",
+      tone: "destructive",
+    });
+    if (!ok) return;
+    try {
+      await registryApi.deleteDeployToken(token.id);
+      toast.success("Token deleted");
+      loadData();
+    } catch {
+      toast.error("Failed to delete token");
     }
   };
 
@@ -356,7 +376,7 @@ export default function RegistryPage() {
                   setCreatedToken(null);
                   setTokenName("");
                   setTokenScope("pull");
-                  setTokenProjectId(projects[0]?.id ?? "");
+                  setTokenProjectId("");
                   setTokenExpiryDays("");
                 }}>
                   <Plus className="h-4 w-4 mr-2" />
@@ -389,9 +409,12 @@ export default function RegistryPage() {
                               {dt.is_active ? "Active" : "Revoked"}
                             </Badge>
                             <Badge variant="outline">{dt.scope}</Badge>
+                            {!dt.project_id && (
+                              <Badge variant="secondary">Global</Badge>
+                            )}
                           </div>
                           <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                            <span>Project: {project?.name ?? dt.project_id}</span>
+                            <span>{dt.project_id ? `Project: ${project?.name ?? dt.project_id}` : "Global (all projects)"}</span>
                             <span>Hint: ...{dt.token_hint}</span>
                             {dt.expires_at && (
                               <span>Expires {formatDistanceToNow(new Date(dt.expires_at), { addSuffix: true })}</span>
@@ -401,16 +424,28 @@ export default function RegistryPage() {
                             )}
                           </div>
                         </div>
-                        {canManage && dt.is_active && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleRevokeToken(dt)}
-                            title="Revoke token"
-                          >
-                            <ShieldOff className="h-4 w-4 text-destructive" />
-                          </Button>
-                        )}
+                        <div className="flex items-center gap-1 shrink-0 ml-4">
+                          {canManage && dt.is_active && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRevokeToken(dt)}
+                              title="Revoke token"
+                            >
+                              <ShieldOff className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
+                          {canManage && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteToken(dt)}
+                              title="Delete token"
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
+                        </div>
                       </CardContent>
                     </Card>
                   );
@@ -456,13 +491,19 @@ export default function RegistryPage() {
                       />
                     </div>
                     <div>
-                      <label className="text-sm font-medium">Project</label>
+                      <label className="text-sm font-medium">Project (optional)</label>
                       <Select
                         value={tokenProjectId}
                         onChange={(e) => setTokenProjectId(e.target.value)}
-                        options={projects.map((p) => ({ value: p.id, label: p.name }))}
-                        placeholder="Select project"
+                        options={[
+                          { value: "", label: "Global (all projects)" },
+                          ...projects.map((p) => ({ value: p.id, label: p.name })),
+                        ]}
+                        placeholder="Global (all projects)"
                       />
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        Leave as global to grant access across all registry projects.
+                      </p>
                     </div>
                     <div>
                       <label className="text-sm font-medium">Scope</label>
@@ -488,7 +529,7 @@ export default function RegistryPage() {
                       <Button variant="outline" onClick={() => setTokenDialogOpen(false)}>
                         Cancel
                       </Button>
-                      <Button onClick={handleCreateToken} disabled={!tokenName.trim() || !tokenProjectId}>
+                      <Button onClick={handleCreateToken} disabled={!tokenName.trim()}>
                         Create
                       </Button>
                     </DialogFooter>

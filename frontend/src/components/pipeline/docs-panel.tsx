@@ -69,11 +69,20 @@ stages:
     title: "Docker Login",
     icon: <Container className="h-4 w-4" />,
     description:
-      "Authenticate with a container registry before pushing/pulling images.",
-    yaml: `- docker_login:
+      "Authenticate with a container registry before pushing/pulling images. You can use user credentials via secrets, or use a registry deploy token (created under Container Registry → Deploy Tokens). Deploy tokens use the fixed username 'deploy-token'.",
+    yaml: `# Option 1: User credentials via secrets
+- docker_login:
     registry: ghcr.io
     username: \${{ secrets.GHCR_USER }}
-    password: \${{ secrets.GHCR_TOKEN }}`,
+    password: \${{ secrets.GHCR_TOKEN }}
+
+# Option 2: MegooCI registry deploy token
+# Create a global deploy token under Registry → Deploy Tokens.
+# Store the token value as a secret (e.g. REGISTRY_TOKEN).
+- docker_login:
+    registry: megooci-registry.example.com
+    username: deploy-token
+    password: \${{ secrets.REGISTRY_TOKEN }}`,
   },
   {
     id: "docker_build",

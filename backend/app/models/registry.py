@@ -131,8 +131,9 @@ class RegistryDeployToken(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    project_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"),
+        index=True, nullable=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -152,7 +153,7 @@ class RegistryDeployToken(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    project: Mapped["Project"] = relationship()  # noqa: F821
+    project: Mapped["Project | None"] = relationship()  # noqa: F821
 
     def __repr__(self) -> str:
         return f"<RegistryDeployToken {self.name} ({self.scope})>"

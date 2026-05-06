@@ -1323,7 +1323,7 @@ export interface ContainerTag {
 
 export interface DeployToken {
   id: string;
-  project_id: string;
+  project_id: string | null;
   name: string;
   token_hint: string;
   scope: string;
@@ -1418,13 +1418,18 @@ export const registryApi = {
     );
   },
 
-  createDeployToken: (projectId: string, data: { name: string; scope: string; expires_in_days?: number }) =>
-    fetchApi<DeployTokenCreated>(
-      `/api/v1/registry/deploy-tokens?project_id=${projectId}`,
+  createDeployToken: (data: { name: string; scope: string; expires_in_days?: number }, projectId?: string | null) => {
+    const qs = projectId ? `?project_id=${projectId}` : "";
+    return fetchApi<DeployTokenCreated>(
+      `/api/v1/registry/deploy-tokens${qs}`,
       { method: "POST", body: JSON.stringify(data) },
-    ),
+    );
+  },
 
   revokeDeployToken: (tokenId: string) =>
+    fetchApi<void>(`/api/v1/registry/deploy-tokens/${tokenId}/revoke`, { method: "PATCH" }),
+
+  deleteDeployToken: (tokenId: string) =>
     fetchApi<void>(`/api/v1/registry/deploy-tokens/${tokenId}`, { method: "DELETE" }),
 
   listEvents: (params?: { repository_id?: string; skip?: number; limit?: number }) => {
