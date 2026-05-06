@@ -398,7 +398,7 @@ export default function RegistryPage() {
             ) : (
               <div className="space-y-3">
                 {deployTokens.map((dt) => {
-                  const project = projectMap.get(dt.project_id);
+                  const project = dt.project_id ? projectMap.get(dt.project_id) : undefined;
                   return (
                     <Card key={dt.id}>
                       <CardContent className="flex items-center justify-between py-4">
