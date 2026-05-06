@@ -527,6 +527,10 @@ export function ProjectIntegrations({ projectId }: { projectId: string }) {
   >(null);
   const [manualMode, setManualMode] = React.useState(false);
 
+  // Branch picker state — fetched when a repo is selected
+  const [providerBranches, setProviderBranches] = React.useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = React.useState(false);
+
   // Webhook setup drawer state
   const [webhookRepo, setWebhookRepo] = React.useState<ProjectRepository | null>(
     null,
@@ -652,6 +656,21 @@ export function ProjectIntegrations({ projectId }: { projectId: string }) {
       // but only overwrite if the user hasn't typed anything custom.
       display_name: p.display_name || repo.full_name,
     }));
+
+    // Fetch branches for the selected repo
+    setProviderBranches([]);
+    setBranchesLoading(true);
+    gitConnectionsApi
+      .branches(linkForm.connection_id, repo.full_name)
+      .then((res) => {
+        if (res.ok) {
+          setProviderBranches(res.branches);
+        }
+      })
+      .catch(() => {
+        // Silently fall back to manual input
+      })
+      .finally(() => setBranchesLoading(false));
   }
 
   async function handleLink(e: React.FormEvent) {
@@ -990,16 +1009,38 @@ export function ProjectIntegrations({ projectId }: { projectId: string }) {
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Default branch</label>
-                  <Input
-                    placeholder="main"
-                    value={linkForm.default_branch}
-                    onChange={(e) =>
-                      setLinkForm((p) => ({
-                        ...p,
-                        default_branch: e.target.value,
-                      }))
-                    }
-                  />
+                  {branchesLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      Loading branches…
+                    </div>
+                  ) : providerBranches.length > 0 ? (
+                    <Select
+                      value={linkForm.default_branch}
+                      onChange={(e) =>
+                        setLinkForm((p) => ({
+                          ...p,
+                          default_branch: e.target.value,
+                        }))
+                      }
+                      options={providerBranches.map((b) => ({
+                        value: b,
+                        label: b,
+                      }))}
+                      placeholder="Select a branch"
+                    />
+                  ) : (
+                    <Input
+                      placeholder="main"
+                      value={linkForm.default_branch}
+                      onChange={(e) =>
+                        setLinkForm((p) => ({
+                          ...p,
+                          default_branch: e.target.value,
+                        }))
+                      }
+                    />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">

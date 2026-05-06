@@ -79,6 +79,13 @@ class ProviderRepositoryList(BaseModel):
     repositories: list[ProviderRepositoryInfo]
 
 
+class ProviderBranchList(BaseModel):
+    ok: bool
+    status: str           # "ok" | "failed" | "unsupported"
+    detail: str
+    branches: list[str]
+
+
 # ----------------------------------------------------------------------------
 # ProjectRepository
 # ----------------------------------------------------------------------------

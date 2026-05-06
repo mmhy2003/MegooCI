@@ -71,6 +71,14 @@ class RepositoryListResult:
     repositories: list[ProviderRepository]
 
 
+@dataclass
+class BranchListResult:
+    ok: bool
+    status: str               # "ok" | "failed" | "unsupported"
+    detail: str
+    branches: list[str]
+
+
 # ----------------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------------
@@ -242,6 +250,50 @@ class GitHubAdapter:
             repositories=repos,
         )
 
+    @staticmethod
+    async def list_branches(
+        base_url: str | None, token: str, repo_full_name: str
+    ) -> BranchListResult:
+        """List branches for a specific repository (owner/repo)."""
+        api = (base_url or "https://api.github.com").rstrip("/")
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "MegooCI",
+        }
+        branches: list[str] = []
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                page = 1
+                while True:
+                    r = await client.get(
+                        f"{api}/repos/{repo_full_name}/branches",
+                        headers=headers,
+                        params={"per_page": 100, "page": page},
+                    )
+                    if r.status_code >= 400:
+                        return BranchListResult(
+                            ok=False, status="failed",
+                            detail=f"GitHub returned HTTP {r.status_code}",
+                            branches=[],
+                        )
+                    data = r.json()
+                    if not isinstance(data, list) or not data:
+                        break
+                    branches.extend(item.get("name", "") for item in data)
+                    if len(data) < 100:
+                        break
+                    page += 1
+        except httpx.HTTPError as exc:
+            return BranchListResult(
+                ok=False, status="failed", detail=f"HTTP error: {exc}", branches=[],
+            )
+        return BranchListResult(
+            ok=True, status="ok",
+            detail=f"Listed {len(branches)} branches", branches=branches,
+        )
+
 
 # ----------------------------------------------------------------------------
 # GitLab
@@ -376,6 +428,47 @@ class GitLabAdapter:
             status="ok",
             detail=f"Listed {len(repos)} repositories",
             repositories=repos,
+        )
+
+    @staticmethod
+    async def list_branches(
+        base_url: str | None, token: str, repo_full_name: str
+    ) -> BranchListResult:
+        """List branches for a GitLab project identified by path_with_namespace."""
+        import urllib.parse
+        base = (base_url or "https://gitlab.com").rstrip("/")
+        encoded = urllib.parse.quote(repo_full_name, safe="")
+        headers = {"PRIVATE-TOKEN": token, "User-Agent": "MegooCI"}
+        branches: list[str] = []
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                page = 1
+                while True:
+                    r = await client.get(
+                        f"{base}/api/v4/projects/{encoded}/repository/branches",
+                        headers=headers,
+                        params={"per_page": 100, "page": page},
+                    )
+                    if r.status_code >= 400:
+                        return BranchListResult(
+                            ok=False, status="failed",
+                            detail=f"GitLab returned HTTP {r.status_code}",
+                            branches=[],
+                        )
+                    data = r.json()
+                    if not isinstance(data, list) or not data:
+                        break
+                    branches.extend(item.get("name", "") for item in data)
+                    if len(data) < 100:
+                        break
+                    page += 1
+        except httpx.HTTPError as exc:
+            return BranchListResult(
+                ok=False, status="failed", detail=f"HTTP error: {exc}", branches=[],
+            )
+        return BranchListResult(
+            ok=True, status="ok",
+            detail=f"Listed {len(branches)} branches", branches=branches,
         )
 
 
@@ -518,6 +611,16 @@ class GenericGitAdapter:
                 "connections. Paste the repository URL directly."
             ),
             repositories=[],
+        )
+
+    @staticmethod
+    async def list_branches(
+        base_url: str | None, token: str, repo_full_name: str
+    ) -> BranchListResult:
+        return BranchListResult(
+            ok=False, status="unsupported",
+            detail="Branch listing is not supported for generic Git connections.",
+            branches=[],
         )
 
 

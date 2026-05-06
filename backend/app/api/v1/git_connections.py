@@ -24,10 +24,11 @@ from app.schemas.git_integration import (
     ConnectionResponse,
     ConnectionTestResult,
     ConnectionUpdate,
+    ProviderBranchList,
     ProviderRepositoryInfo,
     ProviderRepositoryList,
 )
-from app.services.git_providers import ValidationResult, get_adapter
+from app.services.git_providers import BranchListResult, ValidationResult, get_adapter
 
 router = APIRouter()
 
@@ -297,4 +298,49 @@ async def list_provider_repositories(
             )
             for r in result.repositories
         ],
+    )
+
+
+@router.get(
+    "/{connection_id}/branches", response_model=ProviderBranchList
+)
+async def list_provider_branches(
+    connection_id: uuid.UUID,
+    repo: str = Query(..., description="Repository full name (e.g. owner/repo)"),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_permission("projects.manage")),
+) -> ProviderBranchList:
+    """List branches for a repository accessible via this connection's PAT."""
+    connection = await db.get(GitProviderConnection, connection_id)
+    if connection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found"
+        )
+
+    try:
+        adapter = get_adapter(connection.provider_type)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+
+    settings = get_settings()
+    try:
+        token = decrypt_secret(
+            connection.encrypted_credential, settings.MEGOOCI_SECRET_KEY
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unable to decrypt stored credential: {exc}",
+        )
+
+    result: BranchListResult = await adapter.list_branches(
+        connection.base_url, token, repo
+    )
+    return ProviderBranchList(
+        ok=result.ok,
+        status=result.status,
+        detail=result.detail,
+        branches=result.branches,
     )

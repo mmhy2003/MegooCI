@@ -786,6 +786,13 @@ export interface ProviderRepositoryList {
   repositories: ProviderRepositoryInfo[];
 }
 
+export interface ProviderBranchList {
+  ok: boolean;
+  status: string;
+  detail: string;
+  branches: string[];
+}
+
 export const gitConnectionsApi = {
   list: () => fetchApi<GitConnection[]>("/api/v1/git/connections/"),
 
@@ -816,6 +823,11 @@ export const gitConnectionsApi = {
   repositories: (id: string, limit = 100) =>
     fetchApi<ProviderRepositoryList>(
       `/api/v1/git/connections/${id}/repositories?limit=${limit}`,
+    ),
+
+  branches: (id: string, repoFullName: string) =>
+    fetchApi<ProviderBranchList>(
+      `/api/v1/git/connections/${id}/branches?repo=${encodeURIComponent(repoFullName)}`,
     ),
 };
 
