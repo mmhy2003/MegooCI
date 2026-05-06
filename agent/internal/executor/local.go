@@ -350,11 +350,30 @@ func buildDockerPushCmd(cfg map[string]interface{}) string {
 }
 
 func buildDockerLoginCmd(cfg map[string]interface{}) string {
-	args := "docker login"
-	if user := configStr(cfg, "username"); user != "" {
-		args += " -u " + shellQuote(user)
+	user := configStr(cfg, "username")
+	pw := configStr(cfg, "password")
+
+	// Guard: --password-stdin requires --username. If either credential
+	// is empty the secret interpolation likely failed (typo, wrong scope,
+	// or secret not created). Emit a clear diagnostic instead of letting
+	// Docker produce the confusing "--password-stdin requires --username"
+	// error.
+	if user == "" || pw == "" {
+		var missing []string
+		if user == "" {
+			missing = append(missing, "username")
+		}
+		if pw == "" {
+			missing = append(missing, "password")
+		}
+		return fmt.Sprintf(
+			"echo 'ERROR: docker_login is missing required field(s): %s. "+
+				"Verify that the referenced secrets exist and are in scope for this pipeline.' && exit 1",
+			strings.Join(missing, ", "),
+		)
 	}
-	args += " --password-stdin"
+
+	args := "docker login -u " + shellQuote(user) + " --password-stdin"
 
 	// Prefer the internal registry address (injected by the backend)
 	// so auth goes through the Docker network directly.  Falls back to
@@ -366,9 +385,7 @@ func buildDockerLoginCmd(cfg map[string]interface{}) string {
 	if reg != "" {
 		args += " " + shellQuote(reg)
 	}
-	if pw := configStr(cfg, "password"); pw != "" {
-		args = "echo " + shellQuote(pw) + " | " + args
-	}
+	args = "echo " + shellQuote(pw) + " | " + args
 	return args
 }
 

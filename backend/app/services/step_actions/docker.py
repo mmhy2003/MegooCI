@@ -114,10 +114,25 @@ class DockerLoginHandler(StepActionHandler):
         username = config.get("username", "")
         password = config.get("password", "")
 
-        args = ["docker", "login"]
-        if username:
-            args += ["-u", username]
-        args += ["--password-stdin"]
+        # Guard: both username and password are required. If either is
+        # empty it usually means the ${{ secrets.X }} placeholder was not
+        # resolved (typo, wrong scope, or secret not created).
+        missing = []
+        if not username:
+            missing.append("username")
+        if not password:
+            missing.append("password")
+        if missing:
+            msg = (
+                f"docker_login is missing required field(s): {', '.join(missing)}. "
+                "Verify that the referenced secrets exist and are in scope "
+                "for this pipeline.\n"
+            )
+            yield LogLine(stream="stderr", content=msg)
+            yield StepResult(exit_code=1, status="failed", error=msg.strip())
+            return
+
+        args = ["docker", "login", "-u", username, "--password-stdin"]
         if registry:
             args.append(registry)
 
@@ -126,8 +141,10 @@ class DockerLoginHandler(StepActionHandler):
 
     def validate_config(self, config: dict[str, Any]) -> list[str]:
         errors: list[str] = []
-        if not config.get("password") and not config.get("username"):
-            errors.append("docker_login requires at least 'username' and 'password'")
+        if not config.get("username"):
+            errors.append("docker_login requires 'username'")
+        if not config.get("password"):
+            errors.append("docker_login requires 'password'")
         return errors
 
 
