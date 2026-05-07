@@ -176,6 +176,9 @@ async def _enqueue_matching_builds(
     Returns the list of newly-created build ids (to be dispatched to Celery
     after the DB commit).
     """
+    from app.models.build import Stage, Step
+    from app.services.pipeline_compiler import parse_yaml_pipeline, compile_to_build_graph
+
     result = await db.execute(
         select(Pipeline).where(
             Pipeline.project_id == repo.project_id,
@@ -218,6 +221,44 @@ async def _enqueue_matching_builds(
         )
         db.add(build)
         await db.flush()
+
+        # ── Compile YAML → stages/steps (same as manual trigger) ──
+        if pipeline.yaml_content:
+            try:
+                pipeline_def = parse_yaml_pipeline(pipeline.yaml_content)
+                stage_defs = compile_to_build_graph(pipeline_def)
+
+                for sort_order, stage_def in enumerate(stage_defs):
+                    stage = Stage(
+                        build_id=build.id,
+                        name=stage_def["name"],
+                        status="pending",
+                        sort_order=sort_order,
+                        artifact_paths=stage_def.get("artifacts"),
+                    )
+                    db.add(stage)
+                    await db.flush()
+
+                    for step_order, step_def in enumerate(stage_def.get("steps", [])):
+                        step_type = step_def.get("step_type", "run")
+                        config = step_def.get("config", {})
+                        command = config.get("command") if step_type == "run" else None
+
+                        step = Step(
+                            stage_id=stage.id,
+                            name=step_def.get("name", f"step-{step_order}"),
+                            step_type=step_type,
+                            command=command,
+                            config_json=config if config else None,
+                            status="pending",
+                            sort_order=step_order,
+                        )
+                        db.add(step)
+            except Exception:
+                # If YAML parsing fails, the build will still be created
+                # but with no stages — the executor will mark it as failed.
+                pass
+
         new_build_ids.append(build.id)
 
     return new_build_ids
