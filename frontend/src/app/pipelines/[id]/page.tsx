@@ -549,40 +549,8 @@ export default function PipelineDetailPage() {
         {/* Configuration tab */}
         {activeTab === "configuration" && (
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+            <CardHeader>
               <CardTitle className="text-base">Pipeline Definition</CardTitle>
-              {!editing ? (
-                canManagePipelines && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setEditing(true)}
-                  >
-                    <Pencil className="mr-1.5 h-4 w-4" />
-                    Edit
-                  </Button>
-                )
-              ) : (
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setEditing(false);
-                      setEditContent(pipeline.yaml_content || "");
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={saving}
-                    onClick={handleSaveConfig}
-                  >
-                    {saving ? "Saving…" : "Save"}
-                  </Button>
-                </div>
-              )}
             </CardHeader>
             <CardContent>
               <PipelineEditor
@@ -597,6 +565,19 @@ export default function PipelineDetailPage() {
                 onToggleDocs={() => setDocsOpen((prev) => !prev)}
                 varsOpen={varsOpen}
                 onToggleVars={() => setVarsOpen((prev) => !prev)}
+                onSave={editing && !saving ? handleSaveConfig : undefined}
+                onToggleEdit={canManagePipelines ? () => {
+                  if (editing) {
+                    // If already editing, save
+                    handleSaveConfig();
+                  } else {
+                    setEditing(true);
+                  }
+                } : undefined}
+                onCancelEdit={editing ? () => {
+                  setEditing(false);
+                  setEditContent(pipeline.yaml_content || "");
+                } : undefined}
               />
             </CardContent>
           </Card>

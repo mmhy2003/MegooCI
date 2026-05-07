@@ -259,6 +259,10 @@ export default function NewPipelinePage() {
                 onToggleDocs={() => setDocsOpen((prev) => !prev)}
                 varsOpen={varsOpen}
                 onToggleVars={() => setVarsOpen((prev) => !prev)}
+                onSave={!isSubmitting ? () => {
+                  // Programmatically submit the parent form
+                  document.querySelector<HTMLFormElement>("form")?.requestSubmit();
+                } : undefined}
               />
 
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">

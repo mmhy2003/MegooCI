@@ -2,9 +2,35 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { BookOpen, Sparkles, Variable } from "lucide-react";
+import { BookOpen, Pencil, Sparkles, Variable } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { YamlEditor } from "@/components/ui/yaml-editor";
+
+// ── Shortcut helpers ────────────────────────────────────────────────────
+
+function useIsMac() {
+  const [isMac, setIsMac] = React.useState(false);
+  React.useEffect(() => {
+    setIsMac(navigator.platform?.toUpperCase().includes("MAC") ?? false);
+  }, []);
+  return isMac;
+}
+
+/** Tiny pill that renders a keyboard shortcut hint. */
+function Kbd({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <kbd
+      className={cn(
+        "hidden md:inline-flex items-center rounded border border-border/60 bg-muted/70 px-1 py-px text-[10px] font-mono leading-none text-muted-foreground",
+        className,
+      )}
+    >
+      {children}
+    </kbd>
+  );
+}
+
+// ── Props ───────────────────────────────────────────────────────────────
 
 interface PipelineEditorProps {
   value: string;
@@ -27,7 +53,15 @@ interface PipelineEditorProps {
   varsOpen?: boolean;
   /** Called when the user clicks the Vars toolbar button. */
   onToggleVars?: () => void;
+  /** Called when the user presses Ctrl+S / Cmd+S to save. */
+  onSave?: () => void;
+  /** Called when the user presses Ctrl+Shift+E / Cmd+Shift+E to toggle edit mode. */
+  onToggleEdit?: () => void;
+  /** Called when the user presses Escape to cancel editing. */
+  onCancelEdit?: () => void;
 }
+
+// ── Component ───────────────────────────────────────────────────────────
 
 export function PipelineEditor({
   value,
@@ -42,11 +76,106 @@ export function PipelineEditor({
   onToggleDocs,
   varsOpen = false,
   onToggleVars,
+  onSave,
+  onToggleEdit,
+  onCancelEdit,
 }: PipelineEditorProps) {
+  const isMac = useIsMac();
+  const mod = isMac ? "⌘" : "Ctrl";
+  const alt = isMac ? "⌥" : "Alt";
+
+  // Keep refs so the event handler always sees the latest callbacks
+  // without forcing the effect to re-register.
+  const callbacks = React.useRef({
+    onSave,
+    onToggleDocs,
+    onToggleVars,
+    onToggleAi,
+    onToggleEdit,
+    onCancelEdit,
+  });
+  callbacks.current = {
+    onSave,
+    onToggleDocs,
+    onToggleVars,
+    onToggleAi,
+    onToggleEdit,
+    onCancelEdit,
+  };
+
+  React.useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const modKey = e.ctrlKey || e.metaKey;
+
+      // Ctrl/Cmd + S → Save
+      if (modKey && !e.shiftKey && e.key === "s") {
+        e.preventDefault();
+        callbacks.current.onSave?.();
+        return;
+      }
+
+      // Alt + E → Toggle Edit
+      if (e.altKey && !modKey && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        callbacks.current.onToggleEdit?.();
+        return;
+      }
+
+      // Alt + D → Toggle Docs
+      if (e.altKey && !modKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        callbacks.current.onToggleDocs?.();
+        return;
+      }
+
+      // Alt + V → Toggle Vars
+      if (e.altKey && !modKey && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        callbacks.current.onToggleVars?.();
+        return;
+      }
+
+      // Alt + A → Toggle AI Assistant
+      if (e.altKey && !modKey && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        callbacks.current.onToggleAi?.();
+        return;
+      }
+
+      // Escape → Cancel Edit
+      if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        callbacks.current.onCancelEdit?.();
+        return;
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
     <div className={cn("space-y-2", className)}>
       {/* Toolbar */}
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-between gap-2">
+        {/* Left: edit toggle */}
+        <div className="flex gap-1.5">
+          {onToggleEdit && (
+            <Button
+              type="button"
+              variant={readOnly ? "outline" : "default"}
+              size="sm"
+              onClick={onToggleEdit}
+              className="h-7 gap-1.5 text-xs"
+              title={`Toggle edit mode (${alt}+E)`}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{readOnly ? "Edit" : "Editing"}</span>
+              <Kbd>{alt}E</Kbd>
+            </Button>
+          )}
+        </div>
+
+        {/* Right: panels + save */}
         <div className="flex gap-1.5">
           {onToggleDocs && (
             <Button
@@ -55,9 +184,11 @@ export function PipelineEditor({
               size="sm"
               onClick={onToggleDocs}
               className="h-7 gap-1.5 text-xs"
+              title={`Toggle docs panel (${alt}+D)`}
             >
               <BookOpen className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Docs</span>
+              <Kbd>{alt}D</Kbd>
             </Button>
           )}
           {onToggleVars && (
@@ -67,21 +198,37 @@ export function PipelineEditor({
               size="sm"
               onClick={onToggleVars}
               className="h-7 gap-1.5 text-xs"
+              title={`Toggle variables panel (${alt}+V)`}
             >
               <Variable className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Vars</span>
+              <Kbd>{alt}V</Kbd>
             </Button>
           )}
-          {!readOnly && onToggleAi && (
+          {onToggleAi && (
             <Button
               type="button"
               variant={aiOpen ? "default" : "outline"}
               size="sm"
               onClick={onToggleAi}
               className="h-7 gap-1.5 text-xs"
+              title={`Toggle AI assistant (${alt}+A)`}
             >
               <Sparkles className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">AI Assistant</span>
+              <Kbd>{alt}A</Kbd>
+            </Button>
+          )}
+          {!readOnly && onSave && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={onSave}
+              className="h-7 gap-1.5 text-xs"
+              title={`Save (${mod}+S)`}
+            >
+              <span>Save</span>
+              <Kbd>{mod}S</Kbd>
             </Button>
           )}
         </div>
