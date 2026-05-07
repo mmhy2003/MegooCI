@@ -348,7 +348,7 @@ export default function ProjectDetailPage() {
     }
     setSavingEnv(true);
     try {
-      const updated = await envVarsApi.update(editEnvId, { value: editEnvValue.trim() });
+      const { envVar: updated } = await envVarsApi.update(editEnvId, { value: editEnvValue.trim() });
       setEnvVars((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
       setEditEnvDialogOpen(false);
       toast.success("Variable updated");
