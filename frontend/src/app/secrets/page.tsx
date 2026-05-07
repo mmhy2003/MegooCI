@@ -14,6 +14,7 @@ import {
   type Project,
   type Secret,
   type EnvVar,
+  type UpdatedPipelineRef,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -80,6 +81,20 @@ export default function SecretsPage() {
   const [editEnvValue, setEditEnvValue] = React.useState("");
   const [editEnvScope, setEditEnvScope] = React.useState(GLOBAL_SCOPE);
   const [savingEnv, setSavingEnv] = React.useState(false);
+
+  /** Show a toast summarising which pipelines were auto-updated. */
+  function notifyPipelineUpdates(
+    updatedPipelines: UpdatedPipelineRef[],
+    kind: "secret" | "variable",
+  ) {
+    if (updatedPipelines.length === 0) return;
+    const total = updatedPipelines.reduce((s, p) => s + p.occurrences, 0);
+    const names = updatedPipelines.map((p) => p.pipeline_name).join(", ");
+    toast.success(
+      `Auto-updated ${total} reference${total !== 1 ? "s" : ""} in ${updatedPipelines.length} pipeline${updatedPipelines.length !== 1 ? "s" : ""}: ${names}`,
+      { duration: 6000, description: `All $\{{ ${kind === "secret" ? "secrets" : "env"}.* }} placeholders have been renamed in the pipeline YAML.` },
+    );
+  }
 
   async function loadData() {
     try {
@@ -187,9 +202,10 @@ export default function SecretsPage() {
     }
     setSavingSec(true);
     try {
-      await secretsApi.update(editSecretId, updates);
+      const { updatedPipelines } = await secretsApi.update(editSecretId, updates);
       setEditSecretDialogOpen(false);
       toast.success("Secret updated");
+      notifyPipelineUpdates(updatedPipelines, "secret");
       loadData();
     } catch {
       toast.error("Failed to update secret");
@@ -278,8 +294,11 @@ export default function SecretsPage() {
       toast.error("Value is required");
       return;
     }
-    const updates: { value?: string; scope_type?: string; scope_id?: string | null } = {};
+    const updates: { value?: string; name?: string; scope_type?: string; scope_id?: string | null } = {};
     const original = allEnvVars.find((v) => v.id === editEnvId);
+    if (editEnvName.trim() && editEnvName !== original?.name) {
+      updates.name = editEnvName.trim();
+    }
     if (editEnvValue.trim() !== original?.value) {
       updates.value = editEnvValue.trim();
     }
@@ -296,9 +315,10 @@ export default function SecretsPage() {
     }
     setSavingEnv(true);
     try {
-      await envVarsApi.update(editEnvId, updates);
+      const { updatedPipelines } = await envVarsApi.update(editEnvId, updates);
       setEditEnvDialogOpen(false);
       toast.success("Variable updated");
+      notifyPipelineUpdates(updatedPipelines, "variable");
       loadData();
     } catch {
       toast.error("Failed to update variable");
@@ -530,6 +550,7 @@ export default function SecretsPage() {
               <DialogDescription>
                 Update the name or replace the encrypted value.
                 Leave the value blank to keep the existing one.
+                Renaming will automatically update all pipeline YAML references.
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleEditSecret} className="space-y-4">
@@ -740,8 +761,8 @@ export default function SecretsPage() {
             <DialogHeader>
               <DialogTitle>Edit Variable</DialogTitle>
               <DialogDescription>
-                Update the value for{" "}
-                <code className="font-mono text-foreground">{editEnvName}</code>.
+                Update the name or value. Renaming will automatically update
+                all pipeline YAML references.
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleEditEnv} className="space-y-4">
@@ -755,7 +776,11 @@ export default function SecretsPage() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Name</label>
-                <Input value={editEnvName} readOnly className="bg-muted" />
+                <Input
+                  placeholder="ENV_NAME"
+                  value={editEnvName}
+                  onChange={(e) => setEditEnvName(e.target.value)}
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Value</label>

@@ -131,6 +131,39 @@ async function fetchApi<T>(
   return res.json();
 }
 
+/**
+ * Like fetchApi but also returns the response headers.
+ * Used when the backend includes metadata (e.g. X-Updated-Pipelines).
+ */
+async function fetchApiWithHeaders<T>(
+  endpoint: string,
+  options: RequestInit = {},
+): Promise<{ data: T; headers: Headers }> {
+  const isAuthEndpoint = endpoint.startsWith("/api/v1/auth/");
+  let res = await performFetch(endpoint, options, getAccessToken());
+
+  if (res.status === 401 && !isAuthEndpoint) {
+    const newAccess = await refreshAccessTokenOnce();
+    if (newAccess) {
+      res = await performFetch(endpoint, options, newAccess);
+    }
+  }
+
+  if (!res.ok) {
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = await res.text();
+    }
+    throw new ApiError(res.status, body, `API error: ${res.status}`);
+  }
+
+  if (res.status === 204) return { data: undefined as T, headers: res.headers };
+  const data = await res.json();
+  return { data, headers: res.headers };
+}
+
 // ------------------------------------------------------------------
 // Auth
 // ------------------------------------------------------------------
@@ -498,6 +531,24 @@ export interface CreateSecretRequest {
   value: string;
 }
 
+/** Info about a pipeline that was auto-updated when a secret/variable was renamed. */
+export interface UpdatedPipelineRef {
+  pipeline_id: string;
+  pipeline_name: string;
+  occurrences: number;
+}
+
+/** Parse the X-Updated-Pipelines header from a response. */
+function parseUpdatedPipelines(headers: Headers): UpdatedPipelineRef[] {
+  const raw = headers.get("x-updated-pipelines");
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as UpdatedPipelineRef[];
+  } catch {
+    return [];
+  }
+}
+
 export const secretsApi = {
   list: (scopeType: string, scopeId?: string) => {
     const qs = new URLSearchParams({ scope_type: scopeType });
@@ -511,11 +562,13 @@ export const secretsApi = {
       body: JSON.stringify(data),
     }),
 
-  update: (secretId: string, data: { name?: string; value?: string; scope_type?: string; scope_id?: string | null }) =>
-    fetchApi<Secret>(`/api/v1/secrets-env/secrets/${secretId}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
+  update: async (secretId: string, data: { name?: string; value?: string; scope_type?: string; scope_id?: string | null }) => {
+    const { data: secret, headers } = await fetchApiWithHeaders<Secret>(
+      `/api/v1/secrets-env/secrets/${secretId}`,
+      { method: "PUT", body: JSON.stringify(data) },
+    );
+    return { secret, updatedPipelines: parseUpdatedPipelines(headers) };
+  },
 
   delete: (secretId: string) =>
     fetchApi<void>(`/api/v1/secrets-env/secrets/${secretId}`, {
@@ -557,11 +610,13 @@ export const envVarsApi = {
       body: JSON.stringify(data),
     }),
 
-  update: (envVarId: string, data: { value?: string; name?: string; scope_type?: string; scope_id?: string | null }) =>
-    fetchApi<EnvVar>(`/api/v1/secrets-env/env-vars/${envVarId}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
+  update: async (envVarId: string, data: { value?: string; name?: string; scope_type?: string; scope_id?: string | null }) => {
+    const { data: envVar, headers } = await fetchApiWithHeaders<EnvVar>(
+      `/api/v1/secrets-env/env-vars/${envVarId}`,
+      { method: "PUT", body: JSON.stringify(data) },
+    );
+    return { envVar, updatedPipelines: parseUpdatedPipelines(headers) };
+  },
 
   delete: (envVarId: string) =>
     fetchApi<void>(`/api/v1/secrets-env/env-vars/${envVarId}`, {
