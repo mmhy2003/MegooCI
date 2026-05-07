@@ -51,13 +51,19 @@ class Pipeline(Base):
         back_populates="pipelines", foreign_keys=[created_by]
     )
     builds: Mapped[list["Build"]] = relationship(  # noqa: F821
-        back_populates="pipeline"
+        back_populates="pipeline",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     triggers: Mapped[list["Trigger"]] = relationship(  # noqa: F821
-        back_populates="pipeline"
+        back_populates="pipeline",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     webhook_endpoints: Mapped[list["WebhookEndpoint"]] = relationship(  # noqa: F821
-        back_populates="pipeline"
+        back_populates="pipeline",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:

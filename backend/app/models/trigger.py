@@ -15,7 +15,7 @@ class Trigger(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     pipeline_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("pipelines.id")
+        UUID(as_uuid=True), ForeignKey("pipelines.id", ondelete="CASCADE")
     )
     type: Mapped[str] = mapped_column(String(20))
     config_json: Mapped[dict] = mapped_column(JSON)
@@ -42,7 +42,7 @@ class WebhookEndpoint(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     pipeline_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("pipelines.id")
+        UUID(as_uuid=True), ForeignKey("pipelines.id", ondelete="CASCADE")
     )
     slug: Mapped[str] = mapped_column(String(255), unique=True)
     secret_hash: Mapped[str] = mapped_column(String(255))

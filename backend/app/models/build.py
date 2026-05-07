@@ -15,7 +15,7 @@ class Build(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     pipeline_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("pipelines.id")
+        UUID(as_uuid=True), ForeignKey("pipelines.id", ondelete="CASCADE")
     )
     number: Mapped[int] = mapped_column(Integer)
     branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -46,10 +46,12 @@ class Build(Base):
         back_populates="builds", foreign_keys=[triggered_by]
     )
     stages: Mapped[list["Stage"]] = relationship(
-        back_populates="build", order_by="Stage.sort_order"
+        back_populates="build", order_by="Stage.sort_order",
+        cascade="all, delete-orphan", passive_deletes=True,
     )
     artifacts: Mapped[list["Artifact"]] = relationship(  # noqa: F821
-        back_populates="build"
+        back_populates="build",
+        cascade="all, delete-orphan", passive_deletes=True,
     )
 
     def __repr__(self) -> str:
@@ -63,7 +65,7 @@ class Stage(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     build_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("builds.id")
+        UUID(as_uuid=True), ForeignKey("builds.id", ondelete="CASCADE")
     )
     name: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default="pending")
@@ -83,7 +85,8 @@ class Stage(Base):
 
     build: Mapped["Build"] = relationship(back_populates="stages")
     steps: Mapped[list["Step"]] = relationship(
-        back_populates="stage", order_by="Step.sort_order"
+        back_populates="stage", order_by="Step.sort_order",
+        cascade="all, delete-orphan", passive_deletes=True,
     )
 
     def __repr__(self) -> str:
@@ -97,7 +100,7 @@ class Step(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     stage_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("stages.id")
+        UUID(as_uuid=True), ForeignKey("stages.id", ondelete="CASCADE")
     )
     name: Mapped[str] = mapped_column(String(255))
     step_type: Mapped[str] = mapped_column(String(50), default="run")
@@ -121,7 +124,8 @@ class Step(Base):
 
     stage: Mapped["Stage"] = relationship(back_populates="steps")
     log_chunks: Mapped[list["LogChunk"]] = relationship(
-        back_populates="step", order_by="LogChunk.seq"
+        back_populates="step", order_by="LogChunk.seq",
+        cascade="all, delete-orphan", passive_deletes=True,
     )
 
     def __repr__(self) -> str:
@@ -135,7 +139,7 @@ class LogChunk(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     step_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("steps.id")
+        UUID(as_uuid=True), ForeignKey("steps.id", ondelete="CASCADE")
     )
     seq: Mapped[int] = mapped_column(Integer)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))

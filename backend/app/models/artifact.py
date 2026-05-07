@@ -15,7 +15,7 @@ class Artifact(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     build_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("builds.id")
+        UUID(as_uuid=True), ForeignKey("builds.id", ondelete="CASCADE")
     )
     relative_path: Mapped[str] = mapped_column(String(1024))
     size_bytes: Mapped[int] = mapped_column(BigInteger)
