@@ -1,7 +1,8 @@
 """
 Template interpolation for pipeline values.
 
-Replaces ``${{ secrets.NAME }}`` and ``${{ env.NAME }}`` placeholders in
+Replaces ``${{ secrets.NAME }}``, ``${{ env.NAME }}``, ``${{ build.NAME }}``,
+``${{ pipeline.NAME }}``, and ``${{ project.NAME }}`` placeholders in
 strings and recursively in dicts/lists.  Used by the build executor before
 handing config to a step handler.
 """
@@ -20,7 +21,7 @@ from app.core.security import decrypt_secret
 from app.models.secret import EnvVar, Secret
 
 _PLACEHOLDER_RE = re.compile(
-    r"\$\{\{\s*(secrets|env)\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}"
+    r"\$\{\{\s*(secrets|env|build|pipeline|project|megooci)\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}"
 )
 
 
@@ -98,19 +99,27 @@ def interpolate_value(
     value: Any,
     secrets: dict[str, str],
     env: dict[str, str],
+    builtins: dict[str, dict[str, str]] | None = None,
 ) -> Any:
-    """Recursively replace ``${{ secrets.X }}`` and ``${{ env.X }}`` in a value.
+    """Recursively replace ``${{ secrets.X }}``, ``${{ env.X }}``,
+    ``${{ build.X }}``, ``${{ pipeline.X }}``, and ``${{ project.X }}``
+    in a value.
+
+    *builtins* is an optional mapping of namespace → {key: value} for the
+    ``build``, ``pipeline``, and ``project`` namespaces.  Example::
+
+        {"build": {"branch": "main", "number": "42"}, ...}
 
     - Strings are interpolated directly.
     - Dicts/lists are traversed recursively.
     - Other types pass through unchanged.
     """
     if isinstance(value, str):
-        return _interpolate_string(value, secrets, env)
+        return _interpolate_string(value, secrets, env, builtins)
     if isinstance(value, dict):
-        return {k: interpolate_value(v, secrets, env) for k, v in value.items()}
+        return {k: interpolate_value(v, secrets, env, builtins) for k, v in value.items()}
     if isinstance(value, list):
-        return [interpolate_value(v, secrets, env) for v in value]
+        return [interpolate_value(v, secrets, env, builtins) for v in value]
     return value
 
 
@@ -118,6 +127,7 @@ def _interpolate_string(
     text: str,
     secrets: dict[str, str],
     env: dict[str, str],
+    builtins: dict[str, dict[str, str]] | None = None,
 ) -> str:
     def _replace(match: re.Match) -> str:
         namespace = match.group(1)
@@ -126,6 +136,8 @@ def _interpolate_string(
             return secrets.get(key, "")
         if namespace == "env":
             return env.get(key, "")
+        if builtins and namespace in builtins:
+            return builtins[namespace].get(key, "")
         return match.group(0)
 
     return _PLACEHOLDER_RE.sub(_replace, text)
@@ -137,3 +149,4 @@ def mask_secrets_in_log(line: str, secrets: dict[str, str]) -> str:
         if value and value in line:
             line = line.replace(value, "***")
     return line
+

@@ -12,6 +12,7 @@ import {
   Loader2,
   AlertCircle,
   X,
+  Braces,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -75,6 +76,7 @@ export function VarsPanel({ className, projectId, pipelineId, onInsert, onClose 
   const [error, setError] = React.useState<string | null>(null);
   const [secretsOpen, setSecretsOpen] = React.useState(true);
   const [envVarsOpen, setEnvVarsOpen] = React.useState(true);
+  const [builtinsOpen, setBuiltinsOpen] = React.useState(false);
 
   React.useEffect(() => {
     async function load() {
@@ -132,16 +134,16 @@ export function VarsPanel({ className, projectId, pipelineId, onInsert, onClose 
     load();
   }, [projectId, pipelineId]);
 
-  const scopeLabel = (scopeType: string) => {
+  const scopeBadge = (scopeType: string) => {
     switch (scopeType) {
       case "global":
-        return "Global";
+        return { label: "Global", className: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400" };
       case "project":
-        return "Project";
+        return { label: "Project", className: "bg-teal-500/15 text-teal-600 dark:text-teal-400" };
       case "pipeline":
-        return "Pipeline";
+        return { label: "Pipeline", className: "bg-orange-500/15 text-orange-600 dark:text-orange-400" };
       default:
-        return scopeType;
+        return { label: scopeType, className: "bg-muted text-muted-foreground" };
     }
   };
 
@@ -183,6 +185,108 @@ export function VarsPanel({ className, projectId, pipelineId, onInsert, onClose 
       ) : (
         <ScrollArea maxHeight="calc(100vh - 200px)" className="flex-1">
           <div className="divide-y">
+            {/* Built-in Variables Section */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setBuiltinsOpen((p) => !p)}
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-muted/50 transition-colors"
+              >
+                {builtinsOpen ? (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <Braces className="h-4 w-4 shrink-0 text-emerald-500" />
+                <span className="font-medium">
+                  Built-in Variables
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                    (auto-populated)
+                  </span>
+                </span>
+              </button>
+              {builtinsOpen && (
+                <div className="px-4 pb-3">
+                  <p className="mb-2.5 text-[11px] text-muted-foreground leading-relaxed">
+                    These variables are automatically set at build time. Use them
+                    in commands, image tags, notifications, and more.
+                  </p>
+
+                  {/* ── build.* ────────────────── */}
+                  <h5 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Build
+                  </h5>
+                  <div className="space-y-2 mb-3">
+                    {([
+                      ["build.number", "Incremental build number (e.g. 42)"],
+                      ["build.branch", "Git branch that triggered the build"],
+                      ["build.commit", "Full Git commit SHA"],
+                      ["build.id", "Unique build identifier (UUID)"],
+                      ["build.status", "Current build status (running, success, failed)"],
+                      ["build.trigger", "How the build was triggered (manual, push, schedule, webhook)"],
+                      ["build.created_at", "ISO 8601 timestamp when the build was created"],
+                      ["build.started_at", "ISO 8601 timestamp when the build started executing"],
+                    ] as [string, string][]).map(([key, desc]) => (
+                      <div key={key} className="space-y-0.5">
+                        <CopySnippet snippet={`\${{ ${key} }}`} onInsert={onInsert} />
+                        <p className="text-[10px] text-muted-foreground pl-0.5">{desc}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ── pipeline.* ─────────────── */}
+                  <h5 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Pipeline
+                  </h5>
+                  <div className="space-y-2 mb-3">
+                    {([
+                      ["pipeline.name", "Name of the pipeline"],
+                      ["pipeline.id", "Unique pipeline identifier (UUID)"],
+                      ["pipeline.repo_url", "Source repository URL"],
+                      ["pipeline.default_branch", "Default branch configured for this pipeline"],
+                    ] as [string, string][]).map(([key, desc]) => (
+                      <div key={key} className="space-y-0.5">
+                        <CopySnippet snippet={`\${{ ${key} }}`} onInsert={onInsert} />
+                        <p className="text-[10px] text-muted-foreground pl-0.5">{desc}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ── project.* ──────────────── */}
+                  <h5 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Project
+                  </h5>
+                  <div className="space-y-2 mb-3">
+                    {([
+                      ["project.name", "Name of the project"],
+                      ["project.slug", "URL-safe project slug"],
+                      ["project.id", "Unique project identifier (UUID)"],
+                    ] as [string, string][]).map(([key, desc]) => (
+                      <div key={key} className="space-y-0.5">
+                        <CopySnippet snippet={`\${{ ${key} }}`} onInsert={onInsert} />
+                        <p className="text-[10px] text-muted-foreground pl-0.5">{desc}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ── megooci.* ──────────────── */}
+                  <h5 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    MegooCI
+                  </h5>
+                  <div className="space-y-2">
+                    {([
+                      ["megooci.url", "Public URL of this MegooCI instance"],
+                    ] as [string, string][]).map(([key, desc]) => (
+                      <div key={key} className="space-y-0.5">
+                        <CopySnippet snippet={`\${{ ${key} }}`} onInsert={onInsert} />
+                        <p className="text-[10px] text-muted-foreground pl-0.5">{desc}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Secrets Section */}
             <div>
               <button
@@ -215,8 +319,8 @@ export function VarsPanel({ className, projectId, pipelineId, onInsert, onClose 
                         <div key={s.id} className="space-y-1">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-medium">{s.name}</span>
-                            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                              {scopeLabel(s.scope_type)}
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${scopeBadge(s.scope_type).className}`}>
+                              {scopeBadge(s.scope_type).label}
                             </span>
                           </div>
                           <CopySnippet
@@ -269,8 +373,8 @@ export function VarsPanel({ className, projectId, pipelineId, onInsert, onClose 
                                   <Lock className="h-3 w-3 text-amber-500" />
                                 </span>
                               )}
-                              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                                {scopeLabel(e.scope_type)}
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${scopeBadge(e.scope_type).className}`}>
+                                {scopeBadge(e.scope_type).label}
                               </span>
                             </div>
                           </div>
@@ -301,10 +405,14 @@ export function VarsPanel({ className, projectId, pipelineId, onInsert, onClose 
                 <div className="rounded-md bg-muted/50 border p-2 font-mono text-[11px] space-y-1">
                   <p>{"${{ secrets.SECRET_NAME }}"}</p>
                   <p>{"${{ env.VAR_NAME }}"}</p>
+                  <p>{"${{ build.branch }}"}</p>
+                  <p>{"${{ pipeline.name }}"}</p>
+                  <p>{"${{ project.slug }}"}</p>
                 </div>
                 <p className="text-[11px] leading-relaxed">
-                  Secrets are decrypted at runtime and automatically masked in build logs.
-                  Variables from narrower scopes (pipeline → project → global) override broader ones.
+                  Secrets are decrypted at runtime and masked in logs.
+                  Environment variables from narrower scopes (pipeline → project → global) override broader ones.
+                  Built-in variables are populated automatically at build time.
                 </p>
               </div>
             </div>

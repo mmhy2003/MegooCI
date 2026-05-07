@@ -72,7 +72,7 @@ async def execute_build(
             "build_id": str(build_id),
         })
 
-        secrets, env_vars = await _load_scope_context(db, build)
+        secrets, env_vars, builtins = await _load_scope_context(db, build)
 
         build_failed = False
         build_agent_ids: set[uuid.UUID] = set()
@@ -114,6 +114,7 @@ async def execute_build(
                     build=build,
                     secrets=secrets,
                     env_vars=env_vars,
+                    builtins=builtins,
                     db=db,
                     redis_client=redis_client,
                     channel=channel,
@@ -197,6 +198,7 @@ async def _execute_step(
     build: Build,
     secrets: dict[str, str],
     env_vars: dict[str, str],
+    builtins: dict[str, dict[str, str]],
     db: AsyncSession,
     redis_client: aioredis.Redis,
     channel: str,
@@ -217,9 +219,9 @@ async def _execute_step(
     if step.step_type == "run" and not step_config.get("command") and step.command:
         step_config["command"] = step.command
 
-    step_config = interpolate_value(step_config, secrets, env_vars)
+    step_config = interpolate_value(step_config, secrets, env_vars, builtins)
     merged_env = {**env_vars}
-    merged_env = interpolate_value(merged_env, secrets, env_vars)
+    merged_env = interpolate_value(merged_env, secrets, env_vars, builtins)
 
     pipeline = await db.get(Pipeline, build.pipeline_id)
     project_id = pipeline.project_id if pipeline else build.pipeline_id
@@ -383,16 +385,58 @@ async def _run_handler(
 
 async def _load_scope_context(
     db: AsyncSession, build: Build
-) -> tuple[dict[str, str], dict[str, str]]:
-    """Load secrets and env vars scoped to this build's pipeline/project."""
+) -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, str]]]:
+    """Load secrets, env vars, and built-in variables for a build.
+
+    Returns (secrets, env_vars, builtins) where *builtins* has the structure::
+
+        {
+            "build":    {"branch": ..., "number": ..., ...},
+            "pipeline": {"name": ..., "id": ...},
+            "project":  {"name": ..., "slug": ..., "id": ...},
+        }
+    """
     from app.models.pipeline import Pipeline
+    from app.models.project import Project
 
     pipeline = await db.get(Pipeline, build.pipeline_id)
     project_id = pipeline.project_id if pipeline else build.pipeline_id
+    project = await db.get(Project, project_id) if project_id else None
 
     secrets = await load_secrets_for_scope(db, project_id, build.pipeline_id)
     env_vars = await load_env_vars_for_scope(db, project_id, build.pipeline_id)
-    return secrets, env_vars
+
+    settings = get_settings()
+
+    # ── Built-in variables ───────────────────────────────────────────────
+    builtins: dict[str, dict[str, str]] = {
+        "build": {
+            "id": str(build.id),
+            "number": str(build.number),
+            "branch": build.branch or "",
+            "commit": build.commit_sha or "",
+            "status": build.status or "",
+            "trigger": build.trigger_type or "manual",
+            "created_at": build.created_at.isoformat() if build.created_at else "",
+            "started_at": build.started_at.isoformat() if build.started_at else "",
+        },
+        "pipeline": {
+            "id": str(build.pipeline_id),
+            "name": pipeline.name if pipeline else "",
+            "repo_url": pipeline.source_repo_url or "" if pipeline else "",
+            "default_branch": pipeline.default_branch if pipeline else "",
+        },
+        "project": {
+            "id": str(project_id),
+            "name": project.name if project else "",
+            "slug": project.slug if project else "",
+        },
+        "megooci": {
+            "url": settings.MEGOOCI_PUBLIC_URL or "",
+        },
+    }
+
+    return secrets, env_vars, builtins
 
 
 async def _run_command_legacy(
