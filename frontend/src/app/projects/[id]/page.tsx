@@ -269,7 +269,7 @@ export default function ProjectDetailPage() {
     }
     setSavingSec(true);
     try {
-      const updated = await secretsApi.update(editSecretId, updates);
+      const { secret: updated } = await secretsApi.update(editSecretId, updates);
       setSecrets((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
       setEditSecretDialogOpen(false);
       toast.success("Secret updated");
