@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # Email / SMTP is now configured via the UI (notification channels).
     MEGOOCI_INVITE_EXPIRY_HOURS: int = 72
 
+    # Frontend base URL — used in invite and password-reset emails so that
+    # links point to the Next.js app rather than the API backend.
+    # Defaults to MEGOOCI_PUBLIC_URL when left blank (single-domain setups).
+    MEGOOCI_FRONTEND_URL: str = ""
+
     # Git provider integration (PRD §6.16)
     # OAuth client credentials are Phase 2; keep them optional so Phase 1
     # works without any configuration.

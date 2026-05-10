@@ -103,7 +103,8 @@ async def create_invite(
     await db.flush()
     await db.refresh(invite, attribute_names=["role", "creator"])
 
-    invite_link = f"{settings.MEGOOCI_PUBLIC_URL}/invite/accept?token={token}"
+    frontend_base = (settings.MEGOOCI_FRONTEND_URL or settings.MEGOOCI_PUBLIC_URL).rstrip("/")
+    invite_link = f"{frontend_base}/invite/accept?token={token}"
 
     await send_invite_email(
         db=db,
@@ -235,7 +236,8 @@ async def resend_invite(
     )
     await db.flush()
 
-    invite_link = f"{settings.MEGOOCI_PUBLIC_URL}/invite/accept?token={token}"
+    frontend_base = (settings.MEGOOCI_FRONTEND_URL or settings.MEGOOCI_PUBLIC_URL).rstrip("/")
+    invite_link = f"{frontend_base}/invite/accept?token={token}"
     await send_invite_email(
         db=db,
         to_email=invite.email,
