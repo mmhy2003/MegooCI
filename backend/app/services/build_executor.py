@@ -71,9 +71,12 @@ async def execute_build(
             "event": "build_started",
             "build_id": str(build_id),
         })
-        # Publish to the global builds:updates fan-out channel so dashboard
-        # and builds-list pages update the status without polling.
-        await publish_build_update(redis_client, build)
+        # Best-effort: publish to the global builds:updates fan-out channel.
+        # Wrapped in try/except so a Redis hiccup can never crash the executor.
+        try:
+            await publish_build_update(redis_client, build)
+        except Exception:
+            pass
 
         secrets, env_vars, builtins = await _load_scope_context(db, build)
 
@@ -179,8 +182,11 @@ async def execute_build(
             "build_id": str(build_id),
             "status": final_status,
         })
-        # Publish to the global builds:updates fan-out channel.
-        await publish_build_update(redis_client, build)
+        # Best-effort: publish to the global builds:updates fan-out channel.
+        try:
+            await publish_build_update(redis_client, build)
+        except Exception:
+            pass
 
         # Tell every agent that participated in this build to release its
         # shared workspace directory.

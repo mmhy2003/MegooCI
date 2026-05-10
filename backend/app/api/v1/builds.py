@@ -113,8 +113,7 @@ async def trigger_build(
 
     run_build.delay(str(build.id))
 
-    # Publish to the global builds:updates channel so the dashboard and
-    # builds-list pages can show the new build immediately.
+    # Best-effort: publish to the global builds:updates channel.
     from app.config import get_settings
     import redis.asyncio as aioredis
     from app.services.in_app_notifications import publish_build_update
@@ -122,6 +121,8 @@ async def trigger_build(
     _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
     try:
         await publish_build_update(_redis, build)
+    except Exception:
+        pass
     finally:
         await _redis.aclose()
 
@@ -178,7 +179,7 @@ async def cancel_build(
     # needs an explicit cancel frame to terminate promptly.
     await _notify_agents_of_cancel(db, build_id)
 
-    # Publish cancellation to the global builds:updates channel.
+    # Best-effort: publish cancellation to the global builds:updates channel.
     from app.config import get_settings
     import redis.asyncio as aioredis
     from app.services.in_app_notifications import publish_build_update
@@ -186,6 +187,8 @@ async def cancel_build(
     _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
     try:
         await publish_build_update(_redis, build)
+    except Exception:
+        pass
     finally:
         await _redis.aclose()
 
@@ -289,7 +292,7 @@ async def retry_build(
 
     run_build.delay(str(new_build.id))
 
-    # Publish new build to the global builds:updates channel.
+    # Best-effort: publish new build to the global builds:updates channel.
     from app.config import get_settings
     import redis.asyncio as aioredis
     from app.services.in_app_notifications import publish_build_update
@@ -297,6 +300,8 @@ async def retry_build(
     _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
     try:
         await publish_build_update(_redis, new_build)
+    except Exception:
+        pass
     finally:
         await _redis.aclose()
 

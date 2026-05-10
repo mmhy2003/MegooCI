@@ -118,6 +118,9 @@ async def publish_build_update(
     finishes so that the dashboard and builds-list pages can patch their
     local state in real time without polling.
     """
+    def _iso(val) -> str | None:
+        return val.isoformat() if val else None
+
     payload = {
         "event": "build_update",
         "id": str(build.id),
@@ -127,10 +130,11 @@ async def publish_build_update(
         "commit_sha": build.commit_sha,
         "status": build.status,
         "trigger_type": build.trigger_type,
-        "started_at": build.started_at.isoformat() if build.started_at else None,
-        "finished_at": build.finished_at.isoformat() if build.finished_at else None,
-        "created_at": build.created_at.isoformat() if build.created_at else None,
-        "updated_at": build.updated_at.isoformat() if build.updated_at else None,
+        "started_at": _iso(getattr(build, "started_at", None)),
+        "finished_at": _iso(getattr(build, "finished_at", None)),
+        "created_at": _iso(getattr(build, "created_at", None)),
+        "updated_at": None,  # not a column on Build; kept for API shape compatibility
         "triggered_by": str(build.triggered_by) if build.triggered_by else None,
     }
     await redis_client.publish("builds:updates", json.dumps(payload))
+
