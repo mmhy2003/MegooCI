@@ -26,18 +26,57 @@ interface BuildLogViewerProps {
 
 export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
+  // Invisible sentinel element — always rendered at the very end of the log
+  // list. We call scrollIntoView() on it instead of mutating scrollTop so
+  // the browser never fires a synthetic scroll event that could trip the
+  // "user scrolled up" detection.
+  const sentinelRef = React.useRef<HTMLDivElement>(null);
+
   const [follow, setFollow] = React.useState(true);
   const [fullscreen, setFullscreen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [searchTerm, setSearchTerm] = React.useState("");
   const [copied, setCopied] = React.useState(false);
 
+  // When set to true the next scroll event(s) that arrive are from our own
+  // programmatic scrollIntoView call — we ignore them so they cannot
+  // accidentally disable follow-mode.
+  const isProgrammaticScroll = React.useRef(false);
+  // rAF handle for the programmatic-scroll flag reset.
+  const programmaticScrollRAF = React.useRef<number>(undefined);
+
+  // ─── Auto-scroll to the bottom whenever new lines arrive ─────────────────
   React.useEffect(() => {
-    if (follow && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    if (!follow || !sentinelRef.current) return;
+
+    // Mark that the upcoming scroll is programmatic so handleScroll ignores it.
+    isProgrammaticScroll.current = true;
+    // Cancel any pending reset first.
+    if (programmaticScrollRAF.current !== undefined) {
+      cancelAnimationFrame(programmaticScrollRAF.current);
     }
+
+    sentinelRef.current.scrollIntoView({ behavior: "instant", block: "end" });
+
+    // Reset the flag after the browser has flushed the layout and fired any
+    // resulting scroll events (two rAF ticks is reliably enough).
+    programmaticScrollRAF.current = requestAnimationFrame(() => {
+      programmaticScrollRAF.current = requestAnimationFrame(() => {
+        isProgrammaticScroll.current = false;
+      });
+    });
   }, [lines, follow]);
 
+  // Cleanup rAF on unmount.
+  React.useEffect(() => {
+    return () => {
+      if (programmaticScrollRAF.current !== undefined) {
+        cancelAnimationFrame(programmaticScrollRAF.current);
+      }
+    };
+  }, []);
+
+  // ─── Keyboard shortcuts ──────────────────────────────────────────────────
   React.useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === "f") {
@@ -53,13 +92,26 @@ export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
     return () => window.removeEventListener("keydown", handleKey);
   }, [fullscreen]);
 
+  // ─── User-scroll detection ───────────────────────────────────────────────
+  // Only disable follow-mode when the user EXPLICITLY scrolls up — ignore any
+  // scroll events that were caused by our own scrollIntoView calls.
   function handleScroll() {
+    if (isProgrammaticScroll.current) return;
     if (!containerRef.current) return;
+
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-    const atBottom = scrollHeight - scrollTop - clientHeight < 40;
-    if (!atBottom && follow) setFollow(false);
+    // Use a generous threshold (80 px) to tolerate sub-pixel rounding,
+    // momentum scrolling overshoot, and browser zoom levels.
+    const atBottom = scrollHeight - scrollTop - clientHeight < 80;
+    if (!atBottom && follow) {
+      setFollow(false);
+    } else if (atBottom && !follow) {
+      // If the user manually scrolled back to the bottom, re-enable.
+      setFollow(true);
+    }
   }
 
+  // ─── Toolbar actions ─────────────────────────────────────────────────────
   async function handleCopy() {
     const text = lines.map((l) => l.text).join("\n");
     await navigator.clipboard.writeText(text);
@@ -67,6 +119,21 @@ export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  function handleFollowToggle() {
+    const next = !follow;
+    setFollow(next);
+    if (next && sentinelRef.current) {
+      isProgrammaticScroll.current = true;
+      sentinelRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+      programmaticScrollRAF.current = requestAnimationFrame(() => {
+        programmaticScrollRAF.current = requestAnimationFrame(() => {
+          isProgrammaticScroll.current = false;
+        });
+      });
+    }
+  }
+
+  // ─── Search filter ───────────────────────────────────────────────────────
   const filtered = searchTerm
     ? lines.filter((l) =>
         l.text.toLowerCase().includes(searchTerm.toLowerCase()),
@@ -125,14 +192,8 @@ export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
               "h-7 w-7 hover:bg-[#21262d] hover:text-[#c9d1d9]",
               follow ? "text-cyan-400" : "text-[#8b949e]",
             )}
-            onClick={() => {
-              setFollow(!follow);
-              if (!follow && containerRef.current) {
-                containerRef.current.scrollTop =
-                  containerRef.current.scrollHeight;
-              }
-            }}
-            title="Auto-scroll"
+            onClick={handleFollowToggle}
+            title={follow ? "Auto-scroll on (click to pause)" : "Auto-scroll off (click to resume)"}
           >
             <ArrowDown className="h-3.5 w-3.5" />
           </Button>
@@ -167,30 +228,37 @@ export function BuildLogViewer({ lines, className }: BuildLogViewerProps) {
               : "No matching log lines"}
           </p>
         ) : (
-          filtered.map((line, idx) => (
-            <div key={idx} className="flex gap-2 hover:bg-[#161b22] sm:gap-3">
-              <span className="w-6 shrink-0 select-none text-right text-[#484f58] sm:w-10">
-                {idx + 1}
-              </span>
-              {line.timestamp && (
-                <span className="hidden shrink-0 text-[#484f58] sm:inline">
-                  {line.timestamp}
+          <>
+            {filtered.map((line, idx) => (
+              <div key={idx} className="flex gap-2 hover:bg-[#161b22] sm:gap-3">
+                <span className="w-6 shrink-0 select-none text-right text-[#484f58] sm:w-10">
+                  {idx + 1}
                 </span>
-              )}
-                <span
-                className={cn(
-                  "flex-1 whitespace-pre-wrap break-all",
-                  line.stream === "stderr"
-                    ? "text-red-400"
-                    : line.stream === "system"
-                      ? "text-cyan-400 italic"
-                      : "text-[#c9d1d9]",
+                {line.timestamp && (
+                  <span className="hidden shrink-0 text-[#484f58] sm:inline">
+                    {line.timestamp}
+                  </span>
                 )}
-              >
-                {searchTerm ? highlightSearch(line.text, searchTerm) : line.text}
-              </span>
-            </div>
-          ))
+                <span
+                  className={cn(
+                    "flex-1 whitespace-pre-wrap break-all",
+                    line.stream === "stderr"
+                      ? "text-red-400"
+                      : line.stream === "system"
+                        ? "text-cyan-400 italic"
+                        : "text-[#c9d1d9]",
+                  )}
+                >
+                  {searchTerm
+                    ? highlightSearch(line.text, searchTerm)
+                    : line.text}
+                </span>
+              </div>
+            ))}
+            {/* Sentinel: scrollIntoView targets this element so the browser
+                never fires a scroll event caused by scrollTop assignment. */}
+            <div ref={sentinelRef} aria-hidden="true" />
+          </>
         )}
       </div>
     </div>
