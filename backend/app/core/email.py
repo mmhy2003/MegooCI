@@ -6,66 +6,57 @@ configured — the invite link is still returned in the API response so admins
 can copy-paste it manually.
 """
 
+import asyncio
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 
-def _get_email_config() -> dict | None:
+async def _get_email_config(db: AsyncSession) -> dict | None:
     """Load SMTP config from the first enabled email notification channel.
+
+    Uses the *caller's* already-open async session — no new event loop, no
+    cross-loop asyncpg connection sharing.
 
     Returns the decrypted config dict, or None if no email channel exists.
     """
-    import asyncio
-
-    from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     from app.models.notification import NotificationChannel
+    from app.services.notification_service import decrypt_channel_config
 
-    async def _load() -> dict | None:
-        from app.database import async_session
+    result = await db.execute(
+        select(NotificationChannel).where(
+            NotificationChannel.channel_type == "email",
+            NotificationChannel.enabled.is_(True),
+        ).limit(1)
+    )
+    channel = result.scalar_one_or_none()
+    if channel is None:
+        return None
 
-        async with async_session() as db:
-            result = await db.execute(
-                select(NotificationChannel).where(
-                    NotificationChannel.channel_type == "email",
-                    NotificationChannel.enabled.is_(True),
-                ).limit(1)
-            )
-            channel = result.scalar_one_or_none()
-            if channel is None:
-                return None
-
-            from app.services.notification_service import decrypt_channel_config
-            return decrypt_channel_config(channel.config_encrypted)
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            return pool.submit(lambda: asyncio.run(_load())).result(timeout=10)
-    else:
-        return asyncio.run(_load())
+    return decrypt_channel_config(channel.config_encrypted)
 
 
-def is_smtp_configured() -> bool:
-    config = _get_email_config()
+async def is_smtp_configured(db: AsyncSession) -> bool:
+    config = await _get_email_config(db)
     return config is not None and bool(config.get("smtp_host"))
 
 
-def send_invite_email(to_email: str, invite_link: str, inviter_name: str | None = None) -> bool:
+async def send_invite_email(
+    db: AsyncSession,
+    to_email: str,
+    invite_link: str,
+    inviter_name: str | None = None,
+) -> bool:
     """Send an invitation email. Returns True on success, False on failure."""
-    config = _get_email_config()
+    config = await _get_email_config(db)
     if not config or not config.get("smtp_host"):
         logger.warning(
             "No email channel configured — skipping invite email to %s. "
@@ -119,12 +110,16 @@ def send_invite_email(to_email: str, invite_link: str, inviter_name: str | None 
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    return _send_email(config, to_email, msg)
+    return await _send_email_async(config, to_email, msg)
 
 
-def send_password_reset_email(to_email: str, reset_link: str) -> bool:
+async def send_password_reset_email(
+    db: AsyncSession,
+    to_email: str,
+    reset_link: str,
+) -> bool:
     """Send a password-reset email. Returns True on success, False on failure."""
-    config = _get_email_config()
+    config = await _get_email_config(db)
     if not config or not config.get("smtp_host"):
         logger.warning(
             "No email channel configured — skipping password-reset email to %s. "
@@ -176,10 +171,18 @@ def send_password_reset_email(to_email: str, reset_link: str) -> bool:
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    return _send_email(config, to_email, msg)
+    return await _send_email_async(config, to_email, msg)
 
 
-def _send_email(config: dict, to_email: str, msg: MIMEMultipart) -> bool:
+async def _send_email_async(config: dict, to_email: str, msg: MIMEMultipart) -> bool:
+    """Run the blocking smtplib call in a thread-pool executor so it doesn't
+    block the uvicorn event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _send_email_sync, config, to_email, msg)
+
+
+def _send_email_sync(config: dict, to_email: str, msg: MIMEMultipart) -> bool:
+    """Blocking SMTP send — always called from a thread, never from the event loop."""
     try:
         host = config["smtp_host"]
         port = int(config.get("smtp_port", 587))
@@ -188,11 +191,9 @@ def _send_email(config: dict, to_email: str, msg: MIMEMultipart) -> bool:
         password = config.get("smtp_password", "")
         from_email = config.get("from_email", "noreply@megooci.local")
 
+        server = smtplib.SMTP(host, port)
         if use_tls:
-            server = smtplib.SMTP(host, port)
             server.starttls()
-        else:
-            server = smtplib.SMTP(host, port)
 
         if user:
             server.login(user, password)

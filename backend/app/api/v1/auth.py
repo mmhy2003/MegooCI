@@ -307,7 +307,7 @@ async def forgot_password(
             expires_delta=timedelta(hours=1),
         )
         reset_link = f"{settings.MEGOOCI_PUBLIC_URL}/reset-password?token={token}"
-        sent = send_password_reset_email(user.email, reset_link)
+        sent = await send_password_reset_email(db, user.email, reset_link)
         if not sent:
             logger.warning("Password-reset email not sent for %s (SMTP not configured?)", user.email)
 

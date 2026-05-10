@@ -105,7 +105,8 @@ async def create_invite(
 
     invite_link = f"{settings.MEGOOCI_PUBLIC_URL}/invite/accept?token={token}"
 
-    send_invite_email(
+    await send_invite_email(
+        db=db,
         to_email=body.email,
         invite_link=invite_link,
         inviter_name=current_user.name,
@@ -235,7 +236,8 @@ async def resend_invite(
     await db.flush()
 
     invite_link = f"{settings.MEGOOCI_PUBLIC_URL}/invite/accept?token={token}"
-    send_invite_email(
+    await send_invite_email(
+        db=db,
         to_email=invite.email,
         invite_link=invite_link,
         inviter_name=current_user.name,
