@@ -23,7 +23,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.models.build import Build, LogChunk, Stage, Step
-from app.services.in_app_notifications import notify_user, get_admin_user_ids
+from app.services.in_app_notifications import notify_user, get_admin_user_ids, publish_build_update
 from app.services.agent_dispatcher import (
     dispatch_step_to_agent,
     pick_online_agent,
@@ -71,6 +71,9 @@ async def execute_build(
             "event": "build_started",
             "build_id": str(build_id),
         })
+        # Publish to the global builds:updates fan-out channel so dashboard
+        # and builds-list pages update the status without polling.
+        await publish_build_update(redis_client, build)
 
         secrets, env_vars, builtins = await _load_scope_context(db, build)
 
@@ -176,6 +179,8 @@ async def execute_build(
             "build_id": str(build_id),
             "status": final_status,
         })
+        # Publish to the global builds:updates fan-out channel.
+        await publish_build_update(redis_client, build)
 
         # Tell every agent that participated in this build to release its
         # shared workspace directory.

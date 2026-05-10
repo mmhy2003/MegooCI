@@ -19,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useBuildUpdates } from "@/hooks/use-build-updates";
 
 function statusVariant(
   s: BuildStatus,
@@ -57,11 +58,15 @@ const STATUS_TABS: { label: string; value: BuildStatus | "all" }[] = [
 export default function BuildsPage() {
   const router = useRouter();
   const [allBuilds, setAllBuilds] = React.useState<Build[]>([]);
-  const [pipelineMap, setPipelineMap] = React.useState<Record<string, Pipeline>>({});
-  const [projectMap, setProjectMap] = React.useState<Record<string, Project>>({});
-  const [statusFilter, setStatusFilter] = React.useState<
-    BuildStatus | "all"
-  >("all");
+  const [pipelineMap, setPipelineMap] = React.useState<
+    Record<string, Pipeline>
+  >({});
+  const [projectMap, setProjectMap] = React.useState<Record<string, Project>>(
+    {},
+  );
+  const [statusFilter, setStatusFilter] = React.useState<BuildStatus | "all">(
+    "all",
+  );
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
@@ -87,6 +92,46 @@ export default function BuildsPage() {
     }
     load();
   }, []);
+
+  // Live updates via WebSocket ————————————————————————————————————
+  useBuildUpdates(
+    React.useCallback((update) => {
+      setAllBuilds((prev) => {
+        const idx = prev.findIndex((b) => b.id === update.id);
+        if (idx !== -1) {
+          // Update status / timestamps for an existing build.
+          return prev.map((b, i) =>
+            i === idx
+              ? {
+                  ...b,
+                  status: update.status as BuildStatus,
+                  started_at: update.started_at,
+                  finished_at: update.finished_at,
+                  updated_at: update.updated_at ?? b.updated_at,
+                }
+              : b,
+          );
+        }
+        // New build — prepend so it appears at the top of the list.
+        const newBuild: Build = {
+          id: update.id,
+          pipeline_id: update.pipeline_id,
+          number: update.number,
+          branch: update.branch,
+          commit_sha: update.commit_sha,
+          status: update.status as BuildStatus,
+          trigger_type: update.trigger_type,
+          started_at: update.started_at,
+          finished_at: update.finished_at,
+          created_at: update.created_at ?? new Date().toISOString(),
+          updated_at: update.updated_at ?? new Date().toISOString(),
+          triggered_by: update.triggered_by,
+          params_json: null,
+        };
+        return [newBuild, ...prev];
+      });
+    }, []),
+  );
 
   const builds =
     statusFilter === "all"
@@ -129,6 +174,7 @@ export default function BuildsPage() {
                   <div key={i} className="flex items-center gap-4">
                     <Skeleton className="h-4 w-16" />
                     <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-4 w-20" />
                     <Skeleton className="h-4 w-20" />
                     <Skeleton className="h-5 w-16 rounded-md" />
                     <Skeleton className="ml-auto h-4 w-20" />
@@ -176,63 +222,70 @@ export default function BuildsPage() {
                       const pl = pipelineMap[build.pipeline_id];
                       const prj = pl ? projectMap[pl.project_id] : undefined;
                       return (
-                      <tr
-                        key={build.id}
-                        className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
-                        onClick={() => router.push(`/builds/${build.id}`)}
-                      >
-                        <td className="py-3 pr-4 font-medium">
-                          #{build.number}
-                        </td>
-                        <td className="hidden py-3 pr-4 sm:table-cell">
-                          <button
-                            className="text-primary hover:underline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              router.push(`/pipelines/${build.pipeline_id}`);
-                            }}
-                          >
-                            {pl?.name || build.pipeline_id.slice(0, 8) + "…"}
-                          </button>
-                        </td>
-                        <td className="hidden py-3 pr-4 lg:table-cell">
-                          {prj ? (
+                        <tr
+                          key={build.id}
+                          className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
+                          onClick={() => router.push(`/builds/${build.id}`)}
+                        >
+                          <td className="py-3 pr-4 font-medium">
+                            #{build.number}
+                          </td>
+                          <td className="hidden py-3 pr-4 sm:table-cell">
                             <button
-                              className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                              className="text-primary hover:underline"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                router.push(`/projects/${prj.id}`);
+                                router.push(
+                                  `/pipelines/${build.pipeline_id}`,
+                                );
                               }}
                             >
-                              <FolderKanban className="h-3.5 w-3.5" />
-                              {prj.name}
+                              {pl?.name ||
+                                build.pipeline_id.slice(0, 8) + "…"}
                             </button>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="hidden py-3 pr-4 md:table-cell">
-                          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                            {build.branch || "—"}
-                          </code>
-                        </td>
-                        <td className="py-3 pr-4">
-                          <Badge variant={statusVariant(build.status)}>
-                            {build.status}
-                          </Badge>
-                        </td>
-                        <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
-                          {formatDuration(build.started_at, build.finished_at)}
-                        </td>
-                        <td className="hidden py-3 pr-4 text-muted-foreground xl:table-cell">
-                          {build.trigger_type}
-                        </td>
-                        <td className="py-3 text-right text-muted-foreground">
-                          {formatDistanceToNow(new Date(build.created_at), {
-                            addSuffix: true,
-                          })}
-                        </td>
-                      </tr>
+                          </td>
+                          <td className="hidden py-3 pr-4 lg:table-cell">
+                            {prj ? (
+                              <button
+                                className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/projects/${prj.id}`);
+                                }}
+                              >
+                                <FolderKanban className="h-3.5 w-3.5" />
+                                {prj.name}
+                              </button>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                          <td className="hidden py-3 pr-4 md:table-cell">
+                            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                              {build.branch || "—"}
+                            </code>
+                          </td>
+                          <td className="py-3 pr-4">
+                            <Badge variant={statusVariant(build.status)}>
+                              {build.status}
+                            </Badge>
+                          </td>
+                          <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
+                            {formatDuration(
+                              build.started_at,
+                              build.finished_at,
+                            )}
+                          </td>
+                          <td className="hidden py-3 pr-4 text-muted-foreground xl:table-cell">
+                            {build.trigger_type}
+                          </td>
+                          <td className="py-3 text-right text-muted-foreground">
+                            {formatDistanceToNow(
+                              new Date(build.created_at),
+                              { addSuffix: true },
+                            )}
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>

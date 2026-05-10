@@ -113,6 +113,18 @@ async def trigger_build(
 
     run_build.delay(str(build.id))
 
+    # Publish to the global builds:updates channel so the dashboard and
+    # builds-list pages can show the new build immediately.
+    from app.config import get_settings
+    import redis.asyncio as aioredis
+    from app.services.in_app_notifications import publish_build_update
+    settings = get_settings()
+    _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
+    try:
+        await publish_build_update(_redis, build)
+    finally:
+        await _redis.aclose()
+
     return build
 
 
@@ -165,6 +177,17 @@ async def cancel_build(
     # and bails out on its own, but a step already in-flight on an agent
     # needs an explicit cancel frame to terminate promptly.
     await _notify_agents_of_cancel(db, build_id)
+
+    # Publish cancellation to the global builds:updates channel.
+    from app.config import get_settings
+    import redis.asyncio as aioredis
+    from app.services.in_app_notifications import publish_build_update
+    settings = get_settings()
+    _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
+    try:
+        await publish_build_update(_redis, build)
+    finally:
+        await _redis.aclose()
 
     return build
 
@@ -265,6 +288,17 @@ async def retry_build(
     await index_build(new_build)
 
     run_build.delay(str(new_build.id))
+
+    # Publish new build to the global builds:updates channel.
+    from app.config import get_settings
+    import redis.asyncio as aioredis
+    from app.services.in_app_notifications import publish_build_update
+    settings = get_settings()
+    _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
+    try:
+        await publish_build_update(_redis, new_build)
+    finally:
+        await _redis.aclose()
 
     return new_build
 

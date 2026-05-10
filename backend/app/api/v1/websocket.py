@@ -152,3 +152,44 @@ async def user_notifications_ws(
         await pubsub.unsubscribe(channel_name)
         await pubsub.aclose()
         await redis_client.aclose()
+
+
+@router.websocket("/ws/builds/updates")
+async def build_updates_ws(
+    websocket: WebSocket,
+    token: str | None = Query(None),
+) -> None:
+    """Global build-status update stream.
+
+    Any authenticated user can subscribe to this channel to receive
+    real-time ``build_update`` events whenever a build is created,
+    transitions to running, or finishes (success / failed / cancelled).
+    The payload mirrors the REST BuildResponse fields needed by the
+    dashboard and builds-list pages so they can patch their local state
+    without a full page reload.
+    """
+    if not await _authenticate_ws(token):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await websocket.accept()
+    settings = get_settings()
+
+    redis_client = aioredis.from_url(
+        settings.MEGOOCI_REDIS_URL, decode_responses=True
+    )
+    channel_name = "builds:updates"
+
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe(channel_name)
+
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                await websocket.send_text(message["data"])
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await pubsub.unsubscribe(channel_name)
+        await pubsub.aclose()
+        await redis_client.aclose()

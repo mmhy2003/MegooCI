@@ -106,3 +106,31 @@ async def get_admin_user_ids(db: AsyncSession) -> list[uuid.UUID]:
         select(User.id).where(User.is_admin.is_(True), User.is_active.is_(True))
     )
     return list(result.scalars().all())
+
+
+async def publish_build_update(
+    redis_client: aioredis.Redis,
+    build,  # app.models.build.Build instance
+) -> None:
+    """Publish a ``build_update`` event to the global ``builds:updates`` channel.
+
+    Called whenever a build is created, transitions to a new status, or
+    finishes so that the dashboard and builds-list pages can patch their
+    local state in real time without polling.
+    """
+    payload = {
+        "event": "build_update",
+        "id": str(build.id),
+        "pipeline_id": str(build.pipeline_id),
+        "number": build.number,
+        "branch": build.branch,
+        "commit_sha": build.commit_sha,
+        "status": build.status,
+        "trigger_type": build.trigger_type,
+        "started_at": build.started_at.isoformat() if build.started_at else None,
+        "finished_at": build.finished_at.isoformat() if build.finished_at else None,
+        "created_at": build.created_at.isoformat() if build.created_at else None,
+        "updated_at": build.updated_at.isoformat() if build.updated_at else None,
+        "triggered_by": str(build.triggered_by) if build.triggered_by else None,
+    }
+    await redis_client.publish("builds:updates", json.dumps(payload))
