@@ -1108,6 +1108,9 @@ export const usersApi = {
     fetchApi<void>(`/api/v1/users/${userId}/roles/${userRoleId}`, {
       method: "DELETE",
     }),
+
+  delete: (id: string) =>
+    fetchApi<void>(`/api/v1/users/${id}`, { method: "DELETE" }),
 };
 
 // ------------------------------------------------------------------

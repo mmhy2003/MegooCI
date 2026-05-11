@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Clock,
   Send,
+  Trash2,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { RequireAdmin } from "@/components/require-permission";
@@ -226,6 +227,24 @@ export default function AdminUsersPage() {
       loadData();
     } catch (e: unknown) {
       const msg = (e as { body?: { detail?: string } })?.body?.detail || `Failed to ${action} user`;
+      toast.error(msg);
+    }
+  };
+
+  const handleDeleteUser = async (u: UserDetail) => {
+    const ok = await confirm({
+      title: "Delete user permanently?",
+      description: `This will permanently delete ${u.name} (${u.email}) and remove all their role assignments. This action cannot be undone.`,
+      confirmText: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await usersApi.delete(u.id);
+      toast.success(`User ${u.name} deleted`);
+      loadData();
+    } catch (e: unknown) {
+      const msg = (e as { body?: { detail?: string } })?.body?.detail || "Failed to delete user";
       toast.error(msg);
     }
   };
@@ -452,6 +471,13 @@ export default function AdminUsersPage() {
                               <CheckCircle2 className="mr-2 h-4 w-4" /> Activate
                             </>
                           )}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleDeleteUser(u)}
+                          disabled={u.id === currentUser?.id}
+                          className="text-destructive"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" /> Delete user
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

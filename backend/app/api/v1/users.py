@@ -235,3 +235,37 @@ async def remove_role(
             status_code=status.HTTP_404_NOT_FOUND, detail="User role assignment not found"
         )
     await db.delete(user_role)
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("users.manage")),
+) -> None:
+    """Permanently delete a user and all associated role assignments."""
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your own account",
+        )
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # Remove all role assignments first.
+    await db.execute(
+        select(UserRole).where(UserRole.user_id == user_id)
+    )
+    role_results = await db.execute(
+        select(UserRole).where(UserRole.user_id == user_id)
+    )
+    for ur in role_results.scalars().all():
+        await db.delete(ur)
+
+    await db.delete(user)
+
