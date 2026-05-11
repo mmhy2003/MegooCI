@@ -1162,6 +1162,9 @@ export const invitesApi = {
   resend: (id: string) =>
     fetchApi<Invite>(`/api/v1/invites/${id}/resend`, { method: "POST" }),
 
+  cleanup: () =>
+    fetchApi<{ deleted: number }>("/api/v1/invites/cleanup", { method: "DELETE" }),
+
   accept: (data: AcceptInviteRequest) =>
     fetchApi<AuthTokens>("/api/v1/invites/accept", {
       method: "POST",

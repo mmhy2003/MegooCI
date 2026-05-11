@@ -212,6 +212,28 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleCleanupInvites = async () => {
+    const nonPending = invites.filter((i) => i.status !== "pending").length;
+    if (nonPending === 0) {
+      toast.info("No old invitations to clear");
+      return;
+    }
+    const ok = await confirm({
+      title: "Clear invitation history?",
+      description: `This will permanently delete ${nonPending} non-pending invitation${nonPending === 1 ? "" : "s"} (accepted, revoked, expired). Pending invitations will not be affected.`,
+      confirmText: "Clear",
+      tone: "warning",
+    });
+    if (!ok) return;
+    try {
+      const result = await invitesApi.cleanup();
+      toast.success(`Cleared ${result.deleted} old invitation${result.deleted === 1 ? "" : "s"}`);
+      loadData();
+    } catch {
+      toast.error("Failed to clear invitation history");
+    }
+  };
+
   const handleToggleActive = async (u: UserDetail) => {
     const action = u.is_active ? "deactivate" : "activate";
     const ok = await confirm({
@@ -490,20 +512,33 @@ export default function AdminUsersPage() {
 
         {/* Invitations */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Mail className="h-5 w-5" />
-              Invitations
-              {!loading && (
-                <Badge variant="secondary" className="ml-2">
-                  {invites.filter((i) => i.status === "pending").length} pending
-                </Badge>
-              )}
-            </CardTitle>
-            <CardDescription>
-              Pending and past invitations. Invited users join with the
-              assigned role.
-            </CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Mail className="h-5 w-5" />
+                Invitations
+                {!loading && (
+                  <Badge variant="secondary" className="ml-2">
+                    {invites.filter((i) => i.status === "pending").length} pending
+                  </Badge>
+                )}
+              </CardTitle>
+              <CardDescription>
+                Pending and past invitations. Invited users join with the
+                assigned role.
+              </CardDescription>
+            </div>
+            {!loading && invites.some((i) => i.status !== "pending") && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleCleanupInvites}
+                className="gap-1.5 text-muted-foreground hover:text-destructive shrink-0"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Clear history
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             {loading ? (
