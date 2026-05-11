@@ -43,6 +43,14 @@ class Agent(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Which build this agent is currently executing (NULL = idle).
+    # Set when execute_build claims the agent, cleared when the build
+    # finishes or is cancelled. The dispatcher skips agents where this
+    # is not NULL.
+    current_build_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

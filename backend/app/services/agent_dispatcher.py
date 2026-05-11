@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -39,7 +40,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.agent import Agent
-from app.models.build import Step
+from app.models.build import Build, Step
+
+logger = logging.getLogger(__name__)
 
 
 # How long we wait for a dispatch to produce a result before giving up. This
@@ -67,19 +70,102 @@ def step_result_channel(step_id: uuid.UUID | str) -> str:
 
 
 async def pick_online_agent(db: AsyncSession) -> Agent | None:
-    """Return a currently-online agent or None.
+    """Return an idle, currently-online agent or None.
 
-    An agent is considered "currently online" if it has an active WS session
-    (``connected_at is not None``) and its status is ``online``. Picks the
-    least-recently-used online agent as a poor-man's load balancer.
+    An agent is considered "available" when:
+    - ``status == 'online'`` and ``connected_at is not None`` (WS up),
+    - ``current_build_id IS NULL`` (not already executing a build).
+
+    Picks the least-recently-used idle agent as a poor-man's load balancer.
     """
     result = await db.execute(
         select(Agent)
-        .where(Agent.status == "online", Agent.connected_at.isnot(None))
+        .where(
+            Agent.status == "online",
+            Agent.connected_at.isnot(None),
+            Agent.current_build_id.is_(None),
+        )
         .order_by(Agent.last_seen_at.asc())
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def claim_agent(
+    db: AsyncSession, agent_id: uuid.UUID, build_id: uuid.UUID
+) -> bool:
+    """Atomically mark an agent as busy with a specific build.
+
+    Returns True if the agent was successfully claimed (was idle), False if
+    it was already busy (another build beat us to it). Uses a database-level
+    conditional UPDATE to prevent races between concurrent Celery workers.
+    """
+    from sqlalchemy import update
+
+    result = await db.execute(
+        update(Agent)
+        .where(
+            Agent.id == agent_id,
+            Agent.current_build_id.is_(None),
+        )
+        .values(current_build_id=build_id)
+    )
+    await db.commit()
+    return result.rowcount > 0  # type: ignore[union-attr]
+
+
+async def release_agent(
+    db: AsyncSession, agent_id: uuid.UUID, build_id: uuid.UUID | None = None
+) -> None:
+    """Mark an agent as idle by clearing current_build_id.
+
+    If *build_id* is provided, only clear if it matches (prevents a stale
+    release from clobbering a newer claim).
+    """
+    from sqlalchemy import update
+
+    stmt = update(Agent).where(Agent.id == agent_id)
+    if build_id is not None:
+        stmt = stmt.where(Agent.current_build_id == build_id)
+    stmt = stmt.values(current_build_id=None)
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def dispatch_pending_builds() -> None:
+    """Check for pending builds and dispatch one if an agent is available.
+
+    Called after a build finishes (agent released) so queued pipelines are
+    picked up automatically without polling.
+    """
+    from app.database import async_session as _session_factory
+    from app.tasks.build_tasks import run_build
+
+    async with _session_factory() as db:
+        # Find the oldest pending build.
+        result = await db.execute(
+            select(Build)
+            .where(Build.status == "pending")
+            .order_by(Build.created_at.asc())
+            .limit(1)
+        )
+        pending = result.scalar_one_or_none()
+        if pending is None:
+            return
+
+        # Check if there's an idle agent.
+        agent = await pick_online_agent(db)
+        if agent is None:
+            return
+
+        logger.info(
+            "Dispatching pending build %s to agent %s",
+            pending.id, agent.name,
+        )
+        try:
+            run_build.delay(str(pending.id))
+        except Exception:
+            logger.exception("Failed to enqueue pending build %s", pending.id)
 
 
 async def dispatch_step_to_agent(

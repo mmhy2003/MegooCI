@@ -25,8 +25,11 @@ from app.config import get_settings
 from app.models.build import Build, LogChunk, Stage, Step
 from app.services.in_app_notifications import notify_user, get_admin_user_ids, publish_build_update
 from app.services.agent_dispatcher import (
+    claim_agent,
+    dispatch_pending_builds,
     dispatch_step_to_agent,
     pick_online_agent,
+    release_agent,
     send_build_finished,
 )
 from app.services.step_actions import get_handler
@@ -43,7 +46,13 @@ async def execute_build(
     build_id: uuid.UUID,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> None:
-    """Main entry point: execute all stages/steps for a build."""
+    """Main entry point: execute all stages/steps for a build.
+
+    Before executing, the function attempts to claim an idle agent. If no
+    agent is available the build stays in ``pending`` and will be picked up
+    later by ``dispatch_pending_builds()`` (called whenever another build
+    finishes and frees an agent).
+    """
     if session_factory is None:
         from app.database import async_session
 
@@ -52,6 +61,80 @@ async def execute_build(
     settings = get_settings()
     redis_client = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
     channel = f"build:{build_id}:logs"
+
+    # ── Agent reservation ────────────────────────────────────────────────
+    # We must claim an idle agent *before* marking the build as running.
+    # If no agent is available, the build stays pending and will be
+    # dequeued automatically when an agent finishes its current work.
+    claimed_agent_id: uuid.UUID | None = None
+
+    async with session_factory() as db:
+        result = await db.execute(
+            select(Build).where(Build.id == build_id)
+        )
+        build = result.scalar_one_or_none()
+        if build is None:
+            await redis_client.aclose()
+            return
+
+        # If the build was already cancelled or is no longer pending, bail.
+        if build.status != "pending":
+            await redis_client.aclose()
+            return
+
+        agent = await pick_online_agent(db)
+        if agent is not None:
+            claimed = await claim_agent(db, agent.id, build_id)
+            if claimed:
+                claimed_agent_id = agent.id
+
+        if claimed_agent_id is None:
+            # No idle agent — leave the build as pending. It will be
+            # dispatched by dispatch_pending_builds() when an agent
+            # finishes its current build.
+            await redis_client.aclose()
+            return
+
+    # ── Execute ──────────────────────────────────────────────────────────
+    try:
+        await _run_build_stages(
+            build_id=build_id,
+            session_factory=session_factory,
+            redis_client=redis_client,
+            channel=channel,
+        )
+    finally:
+        # Always release the agent and try to dequeue a pending build,
+        # regardless of whether the build succeeded, failed, or crashed.
+        if claimed_agent_id is not None:
+            try:
+                async with session_factory() as db:
+                    await release_agent(db, claimed_agent_id, build_id)
+            except Exception:
+                pass  # non-fatal; the agent will be released on disconnect
+
+            # Tell the agent to clean up its workspace.
+            try:
+                await send_build_finished(claimed_agent_id, build_id)
+            except Exception:
+                pass
+
+        await redis_client.aclose()
+
+        # Kick the next pending build now that an agent is free.
+        try:
+            await dispatch_pending_builds()
+        except Exception:
+            pass
+
+
+async def _run_build_stages(
+    build_id: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_client: aioredis.Redis,
+    channel: str,
+) -> None:
+    """Inner routine that actually executes all stages/steps for a build."""
 
     async with session_factory() as db:
         result = await db.execute(
@@ -199,8 +282,6 @@ async def execute_build(
         await _send_build_finished_notification(
             db, redis_client, build, final_status
         )
-
-    await redis_client.aclose()
 
 
 async def _execute_step(

@@ -136,12 +136,15 @@ async def agent_control_ws(
             pass
 
         # Flip to offline so the dispatcher stops choosing us, and
-        # notify admins that this agent disconnected.
+        # notify admins that this agent disconnected. Also clear
+        # current_build_id to prevent stale reservations from blocking
+        # the build queue permanently.
         async with async_session() as db:
             agent = await db.get(Agent, agent_pk)
             if agent is not None:
                 agent.status = "offline"
                 agent.connected_at = None
+                agent.current_build_id = None
                 await db.commit()
 
                 try:
