@@ -190,6 +190,21 @@ async def accept_invite(
     }
 
 
+
+@router.delete("/cleanup", status_code=status.HTTP_200_OK)
+async def cleanup_invites(
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_permission("invites.manage")),
+) -> dict:
+    """Delete all non-pending invitations (accepted, revoked, expired)."""
+    from sqlalchemy import delete as sa_delete
+
+    result = await db.execute(
+        sa_delete(Invite).where(Invite.status.in_(["accepted", "revoked", "expired"]))
+    )
+    return {"deleted": result.rowcount}
+
+
 @router.delete("/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_invite(
     invite_id: uuid.UUID,
@@ -250,17 +265,3 @@ async def resend_invite(
         "role_name": invite.role.name if invite.role else None,
         "creator_name": invite.creator.name if invite.creator else None,
     }
-
-
-@router.delete("/cleanup", status_code=status.HTTP_200_OK)
-async def cleanup_invites(
-    db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("invites.manage")),
-) -> dict:
-    """Delete all non-pending invitations (accepted, revoked, expired)."""
-    from sqlalchemy import delete as sa_delete
-
-    result = await db.execute(
-        sa_delete(Invite).where(Invite.status.in_(["accepted", "revoked", "expired"]))
-    )
-    return {"deleted": result.rowcount}
