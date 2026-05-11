@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
+from app.models.agent import Agent
 from app.models.build import Build, LogChunk, Stage, Step
 from app.services.in_app_notifications import notify_user, get_admin_user_ids, publish_build_update
 from app.services.agent_dispatcher import (
@@ -99,6 +100,7 @@ async def execute_build(
     try:
         await _run_build_stages(
             build_id=build_id,
+            claimed_agent_id=claimed_agent_id,
             session_factory=session_factory,
             redis_client=redis_client,
             channel=channel,
@@ -130,6 +132,7 @@ async def execute_build(
 
 async def _run_build_stages(
     build_id: uuid.UUID,
+    claimed_agent_id: uuid.UUID,
     session_factory: async_sessionmaker[AsyncSession],
     redis_client: aioredis.Redis,
     channel: str,
@@ -208,6 +211,7 @@ async def _run_build_stages(
                     redis_client=redis_client,
                     channel=channel,
                     build_agent_ids=build_agent_ids,
+                    claimed_agent_id=claimed_agent_id,
                 )
 
                 # Persist error messages as visible log lines so users
@@ -295,6 +299,7 @@ async def _execute_step(
     redis_client: aioredis.Redis,
     channel: str,
     build_agent_ids: set[uuid.UUID] | None = None,
+    claimed_agent_id: uuid.UUID | None = None,
 ) -> StepResult:
     """Dispatch a step to the correct handler.
 
@@ -362,6 +367,7 @@ async def _execute_step(
             channel=channel,
             config_override=dispatch_config,
             command_override=step_config.get("command") or step.command or "",
+            claimed_agent_id=claimed_agent_id,
         )
         if agent_result is not None:
             if agent_id is not None and build_agent_ids is not None:
@@ -373,20 +379,15 @@ async def _execute_step(
             )
 
         # Agent dispatch returned None — no agent online or timeout.
-        # Fall through to server-side handler if one exists.
+        # No local fallback: steps MUST run on an agent.
+        return StepResult(
+            exit_code=1,
+            status="failed",
+            error="No build agent is available to execute this step.\n"
+                  "Ensure an agent is registered and online under Settings \u2192 Agents.",
+        )
 
     if handler is None:
-        if step.command:
-            await _emit_system_log(
-                step, db, redis_client, channel,
-                "No build agent is online. Falling back to server-side execution.\n"
-                "To run steps on a dedicated agent, register one under Settings \u2192 Agents.",
-            )
-            exit_code = await _run_command_legacy(step, db, redis_client, channel, secrets)
-            return StepResult(
-                exit_code=exit_code,
-                status="success" if exit_code == 0 else "failed",
-            )
         return StepResult(
             exit_code=1,
             status="failed",
@@ -667,23 +668,31 @@ async def _try_dispatch_to_agent(
     channel: str | None = None,
     config_override: dict | None = None,
     command_override: str | None = None,
+    claimed_agent_id: uuid.UUID | None = None,
 ) -> tuple[dict | None, uuid.UUID | None]:
-    """If a healthy agent is online, run this step there and return
-    ``(result_dict, agent_id)``. Returns ``(None, None)`` if no agent picks
-    it up within the timeout, so the caller can transparently fall back to
-    local execution.
+    """Dispatch a step to the pre-claimed agent for this build.
 
-    Emits descriptive system log lines visible in the build UI when the
-    agent lookup or dispatch fails.
+    If *claimed_agent_id* is provided (normal path), dispatch directly to
+    that agent without re-querying. If not provided, falls back to
+    ``pick_online_agent()`` for backward compatibility.
+
+    Returns ``(result_dict, agent_id)`` or ``(None, None)`` on failure.
     """
-    agent = await pick_online_agent(db)
+    agent = None
+    if claimed_agent_id is not None:
+        agent = await db.get(Agent, claimed_agent_id)
+        # Make sure the agent is still online.
+        if agent is not None and (agent.status != "online" or agent.connected_at is None):
+            agent = None
+    else:
+        agent = await pick_online_agent(db)
+
     if agent is None:
         if redis_client and channel:
             await _emit_system_log(
                 step, db, redis_client, channel,
                 "\u26a0\ufe0f No build agent is currently online. "
-                "Register and start an agent under Settings \u2192 Agents, "
-                "or the step will run on the server (if supported).",
+                "Register and start an agent under Settings \u2192 Agents.",
             )
         return None, None
 
@@ -707,8 +716,7 @@ async def _try_dispatch_to_agent(
         await _emit_system_log(
             step, db, redis_client, channel,
             f"\u26a0\ufe0f Agent \u2018{agent.name}\u2019 did not respond within the timeout. "
-            "The agent may have disconnected or the step took too long. "
-            "Falling back to server-side execution.",
+            "The agent may have disconnected or the step took too long.",
         )
 
     return result, agent.id if result is not None else None
