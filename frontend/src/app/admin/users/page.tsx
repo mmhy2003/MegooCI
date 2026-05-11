@@ -236,7 +236,7 @@ export default function AdminUsersPage() {
       title: "Delete user permanently?",
       description: `This will permanently delete ${u.name} (${u.email}) and remove all their role assignments. This action cannot be undone.`,
       confirmText: "Delete",
-      tone: "danger",
+      tone: "destructive",
     });
     if (!ok) return;
     try {
