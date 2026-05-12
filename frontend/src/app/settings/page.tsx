@@ -116,7 +116,6 @@ function MaintenanceCard({
         description:
           "All pending builds will be paused. New builds will still be queued but won't execute until maintenance mode is disabled. Continue?",
         confirmText: "Enable",
-        variant: "destructive",
       });
       if (!ok) return;
     }
