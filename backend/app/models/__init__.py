@@ -23,6 +23,7 @@ from app.models.registry import (
 )
 from app.models.role import Role, UserRole
 from app.models.secret import EnvVar, Secret
+from app.models.system_setting import SystemSetting
 from app.models.trigger import Trigger, WebhookEndpoint
 from app.models.user import User
 
@@ -57,4 +58,5 @@ __all__ = [
     "ContainerTag",
     "RegistryDeployToken",
     "RegistryEvent",
+    "SystemSetting",
 ]

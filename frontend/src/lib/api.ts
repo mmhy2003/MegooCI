@@ -718,8 +718,22 @@ export interface SystemInfo {
   git: GitIntegrationInfo;
 }
 
+export interface AiSettingsUpdate {
+  enabled?: boolean;
+  provider?: string;
+  api_key?: string;
+  model?: string;
+  base_url?: string;
+}
+
 export const systemApi = {
   info: () => fetchApi<SystemInfo>("/api/v1/system/info"),
+
+  updateAi: (data: AiSettingsUpdate) =>
+    fetchApi<AiInfo>("/api/v1/system/ai", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
 };
 
 // ------------------------------------------------------------------

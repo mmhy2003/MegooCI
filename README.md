@@ -260,7 +260,10 @@ MegooCI reads all configuration from environment variables. See [`.env.example`]
 | `MEGOOCI_STORAGE_ROOT` | `/var/lib/megooci` | Root folder for artifacts, logs, and registry blobs. |
 | `MEGOOCI_PUBLIC_URL` | `http://localhost:8000` | External URL used for webhook URLs. |
 | `MEGOOCI_AI_ENABLED` | `true` | Enable/disable the AI pipeline assistant. |
-| `MEGOOCI_AI_BASE_URL` | — | OpenAI-compatible API endpoint (OpenAI, Azure, Ollama, vLLM). |
+| `MEGOOCI_AI_PROVIDER` | `openai` | `openai`, `anthropic`, `ollama`, `azure_openai`, `custom`, or `disabled`. |
+| `MEGOOCI_AI_API_KEY` | — | Provider API key (not needed for `ollama`). |
+| `MEGOOCI_AI_MODEL` | provider default | Model identifier (e.g. `gpt-4o-mini`, `claude-sonnet-4-5`). |
+| `MEGOOCI_AI_BASE_URL` | — | OpenAI-compatible API endpoint. Use `custom` provider + this URL for vLLM, LiteLLM, LM Studio, etc. All AI settings can also be changed at runtime from **Settings → AI Configuration** (admin only). |
 | `MEGOOCI_REGISTRY_STORAGE_PATH` | — | Path for OCI registry blob storage. |
 | `MEGOOCI_REGISTRY_MAX_UPLOAD_MB` | — | Max image layer upload size. |
 | `MEGOOCI_ARTIFACT_RETENTION_DAYS` | `30` | Days to retain build artifacts before expiry. |

@@ -418,15 +418,17 @@ async def pipeline_assistant(
     current_user: User = Depends(require_permission("pipelines.manage")),
 ) -> AssistantResponse:
     from app.core.deps import _collect_permissions
+    from app.api.v1.system import get_ai_overrides, resolve_ai_config
 
-    settings = get_settings()
+    overrides = await get_ai_overrides(db)
+    ai_cfg = resolve_ai_config(overrides)
 
-    if not settings.MEGOOCI_AI_ENABLED:
+    if not ai_cfg["enabled"]:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI assistant is disabled",
         )
-    if not settings.MEGOOCI_AI_API_KEY:
+    if not ai_cfg["api_key"] and ai_cfg["provider"] in ("openai", "anthropic", "azure_openai"):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI API key is not configured",
@@ -488,19 +490,19 @@ async def pipeline_assistant(
 
     messages.append({"role": "user", "content": body.prompt})
 
-    base_url = settings.MEGOOCI_AI_BASE_URL or "https://api.openai.com/v1"
-    url = f"{base_url.rstrip('/')}/chat/completions"
+    base_url = ai_cfg["base_url"] or "https://api.openai.com/v1"
+    url = f"{str(base_url).rstrip('/')}/chat/completions"
 
     async with httpx.AsyncClient(timeout=60) as client:
         try:
+            req_headers: dict[str, str] = {"Content-Type": "application/json"}
+            if ai_cfg["api_key"]:
+                req_headers["Authorization"] = f"Bearer {ai_cfg['api_key']}"
             resp = await client.post(
                 url,
-                headers={
-                    "Authorization": f"Bearer {settings.MEGOOCI_AI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
+                headers=req_headers,
                 json={
-                    "model": settings.MEGOOCI_AI_MODEL or "gpt-4o-mini",
+                    "model": ai_cfg["model"] or "gpt-4o-mini",
                     "messages": messages,
                     "temperature": 0.3,
                     "max_tokens": 4096,
