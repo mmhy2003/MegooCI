@@ -83,6 +83,15 @@ async def execute_build(
             await redis_client.aclose()
             return
 
+        # ── Maintenance gate ─────────────────────────────────────────────
+        from app.api.v1.system import is_maintenance_mode
+        if await is_maintenance_mode(db):
+            # Leave the build as pending — it will be picked up when
+            # maintenance mode is disabled and dispatch_pending_builds()
+            # is called.
+            await redis_client.aclose()
+            return
+
         agent = await pick_online_agent(db)
         if agent is not None:
             claimed = await claim_agent(db, agent.id, build_id)

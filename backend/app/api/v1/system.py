@@ -33,6 +33,8 @@ _AI_SETTING_KEYS = {
     "ai_base_url",
 }
 
+_MAINTENANCE_KEY = "maintenance_mode"
+
 
 async def get_ai_overrides(db: AsyncSession) -> dict[str, str]:
     """Fetch AI-related runtime overrides from the DB.
@@ -117,10 +119,16 @@ class GitIntegrationInfo(BaseModel):
     webhook_rate_limit_per_minute: int
 
 
+class MaintenanceInfo(BaseModel):
+    enabled: bool
+    message: str | None = None
+
+
 class SystemInfo(BaseModel):
     version: str
     public_url: str
     log_level: str
+    maintenance: MaintenanceInfo
     ai: AiInfo
     storage: StorageInfo
     auth: AuthInfo
@@ -205,10 +213,13 @@ async def get_system_info(
     settings = get_settings()
     overrides = await get_ai_overrides(db)
 
+    maint = await _get_maintenance_info(db)
+
     return SystemInfo(
         version="0.1.0",
         public_url=settings.MEGOOCI_PUBLIC_URL,
         log_level=settings.MEGOOCI_LOG_LEVEL,
+        maintenance=maint,
         ai=_build_ai_info(overrides),
         storage=StorageInfo(
             storage_root=settings.MEGOOCI_STORAGE_ROOT,
@@ -296,3 +307,83 @@ async def update_ai_settings(
     # Re-read to get fresh merged state.
     overrides = await get_ai_overrides(db)
     return _build_ai_info(overrides)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Maintenance Mode
+# ──────────────────────────────────────────────────────────────────────
+
+async def _get_maintenance_info(db: AsyncSession) -> MaintenanceInfo:
+    """Read maintenance mode state from the DB."""
+    row = await db.get(SystemSetting, _MAINTENANCE_KEY)
+    if row is None or row.value.lower() not in ("1", "true", "yes"):
+        return MaintenanceInfo(enabled=False)
+    # Check for an optional message stored in a companion key.
+    msg_row = await db.get(SystemSetting, "maintenance_message")
+    return MaintenanceInfo(
+        enabled=True,
+        message=msg_row.value if msg_row and msg_row.value else None,
+    )
+
+
+async def is_maintenance_mode(db: AsyncSession) -> bool:
+    """Quick check used by the build executor / dispatcher."""
+    row = await db.get(SystemSetting, _MAINTENANCE_KEY)
+    if row is None:
+        return False
+    return row.value.lower() in ("1", "true", "yes")
+
+
+class MaintenanceToggle(BaseModel):
+    enabled: bool
+    message: str | None = None
+
+
+@router.get("/maintenance", response_model=MaintenanceInfo)
+async def get_maintenance(
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_active_user),
+) -> MaintenanceInfo:
+    """Check whether maintenance mode is active."""
+    return await _get_maintenance_info(db)
+
+
+@router.put("/maintenance", response_model=MaintenanceInfo)
+async def set_maintenance(
+    body: MaintenanceToggle,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(get_current_admin_user),
+) -> MaintenanceInfo:
+    """Toggle maintenance mode (admin only).
+
+    When enabled, new builds are queued as ``pending`` but will not be
+    dispatched to agents until maintenance mode is turned off.
+    """
+    value = "true" if body.enabled else "false"
+    existing = await db.get(SystemSetting, _MAINTENANCE_KEY)
+    if existing:
+        existing.value = value
+    else:
+        db.add(SystemSetting(key=_MAINTENANCE_KEY, value=value))
+
+    # Persist the optional message.
+    msg_row = await db.get(SystemSetting, "maintenance_message")
+    msg_value = (body.message or "").strip()
+    if msg_row:
+        msg_row.value = msg_value
+    elif msg_value:
+        db.add(SystemSetting(key="maintenance_message", value=msg_value))
+
+    await db.flush()
+    result = await _get_maintenance_info(db)
+
+    # When maintenance mode is turned off, kick the dispatcher so queued
+    # builds start executing immediately.
+    if not body.enabled:
+        try:
+            from app.services.agent_dispatcher import dispatch_pending_builds
+            await dispatch_pending_builds()
+        except Exception:
+            pass  # best-effort; builds will be picked up on the next cycle
+
+    return result

@@ -707,10 +707,16 @@ export interface GitIntegrationInfo {
   webhook_rate_limit_per_minute: number;
 }
 
+export interface MaintenanceInfo {
+  enabled: boolean;
+  message: string | null;
+}
+
 export interface SystemInfo {
   version: string;
   public_url: string;
   log_level: string;
+  maintenance: MaintenanceInfo;
   ai: AiInfo;
   storage: StorageInfo;
   auth: AuthInfo;
@@ -731,6 +737,15 @@ export const systemApi = {
 
   updateAi: (data: AiSettingsUpdate) =>
     fetchApi<AiInfo>("/api/v1/system/ai", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  getMaintenance: () =>
+    fetchApi<MaintenanceInfo>("/api/v1/system/maintenance"),
+
+  setMaintenance: (data: { enabled: boolean; message?: string | null }) =>
+    fetchApi<MaintenanceInfo>("/api/v1/system/maintenance", {
       method: "PUT",
       body: JSON.stringify(data),
     }),
