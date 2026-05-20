@@ -359,7 +359,7 @@ export function DocsPanel({ className, onInsert, onClose }: DocsPanelProps) {
           </Button>
         )}
       </div>
-      <ScrollArea maxHeight="calc(100vh - 200px)" className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="divide-y">
           {DOCS.map((doc) => {
             const isOpen = expanded === doc.id;

@@ -183,7 +183,7 @@ export function VarsPanel({ className, projectId, pipelineId, onInsert, onClose 
           <p className="text-sm text-muted-foreground">{error}</p>
         </div>
       ) : (
-        <ScrollArea maxHeight="calc(100vh - 200px)" className="flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="divide-y">
             {/* Built-in Variables Section */}
             <div>
