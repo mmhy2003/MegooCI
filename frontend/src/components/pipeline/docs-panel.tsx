@@ -17,6 +17,7 @@ import {
   Copy,
   Check,
   Play,
+  Package,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -238,6 +239,23 @@ stages:
       VERSION: "1.2.3"
     wait: true                      # block until child finishes
     timeout: 3600                   # max wait seconds (default: 3600)`,
+  },
+  {
+    id: "artifacts",
+    title: "Artifacts",
+    icon: <Package className="h-4 w-4" />,
+    description:
+      "Collect build outputs (binaries, reports, bundles) after a stage's steps succeed. Declare an artifacts.paths list on the stage with glob patterns resolved from the workspace root. Files are stored on the server and downloadable from the build detail page and the /artifacts page; retention is governed by system settings.",
+    yaml: `stages:
+  - name: build
+    steps:
+      - run: "go build -o dist/myapp ./cmd/app"
+      - run: "go test -coverprofile=coverage/report.out ./..."
+    artifacts:
+      paths:
+        - "dist/*"
+        - "coverage/report.out"
+        - "build/reports/**/*.html"`,
   },
   {
     id: "secrets",

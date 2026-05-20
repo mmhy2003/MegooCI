@@ -14,6 +14,49 @@ class ApiError extends Error {
   }
 }
 
+/**
+ * Turn a FastAPI error response into a human-readable string.
+ *
+ * FastAPI shapes:
+ *   - HTTPException → { "detail": "string" }
+ *   - Pydantic validation errors → { "detail": [{ "msg": "...", "loc": [...] }, ...] }
+ *   - Plain text body (rare) → "string"
+ *
+ * Falls back to friendly per-status messages so the user never sees "API error: 401".
+ */
+function extractErrorMessage(status: number, body: unknown): string {
+  if (body && typeof body === "object" && "detail" in body) {
+    const detail = (body as { detail: unknown }).detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (Array.isArray(detail)) {
+      const msgs = detail
+        .map((e) =>
+          e && typeof e === "object" && "msg" in e
+            ? String((e as { msg: unknown }).msg)
+            : null,
+        )
+        .filter((m): m is string => Boolean(m));
+      if (msgs.length) return msgs.join("; ");
+    }
+  }
+  if (typeof body === "string" && body.trim()) return body.trim();
+
+  switch (status) {
+    case 400: return "The request was invalid. Please check the form and try again.";
+    case 401: return "Invalid credentials. Please check your email and password.";
+    case 403: return "You don't have permission to do that.";
+    case 404: return "We couldn't find what you were looking for.";
+    case 409: return "That doesn't match the current state. Refresh and try again.";
+    case 422: return "Some fields are invalid. Please review and try again.";
+    case 429: return "Too many requests — please wait a moment and try again.";
+    case 500: return "The server hit an unexpected error. Please try again.";
+    case 502:
+    case 503:
+    case 504: return "The server is temporarily unavailable. Please try again shortly.";
+    default: return `Request failed (${status}). Please try again.`;
+  }
+}
+
 function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(ACCESS_KEY);
@@ -90,7 +133,15 @@ async function performFetch(
     ...(options.headers as Record<string, string>),
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  return fetch(`${BASE_URL}${endpoint}`, { ...options, headers, cache: "no-store" });
+  try {
+    return await fetch(`${BASE_URL}${endpoint}`, { ...options, headers, cache: "no-store" });
+  } catch {
+    throw new ApiError(
+      0,
+      null,
+      "Couldn't reach the server. Please check your connection and try again.",
+    );
+  }
 }
 
 async function fetchApi<T>(
@@ -124,7 +175,7 @@ async function fetchApi<T>(
     } catch {
       body = await res.text();
     }
-    throw new ApiError(res.status, body, `API error: ${res.status}`);
+    throw new ApiError(res.status, body, extractErrorMessage(res.status, body));
   }
 
   if (res.status === 204) return undefined as T;
@@ -156,7 +207,7 @@ async function fetchApiWithHeaders<T>(
     } catch {
       body = await res.text();
     }
-    throw new ApiError(res.status, body, `API error: ${res.status}`);
+    throw new ApiError(res.status, body, extractErrorMessage(res.status, body));
   }
 
   if (res.status === 204) return { data: undefined as T, headers: res.headers };
