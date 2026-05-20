@@ -6,6 +6,10 @@ A single static Go binary that connects outbound to a MegooCI controller over
 WebSocket and runs build steps on behalf of the controller. Works on Linux,
 macOS, and Windows, on both amd64 and arm64.
 
+The Docker image ships a batteries-included toolchain — Python 3, Node.js +
+npm + pnpm, uv, build-essential, Docker CLI + BuildKit, Temurin JDK 21,
+Maven, and the Dart SDK — so most pipelines run without a custom base image.
+
 Implements the agent side of **PRD §6.3** (F-3.4). Phase 1 ships with the
 local-shell executor only; Docker / SSH / Kubernetes executors will satisfy
 the same `executor.Executor` interface in future releases.

@@ -1,8 +1,9 @@
 # Multi-stage build for the MegooCI agent. The final image ships a batteries-
-# included toolchain (Python, Node/npm/pnpm, uv, build-essential, Docker CLI)
-# so most pipeline steps work without needing the user to bring their own base
-# image. The Docker CLI is client-only — bind-mount the host socket or run a
-# DinD sidecar to enable `docker build` / `docker run` inside pipelines.
+# included toolchain (Python, Node/npm/pnpm, uv, build-essential, Docker CLI,
+# Temurin JDK 21, Maven, Dart SDK) so most pipeline steps work without needing
+# the user to bring their own base image. The Docker CLI is client-only —
+# bind-mount the host socket or run a DinD sidecar to enable `docker build` /
+# `docker run` inside pipelines.
 #
 # Build:
 #   docker build -t megooci/agent:dev ./agent
@@ -97,6 +98,42 @@ RUN curl -fsSL https://download.docker.com/linux/debian/gpg \
 
 # ── uv (Astral official image) ─────────────────────────────────────────────
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# ── Temurin JDK 21 LTS (Adoptium official repo) ────────────────────────────
+# Installs to /usr/lib/jvm/temurin-21-jdk-<arch>; we add a stable arch-agnostic
+# symlink so JAVA_HOME works the same on amd64 and arm64 images.
+ARG JDK_MAJOR=21
+RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
+      | gpg --dearmor -o /usr/share/keyrings/adoptium.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb bookworm main" \
+      > /etc/apt/sources.list.d/adoptium.list \
+ && apt-get update && apt-get install -y --no-install-recommends "temurin-${JDK_MAJOR}-jdk" \
+ && ln -sf "/usr/lib/jvm/temurin-${JDK_MAJOR}-jdk-$(dpkg --print-architecture)" /usr/lib/jvm/default-jvm \
+ && rm -rf /var/lib/apt/lists/*
+ENV JAVA_HOME=/usr/lib/jvm/default-jvm
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+# ── Maven (Apache binary tarball) ──────────────────────────────────────────
+# Pulled directly from Apache instead of `apt install maven` to avoid the
+# Debian package's hard dependency on OpenJDK (which would duplicate Temurin).
+ARG MAVEN_VERSION=3.9.9
+RUN curl -fsSL "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
+      | tar -xz -C /opt \
+ && ln -sf "/opt/apache-maven-${MAVEN_VERSION}" /opt/maven \
+ && ln -sf /opt/maven/bin/mvn /usr/local/bin/mvn \
+ && ln -sf /opt/maven/bin/mvnDebug /usr/local/bin/mvnDebug
+ENV MAVEN_HOME=/opt/maven
+
+# ── Dart SDK (Google official repo) ────────────────────────────────────────
+# Supports amd64 + arm64. Pure-Dart projects use `dart pub`, `dart compile`,
+# `dart test`, etc. directly; no Flutter SDK is bundled in this image.
+RUN curl -fsSL https://dl-ssl.google.com/linux/linux_signing_key.pub \
+      | gpg --dearmor -o /usr/share/keyrings/dart.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/dart.gpg] https://storage.googleapis.com/download.dartlang.org/linux/debian stable main" \
+      > /etc/apt/sources.list.d/dart_stable.list \
+ && apt-get update && apt-get install -y --no-install-recommends dart \
+ && rm -rf /var/lib/apt/lists/*
+ENV PATH="/usr/lib/dart/bin:${PATH}"
 
 # ── Non-root user ──────────────────────────────────────────────────────────
 # Create a 'docker' group so the socket GID can be mapped at runtime via
