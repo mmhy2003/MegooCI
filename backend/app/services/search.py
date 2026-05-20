@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 INDEX_PROJECTS = "projects"
 INDEX_PIPELINES = "pipelines"
 INDEX_BUILDS = "builds"
+INDEX_ARTIFACTS = "artifacts"
 
 INDEX_SETTINGS: dict[str, MeilisearchSettings] = {
     INDEX_PROJECTS: MeilisearchSettings(
@@ -44,6 +45,18 @@ INDEX_SETTINGS: dict[str, MeilisearchSettings] = {
         displayed_attributes=[
             "id", "pipeline_id", "number", "branch", "commit_sha",
             "status", "trigger_type", "created_at",
+        ],
+    ),
+    INDEX_ARTIFACTS: MeilisearchSettings(
+        searchable_attributes=["relative_path", "pipeline_name", "project_name"],
+        filterable_attributes=["project_id", "pipeline_id", "build_id"],
+        sortable_attributes=["created_at", "size_bytes"],
+        displayed_attributes=[
+            "id", "relative_path", "size_bytes",
+            "build_id", "build_number",
+            "pipeline_id", "pipeline_name",
+            "project_id", "project_name",
+            "created_at",
         ],
     ),
 }
@@ -105,6 +118,31 @@ def _build_doc(build: Any) -> dict[str, Any]:
     }
 
 
+def _artifact_doc(
+    artifact: Any,
+    *,
+    build_number: int,
+    pipeline_id: Any,
+    pipeline_name: str,
+    project_id: Any,
+    project_name: str,
+) -> dict[str, Any]:
+    """Build an artifact search doc. Caller supplies the joined build / pipeline /
+    project context — the Artifact row alone doesn't carry it."""
+    return {
+        "id": str(artifact.id),
+        "relative_path": artifact.relative_path,
+        "size_bytes": artifact.size_bytes,
+        "build_id": str(artifact.build_id),
+        "build_number": build_number,
+        "pipeline_id": str(pipeline_id),
+        "pipeline_name": pipeline_name,
+        "project_id": str(project_id),
+        "project_name": project_name,
+        "created_at": artifact.created_at.isoformat() if artifact.created_at else "",
+    }
+
+
 # ── Single-document index operations (fire-and-forget safe) ────────────
 
 async def index_project(project: Any) -> None:
@@ -134,6 +172,32 @@ async def index_build(build: Any) -> None:
         logger.warning("Failed to index build %s", build.id, exc_info=True)
 
 
+async def index_artifact(
+    artifact: Any,
+    *,
+    build_number: int,
+    pipeline_id: Any,
+    pipeline_name: str,
+    project_id: Any,
+    project_name: str,
+) -> None:
+    try:
+        async with _get_client() as client:
+            index = client.index(INDEX_ARTIFACTS)
+            await index.add_documents([
+                _artifact_doc(
+                    artifact,
+                    build_number=build_number,
+                    pipeline_id=pipeline_id,
+                    pipeline_name=pipeline_name,
+                    project_id=project_id,
+                    project_name=project_name,
+                )
+            ])
+    except Exception:
+        logger.warning("Failed to index artifact %s", artifact.id, exc_info=True)
+
+
 async def remove_project(project_id: str) -> None:
     try:
         async with _get_client() as client:
@@ -161,13 +225,23 @@ async def remove_build(build_id: str) -> None:
         logger.warning("Failed to remove build %s from index", build_id, exc_info=True)
 
 
+async def remove_artifact(artifact_id: str) -> None:
+    try:
+        async with _get_client() as client:
+            index = client.index(INDEX_ARTIFACTS)
+            await index.delete_document(artifact_id)
+    except Exception:
+        logger.warning("Failed to remove artifact %s from index", artifact_id, exc_info=True)
+
+
 # ── Full re-sync (called once on startup) ──────────────────────────────
 
 async def sync_all(db: AsyncSession) -> None:
-    """Bulk-sync all projects, pipelines, and builds into Meilisearch."""
+    """Bulk-sync all projects, pipelines, builds, and recent artifacts into Meilisearch."""
     from app.models.project import Project
     from app.models.pipeline import Pipeline
     from app.models.build import Build
+    from app.models.artifact import Artifact
 
     async with _get_client() as client:
         # Projects
@@ -195,6 +269,38 @@ async def sync_all(db: AsyncSession) -> None:
             idx = client.index(INDEX_BUILDS)
             await idx.add_documents(builds)
         logger.info("Synced %d builds to Meilisearch", len(builds))
+
+        # Artifacts (limit to most recent 1000 — joined to build/pipeline/project)
+        result = await db.execute(
+            select(
+                Artifact,
+                Build.number.label("build_number"),
+                Pipeline.id.label("pipeline_id"),
+                Pipeline.name.label("pipeline_name"),
+                Project.id.label("project_id"),
+                Project.name.label("project_name"),
+            )
+            .join(Build, Artifact.build_id == Build.id)
+            .join(Pipeline, Build.pipeline_id == Pipeline.id)
+            .join(Project, Pipeline.project_id == Project.id)
+            .order_by(Artifact.created_at.desc())
+            .limit(1000)
+        )
+        artifact_docs = [
+            _artifact_doc(
+                row[0],
+                build_number=row.build_number,
+                pipeline_id=row.pipeline_id,
+                pipeline_name=row.pipeline_name,
+                project_id=row.project_id,
+                project_name=row.project_name,
+            )
+            for row in result.all()
+        ]
+        if artifact_docs:
+            idx = client.index(INDEX_ARTIFACTS)
+            await idx.add_documents(artifact_docs)
+        logger.info("Synced %d artifacts to Meilisearch", len(artifact_docs))
 
 
 # ── Multi-index search ──────────────────────────────────────────────────

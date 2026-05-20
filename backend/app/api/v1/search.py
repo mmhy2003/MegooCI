@@ -68,6 +68,31 @@ def _build_hits(hits: list[dict[str, Any]]) -> list[SearchHit]:
     return out
 
 
+def _artifact_hits(hits: list[dict[str, Any]]) -> list[SearchHit]:
+    out: list[SearchHit] = []
+    for h in hits:
+        path = h.get("relative_path", "")
+        # Clicking an artifact result jumps to /artifacts with the filename
+        # pre-filled in the page's search box so the user lands on a filtered view.
+        from urllib.parse import quote
+        url = f"/artifacts?q={quote(path)}"
+        subtitle_parts = []
+        if h.get("project_name"):
+            subtitle_parts.append(h["project_name"])
+        if h.get("pipeline_name"):
+            subtitle_parts.append(h["pipeline_name"])
+        if h.get("build_number") is not None:
+            subtitle_parts.append(f"build #{h['build_number']}")
+        out.append(SearchHit(
+            id=h["id"],
+            type="artifact",
+            title=path or "(unnamed artifact)",
+            subtitle=" · ".join(subtitle_parts) or None,
+            url=url,
+        ))
+    return out
+
+
 @router.get("", response_model=SearchResponse)
 async def search(
     q: str = Query(..., min_length=1, max_length=200, description="Search query"),
@@ -83,6 +108,8 @@ async def search(
         allowed_indexes.append("pipelines")
     if current_user.is_admin or "builds.read" in perms:
         allowed_indexes.append("builds")
+    if current_user.is_admin or "artifacts.read" in perms:
+        allowed_indexes.append("artifacts")
 
     if not allowed_indexes:
         return SearchResponse(query=q, results=[])
@@ -93,5 +120,6 @@ async def search(
     results.extend(_project_hits(grouped.get("projects", [])))
     results.extend(_pipeline_hits(grouped.get("pipelines", [])))
     results.extend(_build_hits(grouped.get("builds", [])))
+    results.extend(_artifact_hits(grouped.get("artifacts", [])))
 
     return SearchResponse(query=q, results=results)

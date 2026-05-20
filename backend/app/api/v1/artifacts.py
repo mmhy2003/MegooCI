@@ -20,6 +20,7 @@ from app.database import get_db
 from app.models.artifact import Artifact
 from app.models.build import Build
 from app.models.pipeline import Pipeline
+from app.models.project import Project
 from app.models.user import User
 from app.schemas.artifact import ArtifactListItem, ArtifactResponse
 
@@ -44,6 +45,8 @@ async def list_all_artifacts(
             Build.number.label("build_number"),
             Build.pipeline_id,
             Pipeline.name.label("pipeline_name"),
+            Pipeline.project_id.label("project_id"),
+            Project.name.label("project_name"),
             Artifact.relative_path,
             Artifact.size_bytes,
             Artifact.checksum_sha256,
@@ -52,6 +55,7 @@ async def list_all_artifacts(
         )
         .join(Build, Artifact.build_id == Build.id)
         .join(Pipeline, Build.pipeline_id == Pipeline.id)
+        .join(Project, Pipeline.project_id == Project.id)
         .order_by(Artifact.created_at.desc())
         .offset(skip)
         .limit(limit)
@@ -64,6 +68,8 @@ async def list_all_artifacts(
             build_number=row.build_number,
             pipeline_id=row.pipeline_id,
             pipeline_name=row.pipeline_name,
+            project_id=row.project_id,
+            project_name=row.project_name,
             relative_path=row.relative_path,
             size_bytes=row.size_bytes,
             checksum_sha256=row.checksum_sha256,
@@ -157,6 +163,22 @@ async def upload_artifact(
     db.add(artifact)
     await db.commit()
     await db.refresh(artifact)
+
+    # Index for global search — load joined context (pipeline + project).
+    pipeline = await db.get(Pipeline, build.pipeline_id)
+    project = await db.get(Project, pipeline.project_id) if pipeline else None
+    if pipeline is not None and project is not None:
+        from app.services.search import index_artifact
+
+        await index_artifact(
+            artifact,
+            build_number=build.number,
+            pipeline_id=pipeline.id,
+            pipeline_name=pipeline.name,
+            project_id=project.id,
+            project_name=project.name,
+        )
+
     return artifact
 
 
@@ -279,5 +301,10 @@ async def delete_artifact(
     if path.is_file():
         path.unlink()
 
+    artifact_id_str = str(artifact.id)
     await db.delete(artifact)
     await db.commit()
+
+    from app.services.search import remove_artifact
+
+    await remove_artifact(artifact_id_str)

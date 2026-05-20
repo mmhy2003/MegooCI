@@ -7,6 +7,7 @@ import {
   FolderKanban,
   GitBranch,
   Hammer,
+  FileArchive,
   Loader2,
   CornerDownLeft,
 } from "lucide-react";
@@ -31,6 +32,11 @@ const TYPE_META: Record<
     icon: Hammer,
     label: "Build",
     color: "text-amber-500",
+  },
+  artifact: {
+    icon: FileArchive,
+    label: "Artifact",
+    color: "text-emerald-500",
   },
 };
 
@@ -143,7 +149,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search projects, pipelines, builds..."
+            placeholder="Search projects, pipelines, builds, artifacts..."
             className="flex-1 bg-transparent py-3.5 text-sm outline-none placeholder:text-muted-foreground"
             autoComplete="off"
             spellCheck={false}
@@ -242,7 +248,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 }
 
 function groupByType(hits: SearchHit[]): [string, SearchHit[]][] {
-  const order = ["project", "pipeline", "build"];
+  const order = ["project", "pipeline", "build", "artifact"];
   const map = new Map<string, SearchHit[]>();
   for (const hit of hits) {
     const list = map.get(hit.type) ?? [];

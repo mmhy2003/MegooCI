@@ -531,6 +531,8 @@ export interface ArtifactListItem extends Artifact {
   build_number: number;
   pipeline_id: string;
   pipeline_name: string;
+  project_id: string;
+  project_name: string;
 }
 
 export const artifactsApi = {
@@ -807,7 +809,7 @@ export const systemApi = {
 // ------------------------------------------------------------------
 export interface SearchHit {
   id: string;
-  type: "project" | "pipeline" | "build";
+  type: "project" | "pipeline" | "build" | "artifact";
   title: string;
   subtitle: string | null;
   url: string;
