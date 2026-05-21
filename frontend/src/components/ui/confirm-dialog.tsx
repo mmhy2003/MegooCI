@@ -30,6 +30,10 @@ export function useConfirm(): (options: ConfirmOptions) => Promise<boolean> {
 }
 
 interface PendingConfirm extends ConfirmOptions {
+  // Identity counter so a late "clear pending" timer from a previous
+  // confirm can't blank out a fresh one that opened during the 150ms
+  // exit-animation window.
+  id: number;
   resolve: (value: boolean) => void;
 }
 
@@ -72,11 +76,23 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = React.useState<PendingConfirm | null>(null);
   const [visible, setVisible] = React.useState(false);
   const confirmButtonRef = React.useRef<HTMLButtonElement>(null);
+  // Counter that mints a fresh id per confirm so we can detect when a
+  // queued "clear pending" timer belongs to a now-stale dialog.
+  const nextIdRef = React.useRef(0);
+  const clearTimerRef = React.useRef<number | null>(null);
 
   const confirm = React.useCallback<ConfirmContextValue["confirm"]>(
     (options) =>
       new Promise<boolean>((resolve) => {
-        setPending({ ...options, resolve });
+        // A previous close() may have queued a setPending(null) timer to
+        // run after its exit animation. Cancel it before opening — otherwise
+        // it will blank out the dialog we're about to show.
+        if (clearTimerRef.current !== null) {
+          window.clearTimeout(clearTimerRef.current);
+          clearTimerRef.current = null;
+        }
+        const id = ++nextIdRef.current;
+        setPending({ ...options, id, resolve });
         setVisible(true);
       }),
     [],
@@ -85,10 +101,16 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const close = React.useCallback(
     (result: boolean) => {
       if (!pending) return;
+      const closingId = pending.id;
       pending.resolve(result);
       setVisible(false);
-      // Delay clearing so the exit transition can play out.
-      window.setTimeout(() => setPending(null), 150);
+      // Delay clearing so the exit transition can play out. Guard against
+      // a fresh confirm() opening in the meantime — we only null out
+      // `pending` if it still belongs to the dialog we just closed.
+      clearTimerRef.current = window.setTimeout(() => {
+        clearTimerRef.current = null;
+        setPending((current) => (current && current.id === closingId ? null : current));
+      }, 150);
     },
     [pending],
   );
