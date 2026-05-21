@@ -18,6 +18,7 @@ import {
   Check,
   Play,
   Package,
+  Server,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,9 +38,10 @@ const DOCS: DocSection[] = [
     title: "Pipeline Structure",
     icon: <BookOpen className="h-4 w-4" />,
     description:
-      "Every pipeline starts with a version, name, optional global env vars, and a list of stages. Each stage has steps.",
+      "Every pipeline starts with a version, name, optional global env vars, an optional runs_on targeting the build agent, and a list of stages. Each stage has steps.",
     yaml: `version: 1
 name: my-pipeline
+runs_on: linux          # optional — route the whole build to a Linux agent
 env:
   APP_NAME: myapp
 
@@ -53,6 +55,43 @@ stages:
       branch: main
     steps:
       - run: "echo Deploying..."`,
+  },
+  {
+    id: "runs_on",
+    title: "Target Agent (runs_on)",
+    icon: <Server className="h-4 w-4" />,
+    description:
+      "Route the entire build to a specific agent environment. `runs_on` is declared once at the top of the YAML — every stage in the build runs on the same agent. Use the shorthand `runs_on: <os>` to pin to an OS (linux, windows, darwin), or the full form with arch and labels for finer control. Agents are registered under Settings → Agents with their OS, architecture, and labels. If no matching agent is online, the build stays pending until one connects (or an admin re-enables a disabled agent). Omit `runs_on` entirely to accept any online agent.",
+    yaml: `# Shorthand — pin the build to a Linux agent
+version: 1
+name: build-app
+runs_on: linux
+stages:
+  - name: build
+    steps:
+      - run: "go build ./..."
+
+# Full form — match os + arch + labels
+version: 1
+name: package-windows
+runs_on:
+  os: windows
+  arch: amd64
+  labels: [docker]        # agent must carry ALL listed labels
+stages:
+  - name: package
+    steps:
+      - run: "msbuild app.sln"
+
+# No runs_on — any online agent will do
+version: 1
+name: notify-only
+stages:
+  - name: notify
+    steps:
+      - notify:
+          channel: "deploy-alerts"
+          message: "Build done"`,
   },
   {
     id: "run",

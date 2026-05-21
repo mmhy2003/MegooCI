@@ -35,7 +35,7 @@ import uuid
 from typing import Any
 
 import redis.asyncio as aioredis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -69,26 +69,84 @@ def step_result_channel(step_id: uuid.UUID | str) -> str:
     return f"step:{step_id}:result"
 
 
-async def pick_online_agent(db: AsyncSession) -> Agent | None:
-    """Return an idle, currently-online agent or None.
+def agent_matches_requirements(
+    agent: Agent, requirements: dict[str, Any] | None
+) -> bool:
+    """True if *agent* satisfies the given runs_on requirements.
+
+    Requirements is a dict that may contain any subset of:
+      - ``os``    : exact match (case-insensitive)
+      - ``arch``  : exact match (case-insensitive)
+      - ``labels``: list — agent.labels must be a superset
+
+    None / empty requirements always match.
+    """
+    if not requirements:
+        return True
+
+    req_os = (requirements.get("os") or "").strip().lower() if isinstance(requirements.get("os"), str) else ""
+    if req_os and (agent.os or "").strip().lower() != req_os:
+        return False
+
+    req_arch = (requirements.get("arch") or "").strip().lower() if isinstance(requirements.get("arch"), str) else ""
+    if req_arch and (agent.arch or "").strip().lower() != req_arch:
+        return False
+
+    req_labels = requirements.get("labels") or []
+    if req_labels:
+        agent_labels = {str(l).strip().lower() for l in (agent.labels or [])}
+        needed = {str(l).strip().lower() for l in req_labels}
+        if not needed.issubset(agent_labels):
+            return False
+
+    return True
+
+
+async def pick_online_agent(
+    db: AsyncSession,
+    requirements: dict[str, Any] | None = None,
+) -> Agent | None:
+    """Return an idle, currently-online agent that matches *requirements*.
 
     An agent is considered "available" when:
+    - ``enabled`` is True (operators can disable agents for maintenance),
     - ``status == 'online'`` and ``connected_at is not None`` (WS up),
     - ``current_build_id IS NULL`` (not already executing a build).
 
-    Picks the least-recently-used idle agent as a poor-man's load balancer.
+    When *requirements* is provided (e.g. ``{"os": "linux"}``), the agent
+    must also match those constraints — see ``agent_matches_requirements``.
+    Picks the least-recently-used matching agent as a poor-man's load
+    balancer.
     """
-    result = await db.execute(
+    # Eligibility filters that translate cleanly to SQL.
+    query = (
         select(Agent)
         .where(
+            Agent.enabled.is_(True),
             Agent.status == "online",
             Agent.connected_at.isnot(None),
             Agent.current_build_id.is_(None),
         )
         .order_by(Agent.last_seen_at.asc())
-        .limit(1)
     )
-    return result.scalar_one_or_none()
+
+    # os / arch are cheap to push down — labels live in JSON, so we filter
+    # those in Python after the query. With a typical handful of agents
+    # this is fine; if the agent pool grows large we can switch to a
+    # JSONB containment query.
+    if requirements:
+        req_os = requirements.get("os")
+        if isinstance(req_os, str) and req_os.strip():
+            query = query.where(func.lower(Agent.os) == req_os.strip().lower())
+        req_arch = requirements.get("arch")
+        if isinstance(req_arch, str) and req_arch.strip():
+            query = query.where(func.lower(Agent.arch) == req_arch.strip().lower())
+
+    result = await db.execute(query)
+    for agent in result.scalars():
+        if agent_matches_requirements(agent, requirements):
+            return agent
+    return None
 
 
 async def claim_agent(
@@ -137,6 +195,11 @@ async def dispatch_pending_builds() -> None:
 
     Called after a build finishes (agent released) so queued pipelines are
     picked up automatically without polling.
+
+    Picks the oldest pending build *whose runs_on requirements can be
+    satisfied by an idle agent right now*. A Windows build at the head of
+    the queue should not block a Linux build behind it when only a Linux
+    agent is free.
     """
     from app.database import async_session as _session_factory
     from app.tasks.build_tasks import run_build
@@ -147,30 +210,32 @@ async def dispatch_pending_builds() -> None:
         if await is_maintenance_mode(db):
             return
 
-        # Find the oldest pending build.
+        # Scan the queue head; bounded so this stays cheap even with a
+        # large backlog.
         result = await db.execute(
             select(Build)
             .where(Build.status == "pending")
             .order_by(Build.created_at.asc())
-            .limit(1)
+            .limit(20)
         )
-        pending = result.scalar_one_or_none()
-        if pending is None:
+        pending_builds = list(result.scalars())
+        if not pending_builds:
             return
 
-        # Check if there's an idle agent.
-        agent = await pick_online_agent(db)
-        if agent is None:
-            return
+        for pending in pending_builds:
+            agent = await pick_online_agent(db, requirements=pending.runs_on)
+            if agent is None:
+                continue
 
-        logger.info(
-            "Dispatching pending build %s to agent %s",
-            pending.id, agent.name,
-        )
-        try:
-            run_build.delay(str(pending.id))
-        except Exception:
-            logger.exception("Failed to enqueue pending build %s", pending.id)
+            logger.info(
+                "Dispatching pending build %s to agent %s",
+                pending.id, agent.name,
+            )
+            try:
+                run_build.delay(str(pending.id))
+            except Exception:
+                logger.exception("Failed to enqueue pending build %s", pending.id)
+            return
 
 
 async def dispatch_step_to_agent(

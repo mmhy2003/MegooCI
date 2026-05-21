@@ -689,6 +689,7 @@ export interface Agent {
   os: string | null;
   arch: string | null;
   capacity: number;
+  enabled: boolean;
   last_seen_at: string | null;
   status: AgentStatus | string;
   // Agent-token metadata (PRD §6.3 / F-3.4). Plaintext token is returned
@@ -712,7 +713,31 @@ export interface CreateAgentRequest {
   os?: string;
   arch?: string;
   capacity?: number;
+  enabled?: boolean;
 }
+
+export interface UpdateAgentRequest {
+  name?: string;
+  labels?: string[];
+  os?: string;
+  arch?: string;
+  capacity?: number;
+  enabled?: boolean;
+}
+
+// Keep in sync with backend `SUPPORTED_OS` / `SUPPORTED_ARCH` in
+// pipeline_compiler.py — these are the values the dispatcher knows how
+// to match against a stage's `runs_on`.
+export const AGENT_OS_OPTIONS: { value: string; label: string }[] = [
+  { value: "linux", label: "Linux" },
+  { value: "windows", label: "Windows" },
+  { value: "darwin", label: "macOS" },
+];
+
+export const AGENT_ARCH_OPTIONS: { value: string; label: string }[] = [
+  { value: "amd64", label: "amd64 (x86_64)" },
+  { value: "arm64", label: "arm64 (aarch64)" },
+];
 
 // ------------------------------------------------------------------
 // System / Runtime config

@@ -93,6 +93,7 @@ async def register_agent(
         os=body.os,
         arch=body.arch,
         capacity=body.capacity,
+        enabled=body.enabled,
         status="offline",
         token_hash=hash_agent_token(token),
         token_prefix=agent_token_prefix(token),
@@ -109,6 +110,7 @@ async def register_agent(
         "os": agent.os,
         "arch": agent.arch,
         "capacity": agent.capacity,
+        "enabled": agent.enabled,
         "last_seen_at": agent.last_seen_at,
         "status": agent.status,
         "token_prefix": agent.token_prefix,
@@ -149,11 +151,22 @@ async def update_agent(
         )
 
     update_data = body.model_dump(exclude_unset=True)
+    was_enabled = agent.enabled
     for field, value in update_data.items():
         setattr(agent, field, value)
 
     await db.commit()
     await db.refresh(agent)
+
+    # If this update re-enabled a previously disabled agent, kick the
+    # dispatcher so any pending build that needs it can move now.
+    if not was_enabled and agent.enabled:
+        try:
+            from app.services.agent_dispatcher import dispatch_pending_builds
+            await dispatch_pending_builds()
+        except Exception:
+            pass
+
     return agent
 
 
@@ -206,6 +219,7 @@ async def rotate_agent_token(
         "os": agent.os,
         "arch": agent.arch,
         "capacity": agent.capacity,
+        "enabled": agent.enabled,
         "last_seen_at": agent.last_seen_at,
         "status": agent.status,
         "token_prefix": agent.token_prefix,

@@ -92,7 +92,9 @@ async def execute_build(
             await redis_client.aclose()
             return
 
-        agent = await pick_online_agent(db)
+        # Build.runs_on was captured from the YAML at trigger time. None
+        # means "any online agent is fine".
+        agent = await pick_online_agent(db, requirements=build.runs_on)
         if agent is not None:
             claimed = await claim_agent(db, agent.id, build_id)
             if claimed:
@@ -101,7 +103,7 @@ async def execute_build(
         if claimed_agent_id is None:
             # No idle agent — leave the build as pending. It will be
             # dispatched by dispatch_pending_builds() when an agent
-            # finishes its current build.
+            # finishes its current build (or comes online / is enabled).
             await redis_client.aclose()
             return
 

@@ -11,7 +11,11 @@ from app.models.build import Build, Stage
 from app.models.pipeline import Pipeline
 from app.models.user import User
 from app.schemas.build import BuildDetailResponse, BuildResponse, BuildTriggerRequest
-from app.services.pipeline_compiler import parse_yaml_pipeline, compile_to_build_graph
+from app.services.pipeline_compiler import (
+    compile_to_build_graph,
+    normalize_runs_on,
+    parse_yaml_pipeline,
+)
 from app.tasks.build_tasks import run_build
 
 router = APIRouter()
@@ -74,6 +78,7 @@ async def trigger_build(
 
     if pipeline.yaml_content:
         pipeline_def = parse_yaml_pipeline(pipeline.yaml_content)
+        build.runs_on = normalize_runs_on(pipeline_def.get("runs_on"))
         stage_defs = compile_to_build_graph(pipeline_def)
 
         for sort_order, stage_def in enumerate(stage_defs):

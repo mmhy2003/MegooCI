@@ -10,6 +10,7 @@ class AgentCreate(BaseModel):
     os: str | None = None
     arch: str | None = None
     capacity: int = Field(default=1, ge=1, le=64)
+    enabled: bool = True
 
 
 class AgentUpdate(BaseModel):
@@ -18,6 +19,7 @@ class AgentUpdate(BaseModel):
     os: str | None = None
     arch: str | None = None
     capacity: int | None = Field(default=None, ge=1, le=64)
+    enabled: bool | None = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -38,6 +40,7 @@ class AgentResponse(BaseModel):
     os: str | None
     arch: str | None
     capacity: int
+    enabled: bool = True
     last_seen_at: datetime | None
     status: str
     # Token metadata — the plaintext token is never returned here.

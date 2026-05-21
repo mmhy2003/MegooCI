@@ -12,6 +12,7 @@ import {
   Cpu,
   KeyRound,
   Monitor,
+  Power,
   RefreshCw,
   Tag,
 } from "lucide-react";
@@ -21,6 +22,8 @@ import { useAuthStore } from "@/lib/auth";
 import {
   agentsApi,
   systemApi,
+  AGENT_OS_OPTIONS,
+  AGENT_ARCH_OPTIONS,
   type Agent,
   type AgentRegistrationResponse,
 } from "@/lib/api";
@@ -28,6 +31,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -234,6 +238,41 @@ export default function AgentsPage() {
     }
   }
 
+  async function handleToggleEnabled(agent: Agent) {
+    const next = !agent.enabled;
+    // Disabling is the riskier action — confirm so admins don't accidentally
+    // remove an agent from the pool mid-build. Enabling is a no-op for any
+    // build already running so it's fine without a prompt.
+    if (!next) {
+      const ok = await confirm({
+        title: `Disable '${agent.name}'?`,
+        description: (
+          <>
+            New builds will not be dispatched to this agent. Any build it is
+            currently running continues to completion. You can re-enable it at
+            any time.
+          </>
+        ),
+        confirmText: "Disable",
+        cancelText: "Keep enabled",
+        tone: "warning",
+      });
+      if (!ok) return;
+    }
+
+    try {
+      const updated = await agentsApi.update(agent.id, { enabled: next });
+      setAgents((prev) =>
+        prev.map((a) => (a.id === agent.id ? { ...a, ...updated } : a)),
+      );
+      toast.success(next ? "Agent enabled" : "Agent disabled");
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to update agent";
+      toast.error(msg);
+    }
+  }
+
   async function handleRotate(id: string, name: string) {
     const ok = await confirm({
       title: `Rotate token for '${name}'?`,
@@ -347,18 +386,27 @@ export default function AgentsPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <label className="text-sm font-medium">OS</label>
-                      <Input
-                        placeholder="linux"
+                      <Select
+                        options={AGENT_OS_OPTIONS}
+                        placeholder="Select OS"
                         value={newOs}
                         onChange={(e) => setNewOs(e.target.value)}
                       />
+                      <p className="text-[11px] text-muted-foreground">
+                        Pipelines with{" "}
+                        <code className="rounded bg-muted px-1 py-0.5">
+                          runs_on: {newOs || "linux"}
+                        </code>{" "}
+                        will be routed to this agent.
+                      </p>
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium">
                         Architecture
                       </label>
-                      <Input
-                        placeholder="amd64"
+                      <Select
+                        options={AGENT_ARCH_OPTIONS}
+                        placeholder="Select arch"
                         value={newArch}
                         onChange={(e) => setNewArch(e.target.value)}
                       />
@@ -631,7 +679,7 @@ export default function AgentsPage() {
             {agents.map((agent) => (
               <Card key={agent.id} className="transition-shadow hover:shadow-lg">
                 <CardHeader>
-                  <div className="flex items-start justify-between">
+                  <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <CardTitle className="truncate text-base">
                         {agent.name}
@@ -640,9 +688,16 @@ export default function AgentsPage() {
                         capacity {agent.capacity}
                       </p>
                     </div>
-                    <Badge variant={agentStatusVariant(agent.status)}>
-                      {agent.status}
-                    </Badge>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <Badge variant={agentStatusVariant(agent.status)}>
+                        {agent.status}
+                      </Badge>
+                      {!agent.enabled && (
+                        <Badge variant="cancelled" className="text-[10px]">
+                          disabled
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
@@ -694,6 +749,20 @@ export default function AgentsPage() {
                   </p>
                   {isAdmin && (
                     <div className="flex flex-wrap justify-end gap-1 pt-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleToggleEnabled(agent)}
+                      >
+                        <Power
+                          className={`mr-1.5 h-3.5 w-3.5 ${
+                            agent.enabled
+                              ? "text-emerald-500"
+                              : "text-muted-foreground"
+                          }`}
+                        />
+                        {agent.enabled ? "Disable" : "Enable"}
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"

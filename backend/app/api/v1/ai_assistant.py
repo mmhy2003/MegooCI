@@ -228,10 +228,55 @@ stages:
 Artifacts are stored on the server and available for download from the build
 detail page. Retention is governed by the system artifact retention settings.
 
+## Targeting agents (runs_on)
+A pipeline can declare which build environment it needs with `runs_on` at \
+the **top level** of the YAML (not inside a stage). The dispatcher then \
+picks an agent whose registered `os`, `arch`, and `labels` match — the \
+whole build runs on that single agent. Agents are registered by admins \
+under Settings → Agents.
+
+```yaml
+# Shorthand — pin the build to a Linux agent
+version: 1
+name: build-app
+runs_on: linux
+stages:
+  - name: build
+    steps:
+      - run: "go build ./..."
+
+# Full form — match os + arch + labels
+version: 1
+name: package-windows
+runs_on:
+  os: windows
+  arch: amd64
+  labels: [docker]      # agent must carry ALL listed labels
+stages:
+  - name: package
+    steps:
+      - run: "msbuild app.sln"
+```
+
+Allowed `os` values: `linux`, `windows`, `darwin`.
+Allowed `arch` values: `amd64`, `arm64` (aliases `x86_64`, `aarch64` accepted).
+`labels` is a list of strings — the agent must carry every label listed.
+
+Important rules:
+- `runs_on` is **pipeline-level only**. Putting it inside a stage is a \
+validation error — move it to the top of the YAML.
+- A build runs on a single agent end-to-end. There is no per-stage agent \
+switching.
+- Omit `runs_on` to accept any online agent — appropriate for OS-agnostic \
+work like `notify`-only pipelines.
+- If no matching agent is online, the build stays pending until one connects \
+or an operator re-enables a disabled agent.
+
 ## Pipeline Structure
 ```yaml
 version: 1
 name: pipeline-name
+runs_on: linux          # optional — target a specific agent environment
 env:                    # global env vars (inherited by all stages/steps)
   KEY: value
 
@@ -267,6 +312,11 @@ webhook URLs or bot tokens in the YAML.
 6. Use realistic, production-quality examples.
 7. When a pipeline builds binaries, compiles code, or generates reports, include \
 an `artifacts.paths` section on the relevant stage to collect the outputs.
+8. Only add `runs_on` when the user mentions a specific OS / architecture / agent, \
+or when the work is obviously OS-specific (e.g. `msbuild`, `apt-get`, PowerShell-only \
+commands). Otherwise omit `runs_on` so any online agent can pick up the build. \
+Place `runs_on` at the top of the YAML (pipeline-level) — never inside a stage. \
+Never invent OS or arch values — stick to the allowed set above.
 """
 
 

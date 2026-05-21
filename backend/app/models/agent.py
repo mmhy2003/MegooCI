@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +23,11 @@ class Agent(Base):
         DateTime(timezone=True), nullable=True
     )
     status: Mapped[str] = mapped_column(String(20), default="offline")
+    # Operators can disable an agent (e.g. for maintenance) without deleting
+    # it. Disabled agents stay registered but the dispatcher skips them.
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true", default=True
+    )
 
     # Agent authentication (PRD §6.3 / F-3.4).
     #

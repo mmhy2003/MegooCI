@@ -177,7 +177,11 @@ async def _enqueue_matching_builds(
     after the DB commit).
     """
     from app.models.build import Stage, Step
-    from app.services.pipeline_compiler import parse_yaml_pipeline, compile_to_build_graph
+    from app.services.pipeline_compiler import (
+        compile_to_build_graph,
+        normalize_runs_on,
+        parse_yaml_pipeline,
+    )
 
     result = await db.execute(
         select(Pipeline).where(
@@ -226,6 +230,7 @@ async def _enqueue_matching_builds(
         if pipeline.yaml_content:
             try:
                 pipeline_def = parse_yaml_pipeline(pipeline.yaml_content)
+                build.runs_on = normalize_runs_on(pipeline_def.get("runs_on"))
                 stage_defs = compile_to_build_graph(pipeline_def)
 
                 for sort_order, stage_def in enumerate(stage_defs):

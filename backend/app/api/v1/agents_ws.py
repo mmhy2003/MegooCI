@@ -80,6 +80,14 @@ async def agent_control_ws(
 
     await websocket.accept()
 
+    # A previously-pending build that needed *this* agent's OS / labels
+    # might be stuck waiting. Kick the dispatcher so it picks it up now.
+    try:
+        from app.services.agent_dispatcher import dispatch_pending_builds
+        await dispatch_pending_builds()
+    except Exception:
+        pass
+
     settings = get_settings()
     redis_client = aioredis.from_url(
         settings.MEGOOCI_REDIS_URL, decode_responses=True

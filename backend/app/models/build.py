@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import ARRAY, JSON, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSON, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -32,6 +32,11 @@ class Build(Base):
     )
     trigger_type: Mapped[str] = mapped_column(String(50), default="manual")
     params_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Agent selection requirements captured from the pipeline YAML's
+    # top-level `runs_on`. Shape: {os, arch, labels} or NULL = "any agent".
+    # Frozen at trigger time so editing the pipeline doesn't change the
+    # routing of in-flight or historical builds.
+    runs_on: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

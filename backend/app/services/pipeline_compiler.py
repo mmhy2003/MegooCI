@@ -136,6 +136,49 @@ def _compile_stage(
     }
 
 
+# Allowed values for the `os` selector. Keeping this list small avoids the
+# "linux vs Linux vs LINUX" footgun and matches what we expose in the
+# agent registration UI.
+SUPPORTED_OS = {"linux", "windows", "darwin"}
+SUPPORTED_ARCH = {"amd64", "arm64", "x86_64", "aarch64"}
+
+
+def normalize_runs_on(value: Any) -> dict[str, Any] | None:
+    """Normalize a pipeline-level ``runs_on`` declaration into a canonical dict.
+
+    Accepted shapes:
+      runs_on: linux                    → {"os": "linux"}
+      runs_on: { os: linux }            → {"os": "linux"}
+      runs_on: { os: linux, labels: [docker], arch: amd64 }
+      runs_on: { labels: [gpu] }        → {"labels": ["gpu"]}
+
+    Returns ``None`` when no constraint is declared. Validation of the
+    individual values is done in ``validate_pipeline`` so this stays
+    permissive (it should not raise on user input it has already seen pass
+    validation upstream).
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        v = value.strip().lower()
+        return {"os": v} if v else None
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        os_val = value.get("os")
+        if isinstance(os_val, str) and os_val.strip():
+            out["os"] = os_val.strip().lower()
+        arch_val = value.get("arch")
+        if isinstance(arch_val, str) and arch_val.strip():
+            out["arch"] = arch_val.strip().lower()
+        labels_val = value.get("labels")
+        if isinstance(labels_val, list):
+            labels = [str(l).strip() for l in labels_val if str(l).strip()]
+            if labels:
+                out["labels"] = labels
+        return out or None
+    return None
+
+
 def _compile_step(
     step_def: str | dict[str, Any],
     parent_env: dict[str, str],
@@ -215,6 +258,10 @@ def validate_pipeline(yaml_content: str) -> list[str]:
     if not isinstance(data, dict):
         return ["Pipeline definition must be a mapping or a list of stages"]
 
+    runs_on = data.get("runs_on")
+    if runs_on is not None:
+        errors.extend(_validate_runs_on(runs_on))
+
     stages = data.get("stages")
     if not stages:
         errors.append("Pipeline must define at least one stage")
@@ -259,6 +306,65 @@ def validate_pipeline(yaml_content: str) -> list[str]:
         when = stage.get("when")
         if when is not None and not isinstance(when, dict):
             errors.append(f"Stage '{name or i}': 'when' must be a mapping")
+
+        # `runs_on` is pipeline-level only — flag it here so users don't
+        # silently get the wrong behaviour after moving it onto a stage.
+        if "runs_on" in stage:
+            errors.append(
+                f"Stage '{name or i}': 'runs_on' is a pipeline-level field; "
+                f"move it to the top of the YAML, not inside the stage."
+            )
+
+    return errors
+
+
+def _validate_runs_on(value: Any) -> list[str]:
+    """Validate a top-level ``runs_on`` declaration. Returns a list of error strings."""
+    errors: list[str] = []
+    prefix = "'runs_on'"
+
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v and v not in SUPPORTED_OS:
+            errors.append(
+                f"{prefix}: unknown os '{value}' (supported: {', '.join(sorted(SUPPORTED_OS))})"
+            )
+        return errors
+
+    if not isinstance(value, dict):
+        errors.append(f"{prefix} must be a string or a mapping")
+        return errors
+
+    os_val = value.get("os")
+    if os_val is not None:
+        if not isinstance(os_val, str):
+            errors.append(f"{prefix}.os must be a string")
+        elif os_val.strip().lower() not in SUPPORTED_OS:
+            errors.append(
+                f"{prefix}.os: unknown os '{os_val}' (supported: {', '.join(sorted(SUPPORTED_OS))})"
+            )
+
+    arch_val = value.get("arch")
+    if arch_val is not None:
+        if not isinstance(arch_val, str):
+            errors.append(f"{prefix}.arch must be a string")
+        elif arch_val.strip().lower() not in SUPPORTED_ARCH:
+            errors.append(
+                f"{prefix}.arch: unknown arch '{arch_val}' (supported: {', '.join(sorted(SUPPORTED_ARCH))})"
+            )
+
+    labels_val = value.get("labels")
+    if labels_val is not None:
+        if not isinstance(labels_val, list):
+            errors.append(f"{prefix}.labels must be a list of strings")
+        else:
+            for l in labels_val:
+                if not isinstance(l, str):
+                    errors.append(f"{prefix}.labels: each entry must be a string")
+                    break
+
+    if not any(value.get(k) for k in ("os", "arch", "labels")):
+        errors.append(f"{prefix} must declare at least one of: os, arch, labels")
 
     return errors
 
