@@ -30,6 +30,7 @@ import {
 
 const YAML_STARTER = `version: 1
 name: my-pipeline
+runs_on: linux
 
 stages:
   - name: build
