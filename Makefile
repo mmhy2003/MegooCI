@@ -115,6 +115,9 @@ MegooCI Makefile - available targets:
     agent-restart              Restart the agent container (keeps its config)
     agent-logs                 Tail agent container logs
     agent-shell                Open a shell inside the running agent container
+    agent-release              Cross-compile agent binaries + archives for every
+                                 OS/arch (linux, darwin, windows × amd64, arm64)
+                                 into agent/dist/ via goreleaser snapshot
     (Go developer workflow: `cd agent && make build|test|vet|fmt|tidy|snapshot|clean`)
 
   Cleanup
@@ -359,6 +362,11 @@ agent-logs: ## Tail agent container logs
 .PHONY: agent-shell
 agent-shell: ## Open a shell in the running agent container
 	docker exec -it $(_AGENT_NAME) /bin/sh
+
+.PHONY: agent-release
+agent-release: ## Cross-compile agent binaries + archives for every OS/arch into agent/dist/
+	$(MAKE) -C $(AGENT_DIR) snapshot
+	@echo "Artifacts written to $(AGENT_DIR)/dist/ (binaries, archives, checksums.txt)."
 
 # =============================================================================
 # Cleanup

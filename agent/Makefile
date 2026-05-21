@@ -1,4 +1,4 @@
-.PHONY: build tidy test vet lint fmt docker snapshot clean
+.PHONY: build build-all tidy test vet lint fmt docker snapshot release clean
 
 BINARY      := megooci-agent
 VERSION     ?= 0.1.0-dev
@@ -30,8 +30,14 @@ docker:
 	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) \
 		--build-arg DATE=$(DATE) -t megooci/agent:$(VERSION) .
 
+build-all:
+	goreleaser build --clean --snapshot
+
 snapshot:
 	goreleaser release --clean --snapshot --skip=publish
+
+release:
+	goreleaser release --clean
 
 clean:
 	rm -rf bin dist
