@@ -46,6 +46,8 @@ from app.services.step_actions.interpolation import (
 async def execute_build(
     build_id: uuid.UUID,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    *,
+    claimed_agent_id: uuid.UUID | None = None,
 ) -> None:
     """Main entry point: execute all stages/steps for a build.
 
@@ -53,6 +55,9 @@ async def execute_build(
     agent is available the build stays in ``pending`` and will be picked up
     later by ``dispatch_pending_builds()`` (called whenever another build
     finishes and frees an agent).
+
+    When *claimed_agent_id* is provided (from ``dispatch_pending_builds``),
+    the agent has already been pre-claimed — skip the pick-and-claim dance.
     """
     if session_factory is None:
         from app.database import async_session
@@ -67,7 +72,6 @@ async def execute_build(
     # We must claim an idle agent *before* marking the build as running.
     # If no agent is available, the build stays pending and will be
     # dequeued automatically when an agent finishes its current work.
-    claimed_agent_id: uuid.UUID | None = None
 
     async with session_factory() as db:
         result = await db.execute(
@@ -88,17 +92,41 @@ async def execute_build(
         if await is_maintenance_mode(db):
             # Leave the build as pending — it will be picked up when
             # maintenance mode is disabled and dispatch_pending_builds()
-            # is called.
+            # is called.  Release pre-claimed agent if any.
+            if claimed_agent_id is not None:
+                try:
+                    await release_agent(db, claimed_agent_id, build_id)
+                except Exception:
+                    pass
             await redis_client.aclose()
             return
 
-        # Build.runs_on was captured from the YAML at trigger time. None
-        # means "any online agent is fine".
-        agent = await pick_online_agent(db, requirements=build.runs_on)
-        if agent is not None:
-            claimed = await claim_agent(db, agent.id, build_id)
-            if claimed:
-                claimed_agent_id = agent.id
+        # If the caller already pre-claimed an agent (dispatch_pending_builds),
+        # verify the agent is still online and use it directly.
+        if claimed_agent_id is not None:
+            from app.models.agent import Agent as AgentModel
+            agent = await db.get(AgentModel, claimed_agent_id)
+            if agent is not None and agent.status == "online" and agent.connected_at is not None:
+                # Agent is still online — proceed with the pre-claimed agent.
+                pass
+            else:
+                # Pre-claimed agent went offline. Release and fall through
+                # to the normal pick-and-claim path.
+                try:
+                    await release_agent(db, claimed_agent_id, build_id)
+                except Exception:
+                    pass
+                claimed_agent_id = None
+
+        # Normal path: no pre-claimed agent — try to find and claim one.
+        if claimed_agent_id is None:
+            # Build.runs_on was captured from the YAML at trigger time. None
+            # means "any online agent is fine".
+            agent = await pick_online_agent(db, requirements=build.runs_on)
+            if agent is not None:
+                claimed = await claim_agent(db, agent.id, build_id)
+                if claimed:
+                    claimed_agent_id = agent.id
 
         if claimed_agent_id is None:
             # No idle agent — leave the build as pending. It will be

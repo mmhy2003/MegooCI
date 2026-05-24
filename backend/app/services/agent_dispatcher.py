@@ -191,15 +191,20 @@ async def release_agent(
 
 
 async def dispatch_pending_builds() -> None:
-    """Check for pending builds and dispatch one if an agent is available.
+    """Check for pending builds and dispatch them if agents are available.
 
     Called after a build finishes (agent released) so queued pipelines are
     picked up automatically without polling.
 
-    Picks the oldest pending build *whose runs_on requirements can be
-    satisfied by an idle agent right now*. A Windows build at the head of
-    the queue should not block a Linux build behind it when only a Linux
-    agent is free.
+    Iterates through the oldest pending builds whose runs_on requirements
+    can be satisfied by an idle agent right now. A Windows build at the
+    head of the queue should not block a Linux build behind it when only a
+    Linux agent is free.
+
+    Agents are **pre-claimed** before the Celery task is enqueued so that
+    concurrent callers cannot race for the same agent. The claimed agent
+    ID is forwarded to the worker so ``execute_build()`` can skip the
+    pick-and-claim dance.
     """
     from app.database import async_session as _session_factory
     from app.tasks.build_tasks import run_build
@@ -225,17 +230,74 @@ async def dispatch_pending_builds() -> None:
         for pending in pending_builds:
             agent = await pick_online_agent(db, requirements=pending.runs_on)
             if agent is None:
+                # No more free agents — stop trying further builds.
+                continue
+
+            # Pre-claim the agent *before* enqueuing so no other call
+            # can race for it.
+            claimed = await claim_agent(db, agent.id, pending.id)
+            if not claimed:
+                # Another caller grabbed this agent between our
+                # SELECT and UPDATE — try the next pending build
+                # (pick_online_agent will skip this agent now).
                 continue
 
             logger.info(
-                "Dispatching pending build %s to agent %s",
+                "Dispatching pending build %s to pre-claimed agent %s",
                 pending.id, agent.name,
             )
             try:
-                run_build.delay(str(pending.id))
+                run_build.delay(str(pending.id), str(agent.id))
             except Exception:
                 logger.exception("Failed to enqueue pending build %s", pending.id)
-            return
+                # Release the agent we just claimed so it isn't stuck.
+                try:
+                    await release_agent(db, agent.id, pending.id)
+                except Exception:
+                    pass
+
+
+async def dispatch_single_build(build_id: uuid.UUID) -> bool:
+    """Attempt to dispatch a specific pending build to a free agent.
+
+    Called from the manual "Dispatch" API endpoint. Returns True if the
+    build was successfully enqueued, False if no agent was available or
+    the build is not in ``pending`` status.
+    """
+    from app.database import async_session as _session_factory
+    from app.tasks.build_tasks import run_build
+
+    async with _session_factory() as db:
+        result = await db.execute(
+            select(Build).where(Build.id == build_id)
+        )
+        build = result.scalar_one_or_none()
+        if build is None or build.status != "pending":
+            return False
+
+        agent = await pick_online_agent(db, requirements=build.runs_on)
+        if agent is None:
+            return False
+
+        claimed = await claim_agent(db, agent.id, build_id)
+        if not claimed:
+            return False
+
+        logger.info(
+            "Manual dispatch: build %s → agent %s",
+            build_id, agent.name,
+        )
+        try:
+            run_build.delay(str(build_id), str(agent.id))
+        except Exception:
+            logger.exception("Failed to enqueue manually dispatched build %s", build_id)
+            try:
+                await release_agent(db, agent.id, build_id)
+            except Exception:
+                pass
+            return False
+
+        return True
 
 
 async def dispatch_step_to_agent(

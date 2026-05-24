@@ -313,6 +313,44 @@ async def retry_build(
     return new_build
 
 
+@router.post("/{build_id}/dispatch", response_model=BuildResponse)
+async def dispatch_build(
+    build_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_permission("builds.manage")),
+) -> Build:
+    """Manually dispatch a pending build to a free agent.
+
+    Use this when a build is stuck in ``pending`` status and you know an
+    agent is available. The endpoint pre-claims an agent and enqueues the
+    build for execution.
+    """
+    build = await db.get(Build, build_id)
+    if build is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
+        )
+
+    if build.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot dispatch build with status '{build.status}' (must be pending)",
+        )
+
+    from app.services.agent_dispatcher import dispatch_single_build
+    dispatched = await dispatch_single_build(build_id)
+
+    if not dispatched:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No agent is currently available to run this build. "
+                   "Ensure at least one agent is online and idle under Settings → Agents.",
+        )
+
+    await db.refresh(build)
+    return build
+
+
 # ------------------------------------------------------------------
 # Build Logs (persisted LogChunks)
 # ------------------------------------------------------------------

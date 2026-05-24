@@ -18,6 +18,7 @@ import {
   ShieldX,
   Loader2,
   FolderKanban,
+  Play,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import {
@@ -278,6 +279,18 @@ export default function BuildDetailPage() {
     }
   }
 
+  async function handleDispatch() {
+    try {
+      const updated = await buildsApi.dispatch(id);
+      setBuild((prev) => (prev ? { ...prev, ...updated } : null));
+      toast.success("Build dispatched to agent!");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to dispatch build";
+      toast.error(message);
+    }
+  }
+
   async function handleGateResponse(stepId: string, approved: boolean) {
     setApprovingSteps((prev) => new Set(prev).add(stepId));
     try {
@@ -413,6 +426,17 @@ export default function BuildDetailPage() {
           </div>
           {canManageBuilds && (
             <div className="flex flex-wrap gap-2">
+              {build.status === "pending" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDispatch}
+                  className="flex-1 border-cyan-500/30 text-cyan-600 hover:bg-cyan-500/10 hover:text-cyan-700 sm:flex-none"
+                >
+                  <Play className="mr-1.5 h-4 w-4" />
+                  Dispatch
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"

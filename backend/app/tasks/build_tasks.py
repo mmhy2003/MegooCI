@@ -19,7 +19,7 @@ def _make_session_factory():
 
 
 @celery_app.task(name="megooci.run_build", bind=True, max_retries=0)
-def run_build(self, build_id: str) -> dict:
+def run_build(self, build_id: str, claimed_agent_id: str | None = None) -> dict:
     """Celery task that executes a build via the async build executor."""
     from app.services.build_executor import execute_build
 
@@ -27,11 +27,17 @@ def run_build(self, build_id: str) -> dict:
     asyncio.set_event_loop(loop)
     try:
         session_factory = _make_session_factory()
+        agent_uuid = uuid.UUID(claimed_agent_id) if claimed_agent_id else None
         loop.run_until_complete(
-            execute_build(uuid.UUID(build_id), session_factory=session_factory)
+            execute_build(
+                uuid.UUID(build_id),
+                session_factory=session_factory,
+                claimed_agent_id=agent_uuid,
+            )
         )
         return {"build_id": build_id, "status": "completed"}
     except Exception as exc:
         return {"build_id": build_id, "status": "error", "error": str(exc)}
     finally:
         loop.close()
+

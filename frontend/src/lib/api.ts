@@ -500,6 +500,9 @@ export const buildsApi = {
 
   retry: (id: string) =>
     fetchApi<Build>(`/api/v1/builds/${id}/retry`, { method: "POST" }),
+
+  dispatch: (id: string) =>
+    fetchApi<Build>(`/api/v1/builds/${id}/dispatch`, { method: "POST" }),
 };
 
 // ------------------------------------------------------------------
