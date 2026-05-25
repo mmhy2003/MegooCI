@@ -292,10 +292,18 @@ func buildDockerBuildCmd(cfg map[string]interface{}) string {
 	if checkPath == "" {
 		checkPath = filepath.Join(context, "Dockerfile")
 	}
-	preCheck := fmt.Sprintf(
-		`if [ ! -f %s ]; then echo "ERROR: Dockerfile not found at '%s'"; echo "Working directory: $(pwd)"; echo "Files in context directory '%s':"; ls -la %s 2>/dev/null || echo "(directory does not exist)"; exit 1; fi`,
-		shellQuote(checkPath), checkPath, context, shellQuote(context),
-	)
+	var preCheck string
+	if runtime.GOOS == "windows" {
+		preCheck = fmt.Sprintf(
+			`if not exist %s (echo ERROR: Dockerfile not found at '%s' & echo Working directory: %%cd%% & echo Files in context directory '%s': & dir %s 2>nul || echo (directory does not exist) & exit /b 1)`,
+			shellQuote(checkPath), checkPath, context, shellQuote(context),
+		)
+	} else {
+		preCheck = fmt.Sprintf(
+			`if [ ! -f %s ]; then echo "ERROR: Dockerfile not found at '%s'"; echo "Working directory: $(pwd)"; echo "Files in context directory '%s':"; ls -la %s 2>/dev/null || echo "(directory does not exist)"; exit 1; fi`,
+			shellQuote(checkPath), checkPath, context, shellQuote(context),
+		)
+	}
 
 	return preCheck + " && " + args
 }
@@ -349,11 +357,14 @@ func buildDockerLoginCmd(cfg map[string]interface{}) string {
 		if pw == "" {
 			missing = append(missing, "password")
 		}
-		return fmt.Sprintf(
-			"echo 'ERROR: docker_login is missing required field(s): %s. "+
-				"Verify that the referenced secrets exist and are in scope for this pipeline.' && exit 1",
+		msg := fmt.Sprintf(
+			"ERROR: docker_login is missing required field(s): %s. Verify that the referenced secrets exist and are in scope for this pipeline.",
 			strings.Join(missing, ", "),
 		)
+		if runtime.GOOS == "windows" {
+			return fmt.Sprintf("echo %s & exit /b 1", shellQuote(msg))
+		}
+		return fmt.Sprintf("echo %s && exit 1", shellQuote(msg))
 	}
 
 	args := "docker login -u " + shellQuote(user) + " --password-stdin"
@@ -459,7 +470,13 @@ func buildSSHExecCmd(cfg map[string]interface{}) string {
 }
 
 func shellQuote(s string) string {
-	// Single-quote with inner-quote escaping.
+	if runtime.GOOS == "windows" {
+		// cmd.exe uses double quotes. Escape any inner double quotes
+		// and percent signs (which cmd.exe treats as variable expansion).
+		s = strings.ReplaceAll(s, `"`, `\"`) // escape inner double quotes
+		return `"` + s + `"`
+	}
+	// Unix: single-quote with inner-quote escaping.
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
