@@ -79,6 +79,11 @@ func (l *Local) Run(ctx context.Context, step Step, logs chan<- LogLine) Result 
 		defer cleanup()
 	}
 
+	// Handle write_file natively — no need to shell out for a file write.
+	if step.StepType == "write_file" {
+		return l.runWriteFile(step, workdir, logs)
+	}
+
 	// Resolve the command to execute based on step type.
 	command := resolveCommand(step)
 	if command == "" {
@@ -169,8 +174,6 @@ func resolveCommand(step Step) string {
 		return buildGitPushCmd(step.Config)
 	case "ssh_exec":
 		return buildSSHExecCmd(step.Config)
-	case "write_file":
-		return buildWriteFileCmd(step.Config)
 	default:
 		if step.Command != "" {
 			return step.Command
@@ -471,39 +474,36 @@ func buildSSHExecCmd(cfg map[string]interface{}) string {
 	return cmd
 }
 
-// buildWriteFileCmd generates a command that writes content to a file.
-// On Unix it uses a heredoc, on Windows it uses PowerShell Set-Content.
-func buildWriteFileCmd(cfg map[string]interface{}) string {
-	filePath := configStr(cfg, "path")
-	content := configStr(cfg, "content")
+// runWriteFile handles write_file steps using native Go I/O.
+// No shell, no escaping issues, works on every OS.
+func (l *Local) runWriteFile(step Step, workdir string, logs chan<- LogLine) Result {
+	filePath := configStr(step.Config, "path")
+	content := configStr(step.Config, "content")
+
 	if filePath == "" {
-		return "echo write_file: missing 'path' && exit 1"
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: fmt.Errorf("write_file: missing 'path'")}
 	}
 
-	if runtime.GOOS == "windows" {
-		// Use PowerShell for reliable file writing on Windows.
-		// Escape single quotes by doubling them (PowerShell convention).
-		escaped := strings.ReplaceAll(content, "'", "''")
-		pathEscaped := strings.ReplaceAll(filePath, "'", "''")
-		// Ensure parent directory exists, then write the file.
-		return fmt.Sprintf(
-			`powershell -NoLogo -NoProfile -Command "`+
-				`$ErrorActionPreference='Stop'; `+
-				`$dir = Split-Path -Parent '%s'; `+
-				`if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }; `+
-				`Set-Content -LiteralPath '%s' -Value '%s' -Encoding UTF8"`,
-			pathEscaped, pathEscaped, escaped,
-		)
+	// Resolve relative paths against the workspace.
+	if !filepath.IsAbs(filePath) {
+		filePath = filepath.Join(workdir, filePath)
 	}
 
-	// Unix: use a heredoc with a unique delimiter to avoid content conflicts.
-	// Single-quoted delimiter ('MEGOOCI_EOF') prevents variable expansion.
-	return fmt.Sprintf(
-		"mkdir -p %s && cat > %s <<'MEGOOCI_EOF'\n%s\nMEGOOCI_EOF",
-		shellQuote(filepath.Dir(filePath)),
-		shellQuote(filePath),
-		content,
-	)
+	// Ensure parent directories exist.
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		logs <- LogLine{Stream: protocol.StreamStderr, Content: fmt.Sprintf("write_file: failed to create directory %s: %v\n", dir, err)}
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: err}
+	}
+
+	// Write the file.
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		logs <- LogLine{Stream: protocol.StreamStderr, Content: fmt.Sprintf("write_file: failed to write %s: %v\n", filePath, err)}
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: err}
+	}
+
+	logs <- LogLine{Stream: protocol.StreamStdout, Content: fmt.Sprintf("write_file: wrote %s (%d bytes)\n", filePath, len(content))}
+	return Result{ExitCode: 0, Status: protocol.StatusSuccess}
 }
 
 func shellQuote(s string) string {
