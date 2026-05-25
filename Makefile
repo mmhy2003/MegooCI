@@ -12,6 +12,13 @@
 #   scoop install make        (Scoop)
 # =============================================================================
 
+# On Windows, GNU Make defaults SHELL to sh.exe which is usually not on
+# PATH. Detect this and fall back to cmd.exe so recipes actually execute.
+ifeq ($(OS),Windows_NT)
+  SHELL := cmd.exe
+  .SHELLFLAGS := /C
+endif
+
 -include .env
 
 # --- Configuration ----------------------------------------------------------
@@ -37,8 +44,12 @@ DB_NAME       ?= megooci
 # from inside the `agent/` directory.
 AGENT_DIR            := ./agent
 AGENT_VERSION        ?= $(or $(MEGOOCI_AGENT_VERSION),0.1.0-dev)
-AGENT_COMMIT         := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+AGENT_COMMIT         := $(shell git rev-parse --short HEAD 2>$(if $(filter cmd.exe,$(SHELL)),nul,/dev/null) || echo unknown)
+ifeq ($(OS),Windows_NT)
+AGENT_DATE           := $(shell powershell -NoProfile -Command "[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')")
+else
 AGENT_DATE           := $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)
+endif
 AGENT_IMAGE          ?= megooci/agent
 AGENT_IMAGE_TAG      ?= $(AGENT_VERSION)
 AGENT_IMAGE_FULL     := $(AGENT_IMAGE):$(AGENT_IMAGE_TAG)
