@@ -38,6 +38,7 @@ def _bootstrap() -> None:
         wait,
         notify,
         trigger,
+        write_file,
     )
 
 

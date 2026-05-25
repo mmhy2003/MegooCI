@@ -19,6 +19,7 @@ import {
   Play,
   Package,
   Server,
+  FileEdit,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -103,6 +104,30 @@ stages:
   run: "npm install && npm test"
   env:
     NODE_ENV: production`,
+  },
+  {
+    id: "write_file",
+    title: "Write File",
+    icon: <FileEdit className="h-4 w-4" />,
+    description:
+      "Create a file with the specified content at a given path. Parent directories are created automatically. Works cross-platform (Linux, macOS, Windows). Great for generating config files, Dockerfiles, or scripts on the fly.",
+    yaml: `# Create a config file
+- name: write-config
+  write_file:
+    path: ./config.json
+    content: |
+      { "env": "production", "debug": false }
+
+# Generate a Dockerfile
+- name: generate-dockerfile
+  write_file:
+    path: ./Dockerfile
+    content: |
+      FROM node:22-alpine
+      WORKDIR /app
+      COPY . .
+      RUN npm ci --production
+      CMD ["node", "server.js"]`,
   },
   {
     id: "docker_login",

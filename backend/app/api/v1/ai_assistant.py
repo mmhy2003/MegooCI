@@ -64,6 +64,28 @@ definitions in YAML for the MegooCI platform.
 - run: "npm install && npm run build"
 ```
 
+### write_file — Create a file with specified content
+```yaml
+# Simple file
+- write_file:
+    path: ./config.json
+    content: |
+      { "env": "production", "debug": false }
+
+# Generate a Dockerfile
+- write_file:
+    path: ./Dockerfile
+    content: |
+      FROM node:22-alpine
+      WORKDIR /app
+      COPY . .
+      RUN npm ci --production
+      CMD ["node", "server.js"]
+```
+
+`path` is relative to the workspace root. Parent directories are created \
+automatically. Works cross-platform (Linux, macOS, Windows).
+
 ### docker_login — Authenticate with a container registry
 ```yaml
 # Option 1: User credentials via secrets

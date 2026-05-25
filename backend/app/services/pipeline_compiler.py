@@ -4,6 +4,7 @@ YAML pipeline compiler for megooci.yaml format.
 Supports:
 - stages with sequential steps
 - run commands (shell)
+- write_file (create files)
 - docker_login / docker_build / docker_push
   (docker_login supports both user credentials via secrets and deploy tokens;
    deploy tokens use the fixed username 'deploy-token' and a token value)
@@ -25,6 +26,7 @@ import yaml
 
 STEP_TYPE_KEYS = {
     "run",
+    "write_file",
     "docker_login",
     "docker_build",
     "docker_push",
@@ -394,6 +396,15 @@ def _validate_step(step: dict[str, Any], stage_name: str, step_index: int) -> li
     if step_type == "run":
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{prefix}: 'run' must be a non-empty string")
+
+    elif step_type == "write_file":
+        if not isinstance(value, dict):
+            errors.append(f"{prefix}: 'write_file' must be a mapping")
+        else:
+            if not value.get("path"):
+                errors.append(f"{prefix}: 'write_file' requires 'path'")
+            if "content" not in value:
+                errors.append(f"{prefix}: 'write_file' requires 'content'")
 
     elif step_type == "docker_build":
         if not isinstance(value, dict):

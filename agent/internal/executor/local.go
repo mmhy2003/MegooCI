@@ -169,6 +169,8 @@ func resolveCommand(step Step) string {
 		return buildGitPushCmd(step.Config)
 	case "ssh_exec":
 		return buildSSHExecCmd(step.Config)
+	case "write_file":
+		return buildWriteFileCmd(step.Config)
 	default:
 		if step.Command != "" {
 			return step.Command
@@ -467,6 +469,41 @@ func buildSSHExecCmd(cfg map[string]interface{}) string {
 	cmd += " " + target
 	cmd += " " + shellQuote(remoteScript)
 	return cmd
+}
+
+// buildWriteFileCmd generates a command that writes content to a file.
+// On Unix it uses a heredoc, on Windows it uses PowerShell Set-Content.
+func buildWriteFileCmd(cfg map[string]interface{}) string {
+	filePath := configStr(cfg, "path")
+	content := configStr(cfg, "content")
+	if filePath == "" {
+		return "echo write_file: missing 'path' && exit 1"
+	}
+
+	if runtime.GOOS == "windows" {
+		// Use PowerShell for reliable file writing on Windows.
+		// Escape single quotes by doubling them (PowerShell convention).
+		escaped := strings.ReplaceAll(content, "'", "''")
+		pathEscaped := strings.ReplaceAll(filePath, "'", "''")
+		// Ensure parent directory exists, then write the file.
+		return fmt.Sprintf(
+			`powershell -NoLogo -NoProfile -Command "`+
+				`$ErrorActionPreference='Stop'; `+
+				`$dir = Split-Path -Parent '%s'; `+
+				`if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }; `+
+				`Set-Content -LiteralPath '%s' -Value '%s' -Encoding UTF8"`,
+			pathEscaped, pathEscaped, escaped,
+		)
+	}
+
+	// Unix: use a heredoc with a unique delimiter to avoid content conflicts.
+	// Single-quoted delimiter ('MEGOOCI_EOF') prevents variable expansion.
+	return fmt.Sprintf(
+		"mkdir -p %s && cat > %s <<'MEGOOCI_EOF'\n%s\nMEGOOCI_EOF",
+		shellQuote(filepath.Dir(filePath)),
+		shellQuote(filePath),
+		content,
+	)
 }
 
 func shellQuote(s string) string {
