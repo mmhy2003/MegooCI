@@ -471,9 +471,25 @@ func buildSSHExecCmd(cfg map[string]interface{}) string {
 
 func shellQuote(s string) string {
 	if runtime.GOOS == "windows" {
-		// cmd.exe uses double quotes. Escape any inner double quotes
-		// and percent signs (which cmd.exe treats as variable expansion).
-		s = strings.ReplaceAll(s, `"`, `\"`) // escape inner double quotes
+		// cmd.exe + Go's os/exec: Go's syscall.EscapeArg escapes embedded
+		// double quotes with backslashes when constructing the CreateProcess
+		// command line. cmd.exe then passes those backslash-escaped quotes
+		// through as literal characters to the child process (e.g. git sees
+		// the filename as '"."' instead of '.').
+		//
+		// Solution: only wrap in double quotes when the value actually
+		// contains spaces or cmd.exe metacharacters. Simple values (URLs,
+		// paths without spaces, branch names) are safe unquoted.
+		if s == "" {
+			return `""`
+		}
+		if !strings.ContainsAny(s, " \t&|<>^%!()\"") {
+			return s
+		}
+		// Value needs quoting: use caret (^) to escape cmd.exe
+		// metacharacters inside a double-quoted string, and escape
+		// inner double quotes by doubling them (cmd.exe convention).
+		s = strings.ReplaceAll(s, `"`, `""`)
 		return `"` + s + `"`
 	}
 	// Unix: single-quote with inner-quote escaping.
