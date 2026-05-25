@@ -31,7 +31,6 @@ _AI_SETTING_KEYS = {
     "ai_api_key",
     "ai_model",
     "ai_base_url",
-    "ai_reasoning_model",
 }
 
 _MAINTENANCE_KEY = "maintenance_mode"
@@ -72,19 +71,12 @@ def resolve_ai_config(
     model = ov.get("ai_model") or settings.MEGOOCI_AI_MODEL or ""
     base_url = ov.get("ai_base_url") or settings.MEGOOCI_AI_BASE_URL or ""
 
-    reasoning_str = ov.get("ai_reasoning_model")
-    if reasoning_str is not None:
-        reasoning_model = reasoning_str.lower() in ("1", "true", "yes")
-    else:
-        reasoning_model = settings.MEGOOCI_AI_REASONING_MODEL
-
     return {
         "enabled": enabled,
         "provider": provider,
         "api_key": api_key,
         "model": model,
         "base_url": base_url,
-        "reasoning_model": reasoning_model,
     }
 
 
@@ -94,7 +86,6 @@ class AiInfo(BaseModel):
     model: str
     base_url: str | None
     has_api_key: bool
-    reasoning_model: bool
     configured: bool
     status: str        # "ready" | "disabled" | "missing_api_key" | "misconfigured"
     status_detail: str
@@ -154,7 +145,6 @@ class AiSettingsUpdate(BaseModel):
     api_key: str | None = None
     model: str | None = None
     base_url: str | None = None
-    reasoning_model: bool | None = None
 
 
 def _build_ai_info(overrides: dict[str, str] | None = None) -> AiInfo:
@@ -164,7 +154,6 @@ def _build_ai_info(overrides: dict[str, str] | None = None) -> AiInfo:
     api_key: str = cfg["api_key"]  # type: ignore[assignment]
     model_cfg: str = cfg["model"]  # type: ignore[assignment]
     base_url: str = cfg["base_url"]  # type: ignore[assignment]
-    reasoning_model: bool = cfg["reasoning_model"]  # type: ignore[assignment]
 
     default_model = _PROVIDER_DEFAULT_MODEL.get(provider, "")
     model = model_cfg or default_model
@@ -205,7 +194,6 @@ def _build_ai_info(overrides: dict[str, str] | None = None) -> AiInfo:
         model=model,
         base_url=base_url or None,
         has_api_key=has_api_key,
-        reasoning_model=reasoning_model,
         configured=configured,
         status=ai_status,
         status_detail=status_detail,
@@ -300,8 +288,6 @@ async def update_ai_settings(
         updates["ai_model"] = body.model
     if body.base_url is not None:
         updates["ai_base_url"] = body.base_url
-    if body.reasoning_model is not None:
-        updates["ai_reasoning_model"] = "true" if body.reasoning_model else "false"
 
     if not updates:
         # Nothing to change — just return current state.

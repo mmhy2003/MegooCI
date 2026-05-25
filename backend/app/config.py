@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     MEGOOCI_AI_API_KEY: str = ""
     MEGOOCI_AI_MODEL: str = ""
     MEGOOCI_AI_BASE_URL: str = ""
-    MEGOOCI_AI_REASONING_MODEL: bool = False
     MEGOOCI_LOG_LEVEL: str = "INFO"
 
     # Meilisearch

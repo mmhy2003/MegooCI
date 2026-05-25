@@ -22,6 +22,7 @@ dependencies = [
     "email-validator",
     "cryptography",
     "meilisearch-python-sdk",
+    "litellm",
 ]
 
 [build-system]

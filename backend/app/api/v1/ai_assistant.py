@@ -2,9 +2,9 @@
 AI pipeline assistant — generates or modifies megooci.yaml content based on
 natural language prompts.
 
-Uses the OpenAI-compatible chat API configured via MEGOOCI_AI_* settings.
-Supports any provider that speaks the OpenAI chat format (OpenAI, Azure,
-Ollama, vLLM, etc.) by setting MEGOOCI_AI_BASE_URL.
+Uses LiteLLM for unified multi-provider LLM support. LiteLLM automatically
+handles provider-specific parameter translation (reasoning models, Anthropic
+native API, Azure, Ollama, etc.) via a single ``completion()`` interface.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import uuid
 
 logger = logging.getLogger("uvicorn.error")
 
-import httpx
+import litellm
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -28,7 +28,28 @@ from app.models.pipeline import Pipeline
 from app.models.secret import EnvVar, Secret
 from app.models.user import User
 
+# Let LiteLLM silently drop unsupported params per model (e.g. temperature
+# for reasoning models) instead of raising errors.
+litellm.drop_params = True
+
 router = APIRouter()
+
+# Map MegooCI provider names to LiteLLM model prefixes.
+_PROVIDER_PREFIX: dict[str, str] = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "ollama": "ollama",
+    "azure_openai": "azure",
+    "custom": "openai",  # OpenAI-compatible endpoints
+}
+
+
+def _build_model_id(ai_cfg: dict[str, object]) -> str:
+    """Map MegooCI provider + model to LiteLLM's ``provider/model`` format."""
+    provider = str(ai_cfg.get("provider") or "openai")
+    model = str(ai_cfg.get("model") or "gpt-4o-mini")
+    prefix = _PROVIDER_PREFIX.get(provider, "openai")
+    return f"{prefix}/{model}"
 
 SYSTEM_PROMPT = """\
 You are MegooCI Pipeline Assistant — an expert at writing CI/CD pipeline \
@@ -528,18 +549,10 @@ async def pipeline_assistant(
     if repo_ctx:
         system_content += repo_ctx
 
-    model_name = ai_cfg["model"] or "gpt-4o-mini"
-    is_reasoning = bool(ai_cfg.get("reasoning_model"))
+    model_id = _build_model_id(ai_cfg)
 
-    logger.info(
-        "AI request config — model_name=%s is_reasoning=%s",
-        model_name,
-        is_reasoning,
-    )
-
-    system_role = "developer" if is_reasoning else "system"
     messages: list[dict[str, str]] = [
-        {"role": system_role, "content": system_content},
+        {"role": "system", "content": system_content},
     ]
 
     if body.history:
@@ -566,103 +579,56 @@ async def pipeline_assistant(
 
     messages.append({"role": "user", "content": body.prompt})
 
-    base_url = ai_cfg["base_url"] or "https://api.openai.com/v1"
-    url = f"{str(base_url).rstrip('/')}/chat/completions"
-
-    async with httpx.AsyncClient(timeout=60) as client:
-        try:
-            req_headers: dict[str, str] = {"Content-Type": "application/json"}
-            if ai_cfg["api_key"]:
-                req_headers["Authorization"] = f"Bearer {ai_cfg['api_key']}"
-
-            payload: dict[str, object] = {
-                "model": model_name,
-                "messages": messages,
-            }
-
-            if is_reasoning:
-                # Reasoning models (o1, o3, gpt-5, etc.) reject temperature,
-                # top_p, and the legacy max_tokens parameter.
-                # We omit max_completion_tokens entirely so the API defaults
-                # to the model's own maximum — no hardcoding needed.
-                pass
-            else:
-                payload["temperature"] = 0.3
-                payload["max_tokens"] = 4096
-
-            # Log the payload (without messages content to avoid huge logs)
-            logger.info(
-                "Sending request to AI provider — url=%s model=%s "
-                "system_role=%s is_reasoning=%s message_count=%d "
-                "payload_keys=%s",
-                url,
-                model_name,
-                system_role,
-                is_reasoning,
-                len(messages),
-                [k for k in payload if k != "messages"],
-            )
-            logger.debug("Full payload: %s", payload)
-
-            resp = await client.post(
-                url,
-                headers=req_headers,
-                json=payload,
-            )
-
-            logger.info(
-                "AI provider response — status=%d content_length=%s",
-                resp.status_code,
-                resp.headers.get("content-length", "unknown"),
-            )
-
-            if resp.status_code != 200:
-                # Log the full response body for non-200 before raise_for_status
-                logger.error(
-                    "AI provider returned non-200 — status=%d body=%s",
-                    resp.status_code,
-                    resp.text[:2000],
-                )
-
-            resp.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            detail = f"AI provider returned {exc.response.status_code}"
-            try:
-                err_body = exc.response.json()
-                logger.error(
-                    "AI provider HTTP error — status=%d error_body=%s",
-                    exc.response.status_code,
-                    err_body,
-                )
-                if "error" in err_body and "message" in err_body["error"]:
-                    detail += f": {err_body['error']['message']}"
-            except Exception:
-                logger.error(
-                    "AI provider HTTP error — status=%d raw_body=%s",
-                    exc.response.status_code,
-                    exc.response.text[:2000],
-                )
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=detail,
-            )
-        except httpx.RequestError as exc:
-            logger.error("AI provider unreachable — error=%s", exc)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"AI provider unreachable: {exc}",
-            )
-
-    data = resp.json()
+    logger.info(
+        "Sending AI request — model_id=%s provider=%s message_count=%d "
+        "base_url=%s",
+        model_id,
+        ai_cfg["provider"],
+        len(messages),
+        ai_cfg["base_url"] or "(default)",
+    )
 
     try:
-        reply_text = data["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError, TypeError) as exc:
+        response = await litellm.acompletion(
+            model=model_id,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=4096,
+            api_key=str(ai_cfg["api_key"]) if ai_cfg["api_key"] else None,
+            api_base=str(ai_cfg["base_url"]) if ai_cfg["base_url"] else None,
+        )
+    except litellm.exceptions.AuthenticationError as exc:
+        logger.error("AI provider authentication failed — %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI provider authentication failed: {exc.message}",
+        )
+    except litellm.exceptions.BadRequestError as exc:
+        logger.error("AI provider bad request — %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI provider rejected request: {exc.message}",
+        )
+    except litellm.exceptions.APIConnectionError as exc:
+        logger.error("AI provider unreachable — %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI provider unreachable: {exc.message}",
+        )
+    except Exception as exc:
+        logger.error("AI provider error — %s: %s", type(exc).__name__, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI provider error: {exc}",
+        )
+
+    try:
+        reply_text = response.choices[0].message.content.strip()
+    except (AttributeError, IndexError, TypeError) as exc:
         logger.error(
-            "Failed to parse AI response — error=%s response_keys=%s data=%s",
+            "Failed to parse AI response — error=%s response=%s",
             exc,
-            list(data.keys()) if isinstance(data, dict) else type(data).__name__,
-            str(data)[:2000],
+            str(response)[:2000],
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -670,8 +636,9 @@ async def pipeline_assistant(
         )
 
     logger.info(
-        "AI assistant response parsed — reply_length=%d has_yaml=%s",
+        "AI assistant response — reply_length=%d usage=%s has_yaml=%s",
         len(reply_text),
+        getattr(response, "usage", None),
         bool(_extract_yaml(reply_text)),
     )
 
