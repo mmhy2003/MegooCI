@@ -351,6 +351,10 @@ or when the work is obviously OS-specific (e.g. `msbuild`, `apt-get`, PowerShell
 commands). Otherwise omit `runs_on` so any online agent can pick up the build. \
 Place `runs_on` at the top of the YAML (pipeline-level) — never inside a stage. \
 Never invent OS or arch values — stick to the allowed set above.
+11. When modifying or fixing a pipeline, use **inline YAML comments** (`# ...`) \
+to explain what you changed and why, directly next to the affected lines. This \
+makes the pipeline self-documenting. Keep your chat reply brief — a one-line \
+summary is enough since the YAML comments carry the detail.
 """
 
 
