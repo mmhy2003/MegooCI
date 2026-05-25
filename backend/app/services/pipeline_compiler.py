@@ -5,6 +5,7 @@ Supports:
 - stages with sequential steps
 - run commands (shell)
 - write_file (create files)
+- copy_files / delete_files (file operations)
 - docker_login / docker_build / docker_push
   (docker_login supports both user credentials via secrets and deploy tokens;
    deploy tokens use the fixed username 'deploy-token' and a token value)
@@ -36,6 +37,8 @@ STEP_TYPE_KEYS = {
     "ssh_exec",
     "wait_webhook",
     "wait_input",
+    "copy_files",
+    "delete_files",
     "notify",
     "trigger_pipeline",
 }
@@ -405,6 +408,22 @@ def _validate_step(step: dict[str, Any], stage_name: str, step_index: int) -> li
                 errors.append(f"{prefix}: 'write_file' requires 'path'")
             if "content" not in value:
                 errors.append(f"{prefix}: 'write_file' requires 'content'")
+
+    elif step_type == "copy_files":
+        if not isinstance(value, dict):
+            errors.append(f"{prefix}: 'copy_files' must be a mapping")
+        else:
+            if not value.get("source"):
+                errors.append(f"{prefix}: 'copy_files' requires 'source'")
+            if not value.get("destination"):
+                errors.append(f"{prefix}: 'copy_files' requires 'destination'")
+
+    elif step_type == "delete_files":
+        if not isinstance(value, dict):
+            errors.append(f"{prefix}: 'delete_files' must be a mapping")
+        else:
+            if not value.get("path") and not value.get("paths"):
+                errors.append(f"{prefix}: 'delete_files' requires 'path' or 'paths'")
 
     elif step_type == "docker_build":
         if not isinstance(value, dict):

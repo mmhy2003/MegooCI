@@ -86,6 +86,40 @@ definitions in YAML for the MegooCI platform.
 `path` is relative to the workspace root. Parent directories are created \
 automatically. Works cross-platform (Linux, macOS, Windows).
 
+### copy_files — Copy files or directories
+```yaml
+# Copy a single file
+- copy_files:
+    source: ./build/output/app.exe
+    destination: ./dist/app.exe
+
+# Copy an entire directory (recursive)
+- copy_files:
+    source: ./build/output
+    destination: ./dist
+```
+
+`source` and `destination` are relative to the workspace root. Parent \
+directories for the destination are created automatically. When copying a \
+directory, all contents are copied recursively.
+
+### delete_files — Delete files or directories
+```yaml
+# Delete a single path
+- delete_files:
+    path: ./temp
+
+# Delete multiple paths
+- delete_files:
+    paths:
+      - ./temp
+      - ./cache
+      - ./build/output
+```
+
+Use `path` for a single target or `paths` for multiple. Directories are \
+removed recursively. No error if the path doesn't exist.
+
 ### docker_login — Authenticate with a container registry
 ```yaml
 # Option 1: User credentials via secrets

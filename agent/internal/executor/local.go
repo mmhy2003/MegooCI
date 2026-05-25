@@ -83,6 +83,12 @@ func (l *Local) Run(ctx context.Context, step Step, logs chan<- LogLine) Result 
 	if step.StepType == "write_file" {
 		return l.runWriteFile(step, workdir, logs)
 	}
+	if step.StepType == "copy_files" {
+		return l.runCopyFiles(step, workdir, logs)
+	}
+	if step.StepType == "delete_files" {
+		return l.runDeleteFiles(step, workdir, logs)
+	}
 
 	// Resolve the command to execute based on step type.
 	command := resolveCommand(step)
@@ -503,6 +509,131 @@ func (l *Local) runWriteFile(step Step, workdir string, logs chan<- LogLine) Res
 	}
 
 	logs <- LogLine{Stream: protocol.StreamStdout, Content: fmt.Sprintf("write_file: wrote %s (%d bytes)\n", filePath, len(content))}
+	return Result{ExitCode: 0, Status: protocol.StatusSuccess}
+}
+
+// runCopyFiles handles copy_files steps using native Go I/O.
+func (l *Local) runCopyFiles(step Step, workdir string, logs chan<- LogLine) Result {
+	src := configStr(step.Config, "source")
+	dst := configStr(step.Config, "destination")
+
+	if src == "" {
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: fmt.Errorf("copy_files: missing 'source'")}
+	}
+	if dst == "" {
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: fmt.Errorf("copy_files: missing 'destination'")}
+	}
+
+	if !filepath.IsAbs(src) {
+		src = filepath.Join(workdir, src)
+	}
+	if !filepath.IsAbs(dst) {
+		dst = filepath.Join(workdir, dst)
+	}
+
+	info, err := os.Stat(src)
+	if err != nil {
+		logs <- LogLine{Stream: protocol.StreamStderr, Content: fmt.Sprintf("copy_files: source not found: %s: %v\n", src, err)}
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: err}
+	}
+
+	if !info.IsDir() {
+		// Single file copy.
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			logs <- LogLine{Stream: protocol.StreamStderr, Content: fmt.Sprintf("copy_files: mkdir failed: %v\n", err)}
+			return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: err}
+		}
+		if err := copyFile(src, dst); err != nil {
+			logs <- LogLine{Stream: protocol.StreamStderr, Content: fmt.Sprintf("copy_files: %v\n", err)}
+			return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: err}
+		}
+		logs <- LogLine{Stream: protocol.StreamStdout, Content: fmt.Sprintf("copy_files: copied %s -> %s\n", src, dst)}
+		return Result{ExitCode: 0, Status: protocol.StatusSuccess}
+	}
+
+	// Directory copy — walk and copy each file.
+	count := 0
+	err = filepath.WalkDir(src, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		if err := copyFile(path, target); err != nil {
+			return err
+		}
+		count++
+		return nil
+	})
+	if err != nil {
+		logs <- LogLine{Stream: protocol.StreamStderr, Content: fmt.Sprintf("copy_files: %v\n", err)}
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: err}
+	}
+
+	logs <- LogLine{Stream: protocol.StreamStdout, Content: fmt.Sprintf("copy_files: copied %s -> %s (%d files)\n", src, dst, count)}
+	return Result{ExitCode: 0, Status: protocol.StatusSuccess}
+}
+
+// copyFile copies a single file from src to dst, preserving permissions.
+func copyFile(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", src, err)
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", dst, err)
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return fmt.Errorf("copy %s -> %s: %w", src, dst, err)
+	}
+	return nil
+}
+
+// runDeleteFiles handles delete_files steps using native Go I/O.
+func (l *Local) runDeleteFiles(step Step, workdir string, logs chan<- LogLine) Result {
+	// Collect paths to delete from either "path" (single) or "paths" (list).
+	var targets []string
+
+	if single := configStr(step.Config, "path"); single != "" {
+		targets = append(targets, single)
+	}
+	if list, ok := step.Config["paths"]; ok {
+		if items, ok := list.([]interface{}); ok {
+			for _, item := range items {
+				if s, ok := item.(string); ok && s != "" {
+					targets = append(targets, s)
+				}
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: fmt.Errorf("delete_files: no paths specified")}
+	}
+
+	for _, p := range targets {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(workdir, p)
+		}
+		if err := os.RemoveAll(p); err != nil {
+			logs <- LogLine{Stream: protocol.StreamStderr, Content: fmt.Sprintf("delete_files: failed to delete %s: %v\n", p, err)}
+			return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: err}
+		}
+		logs <- LogLine{Stream: protocol.StreamStdout, Content: fmt.Sprintf("delete_files: deleted %s\n", p)}
+	}
+
 	return Result{ExitCode: 0, Status: protocol.StatusSuccess}
 }
 

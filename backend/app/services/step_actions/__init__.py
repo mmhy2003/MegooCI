@@ -39,6 +39,8 @@ def _bootstrap() -> None:
         notify,
         trigger,
         write_file,
+        copy_files,
+        delete_files,
     )
 
 

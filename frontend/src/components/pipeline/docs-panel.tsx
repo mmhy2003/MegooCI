@@ -20,6 +20,8 @@ import {
   Package,
   Server,
   FileEdit,
+  CopyPlus,
+  Trash2,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -128,6 +130,43 @@ stages:
       COPY . .
       RUN npm ci --production
       CMD ["node", "server.js"]`,
+  },
+  {
+    id: "copy_files",
+    title: "Copy Files",
+    icon: <CopyPlus className="h-4 w-4" />,
+    description:
+      "Copy files or entire directories from a source to a destination. Parent directories at the destination are created automatically. When copying a directory, all contents are copied recursively. Works cross-platform.",
+    yaml: `# Copy a single file
+- name: copy-binary
+  copy_files:
+    source: ./build/output/app.exe
+    destination: ./dist/app.exe
+
+# Copy an entire directory (recursive)
+- name: copy-assets
+  copy_files:
+    source: ./build/output
+    destination: ./dist`,
+  },
+  {
+    id: "delete_files",
+    title: "Delete Files",
+    icon: <Trash2 className="h-4 w-4" />,
+    description:
+      "Delete files or directories. Use 'path' for a single target or 'paths' for multiple. Directories are removed recursively. No error if the path doesn't exist.",
+    yaml: `# Delete a single path
+- name: clean-temp
+  delete_files:
+    path: ./temp
+
+# Delete multiple paths
+- name: clean-all
+  delete_files:
+    paths:
+      - ./temp
+      - ./cache
+      - ./build/output`,
   },
   {
     id: "docker_login",
