@@ -757,6 +757,7 @@ export interface AiInfo {
   model: string;
   base_url: string | null;
   has_api_key: boolean;
+  reasoning_model: boolean;
   configured: boolean;
   status: AiStatus;
   status_detail: string;
@@ -811,6 +812,7 @@ export interface AiSettingsUpdate {
   api_key?: string;
   model?: string;
   base_url?: string;
+  reasoning_model?: boolean;
 }
 
 export const systemApi = {

@@ -269,6 +269,7 @@ function AiConfigCard({
   const [model, setModel] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
   const [enabled, setEnabled] = React.useState(true);
+  const [reasoningModel, setReasoningModel] = React.useState(false);
 
   // Sync form state when entering edit mode or when info changes
   function syncForm() {
@@ -278,6 +279,7 @@ function AiConfigCard({
     setModel(info.ai.model || "");
     setApiKey(""); // never pre-fill API key for security
     setEnabled(info.ai.enabled);
+    setReasoningModel(info.ai.reasoning_model);
     setShowKey(false);
   }
 
@@ -299,6 +301,7 @@ function AiConfigCard({
         provider,
         base_url: baseUrl,
         model,
+        reasoning_model: reasoningModel,
       };
       // Only send api_key if user actually typed something
       if (apiKey) {
@@ -435,6 +438,32 @@ function AiConfigCard({
               />
             </div>
 
+            {/* Reasoning Model */}
+            <div className="flex items-center justify-between rounded-lg border px-3 py-3">
+              <div className="space-y-0.5">
+                <label className="text-sm font-medium">Reasoning Model</label>
+                <p className="text-xs text-muted-foreground">
+                  Enable for reasoning models (o1, o3, gpt-5, etc.) that don&apos;t
+                  support temperature or max_tokens parameters.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={reasoningModel}
+                onClick={() => setReasoningModel(!reasoningModel)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  reasoningModel ? "bg-primary" : "bg-muted"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                    reasoningModel ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+
             {/* API Key */}
             <div className="space-y-1.5">
               <label className="text-sm font-medium">API Key</label>
@@ -518,6 +547,13 @@ function AiConfigCard({
                   variant={info.ai.has_api_key ? "success" : "cancelled"}
                 >
                   {info.ai.has_api_key ? "Set" : "Not set"}
+                </Badge>
+              </ConfigRow>
+              <ConfigRow label="Reasoning Model">
+                <Badge
+                  variant={info.ai.reasoning_model ? "warning" : "cancelled"}
+                >
+                  {info.ai.reasoning_model ? "Yes" : "No"}
                 </Badge>
               </ConfigRow>
               {info.ai.base_url && (

@@ -512,8 +512,12 @@ async def pipeline_assistant(
     if repo_ctx:
         system_content += repo_ctx
 
+    model_name = ai_cfg["model"] or "gpt-4o-mini"
+    is_reasoning = bool(ai_cfg.get("reasoning_model"))
+
+    system_role = "developer" if is_reasoning else "system"
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": system_content},
+        {"role": system_role, "content": system_content},
     ]
 
     if body.history:
@@ -548,21 +552,37 @@ async def pipeline_assistant(
             req_headers: dict[str, str] = {"Content-Type": "application/json"}
             if ai_cfg["api_key"]:
                 req_headers["Authorization"] = f"Bearer {ai_cfg['api_key']}"
+
+            payload: dict[str, object] = {
+                "model": model_name,
+                "messages": messages,
+            }
+
+            if is_reasoning:
+                # Reasoning models (o1, o3, gpt-5, etc.) reject temperature,
+                # top_p, and the legacy max_tokens parameter.
+                payload["max_completion_tokens"] = 262144
+            else:
+                payload["temperature"] = 0.3
+                payload["max_tokens"] = 4096
+
             resp = await client.post(
                 url,
                 headers=req_headers,
-                json={
-                    "model": ai_cfg["model"] or "gpt-4o-mini",
-                    "messages": messages,
-                    "temperature": 0.3,
-                    "max_tokens": 4096,
-                },
+                json=payload,
             )
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            detail = f"AI provider returned {exc.response.status_code}"
+            try:
+                err_body = exc.response.json()
+                if "error" in err_body and "message" in err_body["error"]:
+                    detail += f": {err_body['error']['message']}"
+            except Exception:
+                pass
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"AI provider returned {exc.response.status_code}",
+                detail=detail,
             )
         except httpx.RequestError as exc:
             raise HTTPException(
