@@ -180,15 +180,19 @@ export function AiAssistantPanel({
       setMessages((prev) =>
         prev.map((m) => (m.id === streamingMsgId ? assistantMsg : m)),
       );
-    } catch {
-      toast.error("AI assistant failed to respond");
+    } catch (err) {
+      const detail =
+        err instanceof Error && err.message
+          ? err.message
+          : "An unexpected error occurred. Please try again.";
+      toast.error(detail);
       // Replace or add error message
       setMessages((prev) => {
         const hasStreaming = prev.some((m) => m.id === streamingMsgId);
         const errorMsg: Message = {
           id: streamingMsgId,
           role: "assistant",
-          content: "Sorry, I couldn't process that request. Please try again.",
+          content: detail,
         };
         if (hasStreaming) {
           return prev.map((m) => (m.id === streamingMsgId ? errorMsg : m));
@@ -276,7 +280,13 @@ export function AiAssistantPanel({
           </div>
         ) : (
           <div className="p-5 space-y-5">
-            {messages.map((msg) => (
+            {messages.map((msg) => {
+              // Skip the streaming placeholder while it has no content —
+              // the "Thinking..." indicator below handles that state.
+              if (loading && msg.role === "assistant" && !msg.content && !msg.yaml) {
+                return null;
+              }
+              return (
               <div key={msg.id} className="flex gap-3">
                 <div
                   className={cn(
@@ -307,7 +317,8 @@ export function AiAssistantPanel({
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
             {loading && !messages.some((m) => m.role === "assistant" && m.id === messages[messages.length - 1]?.id && m.content) && (
               <div className="flex gap-3">
                 <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">

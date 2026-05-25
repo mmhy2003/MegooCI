@@ -1417,12 +1417,21 @@ export const aiAssistantApi = {
     };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const res = await fetch(`${BASE_URL}/api/v1/ai/assistant/stream`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(data),
-      cache: "no-store",
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${BASE_URL}/api/v1/ai/assistant/stream`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(data),
+        cache: "no-store",
+      });
+    } catch {
+      throw new ApiError(
+        0,
+        null,
+        "Couldn't reach the AI assistant. Please check your connection and try again.",
+      );
+    }
 
     if (!res.ok) {
       let body: unknown;
@@ -1441,37 +1450,46 @@ export const aiAssistantApi = {
     let buffer = "";
     let finalResponse: AiAssistantResponse = { reply: "", yaml: null };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const jsonStr = line.slice(6);
-        if (!jsonStr) continue;
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6);
+          if (!jsonStr) continue;
 
-        try {
-          const event = JSON.parse(jsonStr) as
-            | { type: "token"; content: string }
-            | { type: "done"; reply: string; yaml: string | null }
-            | { type: "error"; detail: string };
+          try {
+            const event = JSON.parse(jsonStr) as
+              | { type: "token"; content: string }
+              | { type: "done"; reply: string; yaml: string | null }
+              | { type: "error"; detail: string };
 
-          if (event.type === "token") {
-            onToken(event.content);
-          } else if (event.type === "done") {
-            finalResponse = { reply: event.reply, yaml: event.yaml };
-          } else if (event.type === "error") {
-            throw new ApiError(502, null, event.detail);
+            if (event.type === "token") {
+              onToken(event.content);
+            } else if (event.type === "done") {
+              finalResponse = { reply: event.reply, yaml: event.yaml };
+            } else if (event.type === "error") {
+              throw new ApiError(502, null, event.detail);
+            }
+          } catch (e) {
+            if (e instanceof ApiError) throw e;
+            // Ignore malformed SSE lines
           }
-        } catch (e) {
-          if (e instanceof ApiError) throw e;
-          // Ignore malformed SSE lines
         }
       }
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+      throw new ApiError(
+        0,
+        null,
+        "Connection to AI assistant was interrupted. Please try again.",
+      );
     }
 
     return finalResponse;
