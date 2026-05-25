@@ -86,6 +86,10 @@ RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
 # ── pnpm (via corepack, ships with Node.js) ────────────────────────────────
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
+# ── Pi AI Coding Agent ─────────────────────────────────────────────
+# Installed globally so `ai_agent` pipeline steps can invoke `pi -p`.
+RUN npm install -g @earendil-works/pi-coding-agent
+
 # ── Docker CLI + BuildKit (Docker official repo) ───────────────────────────
 RUN curl -fsSL https://download.docker.com/linux/debian/gpg \
       | gpg --dearmor -o /usr/share/keyrings/docker.gpg \

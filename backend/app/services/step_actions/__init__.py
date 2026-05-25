@@ -41,6 +41,7 @@ def _bootstrap() -> None:
         write_file,
         copy_files,
         delete_files,
+        ai_agent,
     )
 
 

@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/megooci/megooci-agent/internal/protocol"
 )
@@ -88,6 +89,9 @@ func (l *Local) Run(ctx context.Context, step Step, logs chan<- LogLine) Result 
 	}
 	if step.StepType == "delete_files" {
 		return l.runDeleteFiles(step, workdir, logs)
+	}
+	if step.StepType == "ai_agent" {
+		return l.runAiAgent(ctx, step, workdir, logs)
 	}
 
 	// Resolve the command to execute based on step type.
@@ -635,6 +639,124 @@ func (l *Local) runDeleteFiles(step Step, workdir string, logs chan<- LogLine) R
 	}
 
 	return Result{ExitCode: 0, Status: protocol.StatusSuccess}
+}
+
+// runAiAgent handles ai_agent steps by executing the Pi CLI as a subprocess.
+// It injects the API key as the provider-specific environment variable and
+// streams stdout/stderr as build log lines.
+func (l *Local) runAiAgent(ctx context.Context, step Step, workdir string, logs chan<- LogLine) Result {
+	prompt := configStr(step.Config, "prompt")
+	apiKey := configStr(step.Config, "api_key")
+	provider := configStr(step.Config, "provider")
+	model := configStr(step.Config, "model")
+
+	if prompt == "" {
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: fmt.Errorf("ai_agent: missing 'prompt'")}
+	}
+	if apiKey == "" {
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: fmt.Errorf("ai_agent: missing 'api_key'")}
+	}
+
+	// Apply per-step timeout (default 300s).
+	timeoutSec := 300.0
+	if t, ok := step.Config["timeout"]; ok {
+		switch v := t.(type) {
+		case float64:
+			if v > 0 {
+				timeoutSec = v
+			}
+		case int:
+			if v > 0 {
+				timeoutSec = float64(v)
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec*float64(time.Second)))
+	defer cancel()
+
+	// Build the pi CLI args: pi -p "prompt" [--provider X] [--model Y]
+	args := []string{"-p", prompt}
+	if provider != "" {
+		args = append(args, "--provider", provider)
+	}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+
+	logs <- LogLine{Stream: protocol.StreamStdout, Content: fmt.Sprintf("ai_agent: running pi with provider=%q model=%q timeout=%ds\n", provider, model, int(timeoutSec))}
+
+	// Execute pi directly (no shell wrapper) to avoid prompt escaping issues.
+	cmd := exec.CommandContext(ctx, "pi", args...)
+	cmd.Dir = workdir
+
+	// Inject the API key as the provider-specific env var.
+	envVar := providerEnvVar(provider)
+	cmd.Env = append(mergeEnv(os.Environ(), step.Env), envVar+"="+apiKey)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: err}
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: err}
+	}
+
+	if err := cmd.Start(); err != nil {
+		logs <- LogLine{Stream: protocol.StreamStderr, Content: fmt.Sprintf("ai_agent: failed to start pi: %v\n", err)}
+		return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: err}
+	}
+
+	// Stream stdout/stderr concurrently.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		pipeLines(stdout, protocol.StreamStdout, logs, ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		pipeLines(stderr, protocol.StreamStderr, logs, ctx)
+	}()
+
+	waitErr := cmd.Wait()
+	wg.Wait()
+
+	if ctx.Err() != nil {
+		logs <- LogLine{Stream: protocol.StreamStderr, Content: fmt.Sprintf("ai_agent: timed out after %ds\n", int(timeoutSec))}
+		return Result{ExitCode: -1, Status: protocol.StatusCancelled, Err: ctx.Err()}
+	}
+
+	exitCode := 0
+	if waitErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(waitErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		} else {
+			return Result{ExitCode: 1, Status: protocol.StatusFailed, Err: waitErr}
+		}
+	}
+	status := protocol.StatusSuccess
+	if exitCode != 0 {
+		status = protocol.StatusFailed
+	}
+	return Result{ExitCode: exitCode, Status: status}
+}
+
+// providerEnvVar maps a provider name to the environment variable that
+// the Pi CLI reads the API key from.
+func providerEnvVar(provider string) string {
+	switch strings.ToLower(provider) {
+	case "openai":
+		return "OPENAI_API_KEY"
+	case "anthropic", "":
+		return "ANTHROPIC_API_KEY"
+	case "azure":
+		return "AZURE_OPENAI_API_KEY"
+	default:
+		return strings.ToUpper(provider) + "_API_KEY"
+	}
 }
 
 func shellQuote(s string) string {

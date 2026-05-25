@@ -22,6 +22,7 @@ import {
   FileEdit,
   CopyPlus,
   Trash2,
+  Bot,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -167,6 +168,27 @@ stages:
       - ./temp
       - ./cache
       - ./build/output`,
+  },
+  {
+    id: "ai_agent",
+    title: "AI Agent",
+    icon: <Bot className="h-4 w-4" />,
+    description:
+      "Run the Pi AI coding agent with a prompt. The agent reads the codebase, reasons about the task, and modifies files autonomously. Requires an API key for the LLM provider. Default provider is Anthropic, default timeout is 300 seconds.",
+    yaml: `# Basic usage (Anthropic, default model)
+- name: ai-refactor
+  ai_agent:
+    prompt: "Refactor error handling in src/api/ to use a centralized error handler"
+    api_key: \${{ secrets.ANTHROPIC_API_KEY }}
+
+# Full options (OpenAI, specific model, custom timeout)
+- name: ai-add-tests
+  ai_agent:
+    prompt: "Add unit tests for the User model"
+    api_key: \${{ secrets.OPENAI_API_KEY }}
+    provider: openai
+    model: gpt-4o
+    timeout: 600`,
   },
   {
     id: "docker_login",

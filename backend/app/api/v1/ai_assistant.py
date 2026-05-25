@@ -120,6 +120,29 @@ directory, all contents are copied recursively.
 Use `path` for a single target or `paths` for multiple. Directories are \
 removed recursively. No error if the path doesn't exist.
 
+### ai_agent — Run an AI coding agent with a prompt
+```yaml
+# Basic usage (Anthropic, default model)
+- ai_agent:
+    prompt: "Refactor error handling in src/api/ to use a centralized error handler"
+    api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+# Full options
+- ai_agent:
+    prompt: "Add unit tests for the User model in tests/models/"
+    api_key: ${{ secrets.OPENAI_API_KEY }}
+    provider: openai
+    model: gpt-4o
+    timeout: 600
+```
+
+The `ai_agent` step runs the Pi coding agent (`pi -p`) in the workspace. \
+The agent reads the codebase, reasons about the prompt, and makes changes \
+to files autonomously. `api_key` is injected as the provider's expected \
+environment variable (e.g. `ANTHROPIC_API_KEY` for Anthropic, \
+`OPENAI_API_KEY` for OpenAI). Always use `${{ secrets.X }}` for the key. \
+Default provider is `anthropic`, default timeout is 300 seconds.
+
 ### docker_login — Authenticate with a container registry
 ```yaml
 # Option 1: User credentials via secrets

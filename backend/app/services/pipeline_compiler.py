@@ -6,6 +6,7 @@ Supports:
 - run commands (shell)
 - write_file (create files)
 - copy_files / delete_files (file operations)
+- ai_agent (AI coding agent)
 - docker_login / docker_build / docker_push
   (docker_login supports both user credentials via secrets and deploy tokens;
    deploy tokens use the fixed username 'deploy-token' and a token value)
@@ -41,6 +42,7 @@ STEP_TYPE_KEYS = {
     "delete_files",
     "notify",
     "trigger_pipeline",
+    "ai_agent",
 }
 
 
@@ -424,6 +426,18 @@ def _validate_step(step: dict[str, Any], stage_name: str, step_index: int) -> li
         else:
             if not value.get("path") and not value.get("paths"):
                 errors.append(f"{prefix}: 'delete_files' requires 'path' or 'paths'")
+
+    elif step_type == "ai_agent":
+        if not isinstance(value, dict):
+            errors.append(f"{prefix}: 'ai_agent' must be a mapping")
+        else:
+            if not value.get("prompt"):
+                errors.append(f"{prefix}: 'ai_agent' requires 'prompt'")
+            if not value.get("api_key"):
+                errors.append(f"{prefix}: 'ai_agent' requires 'api_key'")
+            timeout = value.get("timeout")
+            if timeout is not None and (not isinstance(timeout, (int, float)) or timeout <= 0):
+                errors.append(f"{prefix}: 'ai_agent' timeout must be a positive number")
 
     elif step_type == "docker_build":
         if not isinstance(value, dict):
