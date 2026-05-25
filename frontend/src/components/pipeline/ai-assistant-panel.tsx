@@ -129,6 +129,7 @@ export function AiAssistantPanel({
       role: "user",
       content: prompt.trim(),
     };
+    const streamingMsgId = crypto.randomUUID();
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setLoading(true);
@@ -141,31 +142,59 @@ export function AiAssistantPanel({
         content: m.content,
       }));
 
-      const resp = await aiAssistantApi.ask({
-        prompt: prompt.trim(),
-        current_yaml: latestYaml || null,
-        project_id: projectId || null,
-        pipeline_id: pipelineId || null,
-        repo_url: repoUrl || null,
-        branch: branch || null,
-        history: history.length > 0 ? history : undefined,
-      });
+      // Add a placeholder assistant message for streaming tokens
+      setMessages((prev) => [
+        ...prev,
+        { id: streamingMsgId, role: "assistant", content: "", yaml: null },
+      ]);
 
+      const resp = await aiAssistantApi.askStream(
+        {
+          prompt: prompt.trim(),
+          current_yaml: latestYaml || null,
+          project_id: projectId || null,
+          pipeline_id: pipelineId || null,
+          repo_url: repoUrl || null,
+          branch: branch || null,
+          history: history.length > 0 ? history : undefined,
+        },
+        (token) => {
+          // Update the streaming message with each token
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === streamingMsgId
+                ? { ...m, content: m.content + token }
+                : m,
+            ),
+          );
+        },
+      );
+
+      // Replace streaming message with final response (includes extracted YAML)
       const assistantMsg: Message = {
-        id: crypto.randomUUID(),
+        id: streamingMsgId,
         role: "assistant",
         content: resp.reply,
         yaml: resp.yaml,
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === streamingMsgId ? assistantMsg : m)),
+      );
     } catch {
       toast.error("AI assistant failed to respond");
-      const errorMsg: Message = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: "Sorry, I couldn't process that request. Please try again.",
-      };
-      setMessages((prev) => [...prev, errorMsg]);
+      // Replace or add error message
+      setMessages((prev) => {
+        const hasStreaming = prev.some((m) => m.id === streamingMsgId);
+        const errorMsg: Message = {
+          id: streamingMsgId,
+          role: "assistant",
+          content: "Sorry, I couldn't process that request. Please try again.",
+        };
+        if (hasStreaming) {
+          return prev.map((m) => (m.id === streamingMsgId ? errorMsg : m));
+        }
+        return [...prev, errorMsg];
+      });
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -279,14 +308,14 @@ export function AiAssistantPanel({
                 </div>
               </div>
             ))}
-            {loading && (
+            {loading && !messages.some((m) => m.role === "assistant" && m.id === messages[messages.length - 1]?.id && m.content) && (
               <div className="flex gap-3">
                 <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
                   <Bot className="h-3.5 w-3.5" />
                 </div>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Generating...
+                  Thinking...
                 </div>
               </div>
             )}

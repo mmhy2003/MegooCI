@@ -1402,6 +1402,80 @@ export const aiAssistantApi = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  /**
+   * Stream the AI assistant response via SSE.
+   * Calls `onToken` for each text chunk and resolves with the final response.
+   */
+  askStream: async (
+    data: AiAssistantRequest,
+    onToken: (token: string) => void,
+  ): Promise<AiAssistantResponse> => {
+    const token = getAccessToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch(`${BASE_URL}/api/v1/ai/assistant/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(data),
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        body = await res.text();
+      }
+      throw new ApiError(res.status, body, extractErrorMessage(res.status, body));
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new ApiError(0, null, "Streaming not supported");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResponse: AiAssistantResponse = { reply: "", yaml: null };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const jsonStr = line.slice(6);
+        if (!jsonStr) continue;
+
+        try {
+          const event = JSON.parse(jsonStr) as
+            | { type: "token"; content: string }
+            | { type: "done"; reply: string; yaml: string | null }
+            | { type: "error"; detail: string };
+
+          if (event.type === "token") {
+            onToken(event.content);
+          } else if (event.type === "done") {
+            finalResponse = { reply: event.reply, yaml: event.yaml };
+          } else if (event.type === "error") {
+            throw new ApiError(502, null, event.detail);
+          }
+        } catch (e) {
+          if (e instanceof ApiError) throw e;
+          // Ignore malformed SSE lines
+        }
+      }
+    }
+
+    return finalResponse;
+  },
 };
 
 // ------------------------------------------------------------------

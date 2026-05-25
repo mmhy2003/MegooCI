@@ -9,6 +9,7 @@ native API, Azure, Ollama, etc.) via a single ``completion()`` interface.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 
@@ -16,6 +17,7 @@ logger = logging.getLogger("uvicorn.error")
 
 import litellm
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -485,12 +487,15 @@ async def _build_repo_context(
     return "\n".join(parts)
 
 
-@router.post("/assistant", response_model=AssistantResponse)
-async def pipeline_assistant(
+async def _prepare_messages(
     body: AssistantRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("pipelines.manage")),
-) -> AssistantResponse:
+    db: AsyncSession,
+    current_user: User,
+) -> tuple[list[dict[str, str]], str, dict]:
+    """Shared logic for both the regular and streaming assistant endpoints.
+
+    Returns ``(messages, model_id, ai_cfg)``.
+    """
     from app.core.deps import _collect_permissions
     from app.api.v1.system import get_ai_overrides, resolve_ai_config
 
@@ -588,11 +593,23 @@ async def pipeline_assistant(
         ai_cfg["base_url"] or "(default)",
     )
 
+    return messages, model_id, ai_cfg
+
+
+@router.post("/assistant", response_model=AssistantResponse)
+async def pipeline_assistant(
+    body: AssistantRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("pipelines.manage")),
+) -> AssistantResponse:
+    messages, model_id, ai_cfg = await _prepare_messages(body, db, current_user)
+
     try:
         response = await litellm.acompletion(
             model=model_id,
             messages=messages,
             temperature=0.3,
+            timeout=120,
             api_key=str(ai_cfg["api_key"]) if ai_cfg["api_key"] else None,
             api_base=str(ai_cfg["base_url"]) if ai_cfg["base_url"] else None,
         )
@@ -644,6 +661,46 @@ async def pipeline_assistant(
     yaml_block = _extract_yaml(reply_text)
 
     return AssistantResponse(reply=reply_text, yaml=yaml_block)
+
+
+async def _stream_generator(messages, model_id, ai_cfg):
+    """Async generator that yields SSE events for the streaming endpoint."""
+    try:
+        response = await litellm.acompletion(
+            model=model_id,
+            messages=messages,
+            temperature=0.3,
+            stream=True,
+            timeout=120,
+            api_key=str(ai_cfg["api_key"]) if ai_cfg["api_key"] else None,
+            api_base=str(ai_cfg["base_url"]) if ai_cfg["base_url"] else None,
+        )
+        full_reply = ""
+        async for chunk in response:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                full_reply += delta
+                yield f"data: {json.dumps({'type': 'token', 'content': delta})}\n\n"
+
+        yaml_block = _extract_yaml(full_reply)
+        yield f"data: {json.dumps({'type': 'done', 'reply': full_reply.strip(), 'yaml': yaml_block})}\n\n"
+    except Exception as exc:
+        logger.error("AI streaming error — %s: %s", type(exc).__name__, exc)
+        yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+
+
+@router.post("/assistant/stream")
+async def pipeline_assistant_stream(
+    body: AssistantRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("pipelines.manage")),
+):
+    messages, model_id, ai_cfg = await _prepare_messages(body, db, current_user)
+    return StreamingResponse(
+        _stream_generator(messages, model_id, ai_cfg),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _extract_yaml(text: str) -> str | None:
