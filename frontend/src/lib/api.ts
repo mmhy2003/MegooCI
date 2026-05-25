@@ -1,5 +1,14 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
+// For SSE streaming we must bypass the Next.js rewrite proxy, which buffers
+// response bodies and breaks real-time chunk delivery. STREAM_BASE_URL always
+// points directly to the backend API server.
+const STREAM_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.hostname}:8000`
+    : "http://localhost:8000");
+
 const ACCESS_KEY = "megooci_access_token";
 const REFRESH_KEY = "megooci_refresh_token";
 
@@ -1419,7 +1428,7 @@ export const aiAssistantApi = {
 
     let res: Response;
     try {
-      res = await fetch(`${BASE_URL}/api/v1/ai/assistant/stream`, {
+      res = await fetch(`${STREAM_BASE_URL}/api/v1/ai/assistant/stream`, {
         method: "POST",
         headers,
         body: JSON.stringify(data),
