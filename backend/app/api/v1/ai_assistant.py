@@ -328,17 +328,25 @@ stages:
 
 ## Rules
 1. Always output valid YAML.
-2. When the user asks to generate a pipeline, output ONLY the YAML with no \
-markdown fences, no explanations before or after.
-3. When the user asks a question about syntax, answer concisely and include a \
-short YAML example.
-4. Always use `${{ secrets.X }}` for sensitive values — never hardcode passwords.
-5. For notification steps, always use a configured channel name — never hardcode \
+2. When the user asks to **generate** a new pipeline, output the complete YAML \
+inside a ```yaml fenced code block. You may add a brief explanation AFTER the \
+YAML block, but keep it short.
+3. When the user asks to **modify, fix, or update** an existing pipeline, you MUST \
+output the **complete, updated pipeline YAML** inside a ```yaml fenced code block — \
+not just the changed fragment or a single stage. The user's editor will replace the \
+entire pipeline with your output, so partial snippets will break their pipeline. \
+You may add a brief summary of what you changed AFTER the YAML block.
+4. NEVER output only the changed portion of a pipeline. Always return the full \
+pipeline from `version:` through every stage, even if only one line changed.
+5. When the user asks a question about syntax (without requesting a change), \
+answer concisely and include a short YAML example.
+6. Always use `${{ secrets.X }}` for sensitive values — never hardcode passwords.
+7. For notification steps, always use a configured channel name — never hardcode \
 webhook URLs or bot tokens in the YAML.
-6. Use realistic, production-quality examples.
-7. When a pipeline builds binaries, compiles code, or generates reports, include \
+8. Use realistic, production-quality examples.
+9. When a pipeline builds binaries, compiles code, or generates reports, include \
 an `artifacts.paths` section on the relevant stage to collect the outputs.
-8. Only add `runs_on` when the user mentions a specific OS / architecture / agent, \
+10. Only add `runs_on` when the user mentions a specific OS / architecture / agent, \
 or when the work is obviously OS-specific (e.g. `msbuild`, `apt-get`, PowerShell-only \
 commands). Otherwise omit `runs_on` so any online agent can pick up the build. \
 Place `runs_on` at the top of the YAML (pipeline-level) — never inside a stage. \
@@ -569,16 +577,22 @@ async def _prepare_messages(
         messages.append({
             "role": "user",
             "content": (
-                "Here is the current pipeline YAML from the editor "
-                "(this reflects the latest state, including any manual edits I made):\n"
+                "Here is my current pipeline YAML from the editor "
+                "(this reflects the latest state, including any manual edits I made).\n"
+                "IMPORTANT: When I ask you to modify, fix, or update this pipeline, "
+                "you MUST return the COMPLETE updated pipeline YAML inside a "
+                "```yaml code block — not just the changed part. My editor replaces "
+                "the entire pipeline with your output.\n\n"
                 f"```yaml\n{body.current_yaml}\n```"
             ),
         })
         messages.append({
             "role": "assistant",
             "content": (
-                "Got it — I can see your current pipeline YAML with all your latest changes. "
-                "What would you like me to do with it?"
+                "Got it — I can see your full pipeline YAML. "
+                "When you ask me to make changes, I'll always return the "
+                "complete updated pipeline in a ```yaml block so you can "
+                "apply it directly. What would you like me to do?"
             ),
         })
 
