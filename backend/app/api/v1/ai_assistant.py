@@ -593,7 +593,6 @@ async def pipeline_assistant(
             model=model_id,
             messages=messages,
             temperature=0.3,
-            max_tokens=4096,
             api_key=str(ai_cfg["api_key"]) if ai_cfg["api_key"] else None,
             api_base=str(ai_cfg["base_url"]) if ai_cfg["base_url"] else None,
         )
