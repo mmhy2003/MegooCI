@@ -1,14 +1,5 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
-// For SSE streaming we must bypass the Next.js rewrite proxy, which buffers
-// response bodies and breaks real-time chunk delivery. STREAM_BASE_URL always
-// points directly to the backend API server.
-const STREAM_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== "undefined"
-    ? `${window.location.protocol}//${window.location.hostname}:8000`
-    : "http://localhost:8000");
-
 const ACCESS_KEY = "megooci_access_token";
 const REFRESH_KEY = "megooci_refresh_token";
 
@@ -1406,102 +1397,16 @@ export interface AiAssistantResponse {
 }
 
 export const aiAssistantApi = {
-  ask: (data: AiAssistantRequest) =>
-    fetchApi<AiAssistantResponse>("/api/v1/ai/assistant", {
+  ask: (data: AiAssistantRequest) => {
+    // Reasoning models can take 60–120s to respond; use a generous timeout
+    // so the request isn't killed by the browser's default.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    return fetchApi<AiAssistantResponse>("/api/v1/ai/assistant", {
       method: "POST",
       body: JSON.stringify(data),
-    }),
-
-  /**
-   * Stream the AI assistant response via SSE.
-   * Calls `onToken` for each text chunk and resolves with the final response.
-   */
-  askStream: async (
-    data: AiAssistantRequest,
-    onToken: (token: string) => void,
-  ): Promise<AiAssistantResponse> => {
-    const token = getAccessToken();
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-
-    let res: Response;
-    try {
-      res = await fetch(`${STREAM_BASE_URL}/api/v1/ai/assistant/stream`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(data),
-        cache: "no-store",
-      });
-    } catch {
-      throw new ApiError(
-        0,
-        null,
-        "Couldn't reach the AI assistant. Please check your connection and try again.",
-      );
-    }
-
-    if (!res.ok) {
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        body = await res.text();
-      }
-      throw new ApiError(res.status, body, extractErrorMessage(res.status, body));
-    }
-
-    const reader = res.body?.getReader();
-    if (!reader) throw new ApiError(0, null, "Streaming not supported");
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let finalResponse: AiAssistantResponse = { reply: "", yaml: null };
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6);
-          if (!jsonStr) continue;
-
-          try {
-            const event = JSON.parse(jsonStr) as
-              | { type: "token"; content: string }
-              | { type: "done"; reply: string; yaml: string | null }
-              | { type: "error"; detail: string };
-
-            if (event.type === "token") {
-              onToken(event.content);
-            } else if (event.type === "done") {
-              finalResponse = { reply: event.reply, yaml: event.yaml };
-            } else if (event.type === "error") {
-              throw new ApiError(502, null, event.detail);
-            }
-          } catch (e) {
-            if (e instanceof ApiError) throw e;
-            // Ignore malformed SSE lines
-          }
-        }
-      }
-    } catch (e) {
-      if (e instanceof ApiError) throw e;
-      throw new ApiError(
-        0,
-        null,
-        "Connection to AI assistant was interrupted. Please try again.",
-      );
-    }
-
-    return finalResponse;
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
   },
 };
 
