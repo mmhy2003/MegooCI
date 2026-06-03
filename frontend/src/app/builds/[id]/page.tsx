@@ -106,6 +106,13 @@ export default function BuildDetailPage() {
 
   const isRunning = build?.status === "running" || build?.status === "queued";
   const isActive = isRunning || build?.status === "pending";
+  // A build can be cancelled until it reaches a terminal state — while it is
+  // still pending (created/awaiting dispatch), queued, or running. Mirrors the
+  // backend cancel endpoint, which rejects already-finished builds.
+  const canCancel =
+    build?.status === "pending" ||
+    build?.status === "queued" ||
+    build?.status === "running";
 
   const wsUrl = React.useMemo(() => {
     if (!isActive || !accessToken || typeof window === "undefined") return null;
@@ -446,7 +453,7 @@ export default function BuildDetailPage() {
                 <RotateCw className="mr-1.5 h-4 w-4" />
                 Re-run
               </Button>
-              {isRunning && (
+              {canCancel && (
                 <Button
                   variant="outline"
                   size="sm"

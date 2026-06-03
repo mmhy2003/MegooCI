@@ -165,7 +165,7 @@ async def cancel_build(
             status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
         )
 
-    if build.status not in ("pending", "running"):
+    if build.status not in ("pending", "queued", "running"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot cancel build with status '{build.status}'",
