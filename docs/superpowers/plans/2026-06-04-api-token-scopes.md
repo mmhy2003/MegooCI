@@ -56,15 +56,26 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 ```
 
-- [ ] **Step 2: Install the test dependencies**
+- [ ] **Step 2: Create a test virtualenv and install dependencies**
 
-Run (from the repo root):
+The host Python has none of the backend libraries installed, and the dev Docker
+stack is not required for these unit tests, so create a local venv. The tests
+import `app.models` (SQLAlchemy) and, later, `app.core.deps` → `app.database`
+(needs `asyncpg`), so install that subset plus pytest.
+
+Run from `backend/` (the venv lives at `backend/.venv`, already covered by `.gitignore`):
 
 ```bash
-cd backend && python -m pip install "pytest>=8.0" "pytest-asyncio>=0.23"
+cd backend
+python -m venv .venv
+.venv/Scripts/python -m pip install --upgrade pip
+.venv/Scripts/python -m pip install pytest pytest-asyncio sqlalchemy asyncpg fastapi pydantic pydantic-settings "python-jose[cryptography]" bcrypt cryptography email-validator
 ```
 
-Expected: pytest and pytest-asyncio install successfully. (If the backend runs in a container/venv, install them in that same environment.)
+Expected: all install successfully (wheels, no compilation). If a later step hits
+`ModuleNotFoundError` for another module, install that module and continue.
+
+> **All backend `python`/`pytest` commands in this plan use `backend/.venv/Scripts/python`.** `app` is importable because the pytest config sets `pythonpath = ["."]`; the project itself is not installed. The `.venv` is never committed (commits stage explicit files only).
 
 - [ ] **Step 3: Create the test package marker**
 
@@ -123,7 +134,7 @@ def make_user():
 Run:
 
 ```bash
-cd backend && python -m pytest -q
+cd backend && .venv/Scripts/python -m pytest -q
 ```
 
 Expected: exits cleanly with "no tests ran" (collection succeeds, conftest imports without error).
@@ -227,7 +238,7 @@ def test_is_valid_scope_key():
 Run:
 
 ```bash
-cd backend && python -m pytest tests/test_token_scopes.py -q
+cd backend && .venv/Scripts/python -m pytest tests/test_token_scopes.py -q
 ```
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.core.token_scopes'`.
@@ -335,7 +346,7 @@ def resolve_scope(scopes: list[str] | None) -> dict:
 Run:
 
 ```bash
-cd backend && python -m pytest tests/test_token_scopes.py -q
+cd backend && .venv/Scripts/python -m pytest tests/test_token_scopes.py -q
 ```
 
 Expected: PASS (10 passed).
@@ -419,7 +430,7 @@ def test_scoped_resource_permissions_match_only_their_resource(make_user):
 Run:
 
 ```bash
-cd backend && python -m pytest tests/test_effective_permissions.py -q
+cd backend && .venv/Scripts/python -m pytest tests/test_effective_permissions.py -q
 ```
 
 Expected: FAIL — `ImportError: cannot import name 'effective_permissions'`.
@@ -498,7 +509,7 @@ def effective_scoped_permissions(
 Run:
 
 ```bash
-cd backend && python -m pytest tests/test_effective_permissions.py -q
+cd backend && .venv/Scripts/python -m pytest tests/test_effective_permissions.py -q
 ```
 
 Expected: PASS (6 passed).
@@ -592,7 +603,7 @@ def test_check_scoped_permission_denies_out_of_scope(make_user):
 Run:
 
 ```bash
-cd backend && python -m pytest tests/test_permission_enforcement.py -q
+cd backend && .venv/Scripts/python -m pytest tests/test_permission_enforcement.py -q
 ```
 
 Expected: FAIL — `test_scoped_admin_token_denied_on_admin_endpoint` fails (current `get_current_admin_user` returns early on `is_admin`), and `test_require_permission_denies_out_of_scope` fails (current `require_permission` bypasses on `is_admin` / ignores scope).
@@ -753,7 +764,7 @@ Replace with (no token scope for browser/JWT sessions):
 Run:
 
 ```bash
-cd backend && python -m pytest tests/test_permission_enforcement.py -q && python -m pytest -q
+cd backend && .venv/Scripts/python -m pytest tests/test_permission_enforcement.py -q && .venv/Scripts/python -m pytest -q
 ```
 
 Expected: enforcement tests PASS (5 passed), then the full suite PASSES (21 passed total).
@@ -995,7 +1006,7 @@ Replace with:
 Run:
 
 ```bash
-cd backend && python -c "import app.api.v1.api_tokens"
+cd backend && .venv/Scripts/python -c "import app.api.v1.api_tokens"
 ```
 
 Expected: no output, exit 0 (no syntax/import errors).
