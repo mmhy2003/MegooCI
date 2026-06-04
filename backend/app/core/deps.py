@@ -205,7 +205,7 @@ def require_permission(permission: str) -> Callable:
             import asyncio
             from app.core.audit import record as audit_record
 
-            asyncio.ensure_future(audit_record(
+            asyncio.create_task(audit_record(
                 action="permission_denied",
                 actor_id=current_user.id,
                 metadata={"permission": permission},

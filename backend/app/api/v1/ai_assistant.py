@@ -618,7 +618,7 @@ async def _prepare_messages(
         )
 
     user_perms = _collect_permissions(current_user)
-    can_read_secrets = current_user.is_admin or "secrets.read" in user_perms
+    can_read_secrets = "admin" in user_perms or "secrets.read" in user_perms
 
     system_content = SYSTEM_PROMPT
 

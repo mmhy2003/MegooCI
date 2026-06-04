@@ -102,13 +102,13 @@ async def search(
     perms = _collect_permissions(current_user)
 
     allowed_indexes: list[str] = []
-    if current_user.is_admin or "projects.read" in perms:
+    if "admin" in perms or "projects.read" in perms:
         allowed_indexes.append("projects")
-    if current_user.is_admin or "pipelines.read" in perms:
+    if "admin" in perms or "pipelines.read" in perms:
         allowed_indexes.append("pipelines")
-    if current_user.is_admin or "builds.read" in perms:
+    if "admin" in perms or "builds.read" in perms:
         allowed_indexes.append("builds")
-    if current_user.is_admin or "artifacts.read" in perms:
+    if "admin" in perms or "artifacts.read" in perms:
         allowed_indexes.append("artifacts")
 
     if not allowed_indexes:

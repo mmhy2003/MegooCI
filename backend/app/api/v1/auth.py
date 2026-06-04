@@ -268,8 +268,12 @@ async def update_profile(
                 )
             current_user.email = normalised
 
+    # db.refresh reloads mapped columns and drops the transient PAT scope marker;
+    # capture and restore it so the returned permissions stay scope-aware.
+    token_scopes = getattr(current_user, "active_token_scopes", None)
     await db.commit()
     await db.refresh(current_user)
+    current_user.active_token_scopes = token_scopes
 
     from app.core.deps import _collect_permissions, get_user_primary_role_name
 
