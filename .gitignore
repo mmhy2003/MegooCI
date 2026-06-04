@@ -51,3 +51,6 @@ coverage/
 celerybeat-schedule
 celerybeat-schedule.*
 celerybeat.pid
+
+# Superpowers brainstorming companion
+.superpowers/
