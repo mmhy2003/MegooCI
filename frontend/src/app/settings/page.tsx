@@ -910,42 +910,38 @@ export default function SettingsPage() {
                         </span>
                       </div>
                     </div>
-                    {t.is_active && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive"
-                        onClick={async () => {
-                          const ok = await confirm({
-                            title: "Revoke this token?",
-                            description: (
-                              <>
-                                Token <strong>{t.name}</strong> (
-                                <code>{t.token_hint}…</code>) will be
-                                permanently deactivated. Any scripts using it
-                                will stop working.
-                              </>
-                            ),
-                            confirmText: "Revoke",
-                            tone: "destructive",
-                          });
-                          if (!ok) return;
-                          try {
-                            await apiTokensApi.revoke(t.id);
-                            setTokens((prev) =>
-                              prev.map((x) =>
-                                x.id === t.id ? { ...x, is_active: false } : x,
-                              ),
-                            );
-                            toast.success("Token revoked");
-                          } catch {
-                            toast.error("Failed to revoke token");
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive"
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: "Delete this token?",
+                          description: (
+                            <>
+                              Token <strong>{t.name}</strong> (
+                              <code>{t.token_hint}…</code>) will be
+                              permanently removed. Any scripts using it
+                              will stop working.
+                            </>
+                          ),
+                          confirmText: "Delete",
+                          tone: "destructive",
+                        });
+                        if (!ok) return;
+                        try {
+                          await apiTokensApi.remove(t.id);
+                          setTokens((prev) =>
+                            prev.filter((x) => x.id !== t.id),
+                          );
+                          toast.success("Token deleted");
+                        } catch {
+                          toast.error("Failed to delete token");
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 ))}
               </div>

@@ -158,12 +158,12 @@ async def create_token(
     "/tokens/{token_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def revoke_token(
+async def delete_token(
     token_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
-    """Revoke (deactivate) a PAT.  The token is kept for audit but marked inactive."""
+    """Permanently delete a PAT.  Any scripts using it stop authenticating."""
     result = await db.execute(
         select(ApiToken).where(
             ApiToken.id == token_id,
@@ -176,5 +176,5 @@ async def revoke_token(
             status_code=status.HTTP_404_NOT_FOUND, detail="Token not found"
         )
 
-    api_token.is_active = False
+    await db.delete(api_token)
     await db.commit()

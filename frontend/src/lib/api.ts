@@ -1677,6 +1677,6 @@ export const apiTokensApi = {
       body: JSON.stringify(data),
     }),
 
-  revoke: (tokenId: string) =>
+  remove: (tokenId: string) =>
     fetchApi<void>(`/api/v1/tokens/${tokenId}`, { method: "DELETE" }),
 };
