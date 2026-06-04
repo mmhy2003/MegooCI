@@ -238,18 +238,36 @@ export default function BuildsPage() {
         <Card>
           <CardContent className="pt-6">
             {loading ? (
-              <div className="space-y-3">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-4">
-                    <Skeleton className="h-4 w-16" />
-                    <Skeleton className="h-4 w-32" />
-                    <Skeleton className="h-4 w-20" />
-                    <Skeleton className="h-4 w-20" />
-                    <Skeleton className="h-5 w-16 rounded-md" />
-                    <Skeleton className="ml-auto h-4 w-20" />
-                  </div>
-                ))}
-              </div>
+              <>
+                {/* Desktop: row skeletons */}
+                <div className="hidden space-y-3 sm:block">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-4">
+                      <Skeleton className="h-4 w-16" />
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-4 w-20" />
+                      <Skeleton className="h-4 w-20" />
+                      <Skeleton className="h-5 w-16 rounded-md" />
+                      <Skeleton className="ml-auto h-4 w-20" />
+                    </div>
+                  ))}
+                </div>
+                {/* Mobile: card skeletons */}
+                <div className="space-y-4 sm:hidden">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-4 w-12" />
+                        <Skeleton className="h-5 w-16 rounded-md" />
+                        <Skeleton className="ml-auto h-3 w-16" />
+                      </div>
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-3 w-40" />
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : builds.length === 0 ? (
               <div className="py-16 text-center">
                 <Hammer className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
