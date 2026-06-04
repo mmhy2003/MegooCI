@@ -31,7 +31,7 @@ import { useAuthStore } from "@/lib/auth";
 import { useTheme } from "@/components/providers";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { authApi, systemApi, apiTokensApi, type AiInfo, type MaintenanceInfo, type SystemInfo, type ApiToken, type ApiTokenCreated, type AiSettingsUpdate } from "@/lib/api";
+import { authApi, systemApi, apiTokensApi, type AiInfo, type MaintenanceInfo, type SystemInfo, type ApiToken, type ApiTokenCreated, type ApiTokenScope, type AiSettingsUpdate } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -564,6 +564,8 @@ export default function SettingsPage() {
   const [newTokenExpiry, setNewTokenExpiry] = React.useState<string>("");
   const [creatingToken, setCreatingToken] = React.useState(false);
   const [createdToken, setCreatedToken] = React.useState<ApiTokenCreated | null>(null);
+  const [scopeCatalog, setScopeCatalog] = React.useState<ApiTokenScope[]>([]);
+  const [newTokenScope, setNewTokenScope] = React.useState<string>("full_access");
 
   React.useEffect(() => {
     systemApi
@@ -577,6 +579,11 @@ export default function SettingsPage() {
       .then(setTokens)
       .catch(() => {})
       .finally(() => setTokensLoading(false));
+
+    apiTokensApi
+      .scopes()
+      .then(setScopeCatalog)
+      .catch(() => {});
   }, []);
 
   async function handleChangePassword(e: React.FormEvent) {
@@ -871,6 +878,9 @@ export default function SettingsPage() {
                         >
                           {t.is_active ? "Active" : "Revoked"}
                         </Badge>
+                        <Badge variant="outline" className="text-[10px]">
+                          {t.scope.label}
+                        </Badge>
                       </div>
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                         <span>
@@ -952,6 +962,7 @@ export default function SettingsPage() {
               setCreatedToken(null);
               setNewTokenName("");
               setNewTokenExpiry("");
+              setNewTokenScope("full_access");
             }
           }}
         >
@@ -1007,7 +1018,8 @@ export default function SettingsPage() {
                 <DialogHeader>
                   <DialogTitle>Create API token</DialogTitle>
                   <DialogDescription>
-                    The token will inherit your current role&apos;s permissions.
+                    Choose what this token can do. Access is always capped by
+                    your role&apos;s permissions.
                   </DialogDescription>
                 </DialogHeader>
                 <form
@@ -1024,6 +1036,7 @@ export default function SettingsPage() {
                         expires_in_days: newTokenExpiry
                           ? parseInt(newTokenExpiry, 10)
                           : null,
+                        scope: newTokenScope,
                       });
                       setCreatedToken(result);
                       setTokens((prev) => [
@@ -1032,6 +1045,7 @@ export default function SettingsPage() {
                           name: result.name,
                           token_hint: result.token_hint,
                           scopes: result.scopes,
+                          scope: result.scope,
                           expires_at: result.expires_at,
                           is_active: result.is_active,
                           last_used_at: result.last_used_at,
@@ -1041,6 +1055,7 @@ export default function SettingsPage() {
                       ]);
                       setNewTokenName("");
                       setNewTokenExpiry("");
+                      setNewTokenScope("full_access");
                     } catch {
                       toast.error("Failed to create token");
                     } finally {
@@ -1057,6 +1072,23 @@ export default function SettingsPage() {
                       onChange={(e) => setNewTokenName(e.target.value)}
                       autoFocus
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Scope</label>
+                    <select
+                      value={newTokenScope}
+                      onChange={(e) => setNewTokenScope(e.target.value)}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      {scopeCatalog.map((s) => (
+                        <option key={s.key} value={s.key}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      {scopeCatalog.find((s) => s.key === newTokenScope)?.description}
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">

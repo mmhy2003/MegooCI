@@ -1644,11 +1644,18 @@ export const registryApi = {
 // ------------------------------------------------------------------
 // API Tokens (Personal Access Tokens)
 // ------------------------------------------------------------------
+export interface ApiTokenScope {
+  key: string;
+  label: string;
+  description: string;
+}
+
 export interface ApiToken {
   id: string;
   name: string;
   token_hint: string;
   scopes: string[] | null;
+  scope: { key: string; label: string };
   expires_at: string | null;
   is_active: boolean;
   last_used_at: string | null;
@@ -1662,7 +1669,9 @@ export interface ApiTokenCreated extends ApiToken {
 export const apiTokensApi = {
   list: () => fetchApi<ApiToken[]>("/api/v1/tokens"),
 
-  create: (data: { name: string; expires_in_days?: number | null; scopes?: string[] | null }) =>
+  scopes: () => fetchApi<ApiTokenScope[]>("/api/v1/tokens/scopes"),
+
+  create: (data: { name: string; expires_in_days?: number | null; scope?: string | null }) =>
     fetchApi<ApiTokenCreated>("/api/v1/tokens", {
       method: "POST",
       body: JSON.stringify(data),
