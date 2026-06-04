@@ -695,6 +695,13 @@ export interface Agent {
   enabled: boolean;
   last_seen_at: string | null;
   status: AgentStatus | string;
+  // The build this agent is currently running. Present only when busy;
+  // computed server-side so the card can link to the build.
+  current_build?: {
+    id: string;
+    number: number;
+    pipeline_name: string;
+  } | null;
   // Agent-token metadata (PRD §6.3 / F-3.4). Plaintext token is returned
   // only on register / rotate via AgentRegistrationResponse.
   token_prefix?: string | null;
