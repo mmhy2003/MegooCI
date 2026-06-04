@@ -337,6 +337,17 @@ async def dispatch_build(
             detail=f"Cannot dispatch build with status '{build.status}' (must be pending)",
         )
 
+    # Don't dispatch while maintenance mode is active. execute_build() would
+    # bounce the build straight back to pending anyway, so surface a clear
+    # error here instead of reporting a misleading success.
+    from app.api.v1.system import is_maintenance_mode
+    if await is_maintenance_mode(db):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="System is in maintenance mode. Builds cannot be dispatched "
+                   "until an administrator disables maintenance mode.",
+        )
+
     from app.services.agent_dispatcher import dispatch_single_build
     dispatched = await dispatch_single_build(build_id)
 

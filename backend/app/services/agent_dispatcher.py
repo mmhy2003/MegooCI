@@ -268,6 +268,13 @@ async def dispatch_single_build(build_id: uuid.UUID) -> bool:
     from app.tasks.build_tasks import run_build
 
     async with _session_factory() as db:
+        # Don't dispatch builds while maintenance mode is active (mirrors
+        # dispatch_pending_builds). The API endpoint also checks this to
+        # return a clearer error, but guarding here protects any other caller.
+        from app.api.v1.system import is_maintenance_mode
+        if await is_maintenance_mode(db):
+            return False
+
         result = await db.execute(
             select(Build).where(Build.id == build_id)
         )
