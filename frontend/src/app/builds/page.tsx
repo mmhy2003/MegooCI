@@ -20,33 +20,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBuildUpdates } from "@/hooks/use-build-updates";
-
-function statusVariant(
-  s: BuildStatus,
-): "success" | "failed" | "running" | "pending" | "cancelled" {
-  const map: Record<
-    BuildStatus,
-    "success" | "failed" | "running" | "pending" | "cancelled"
-  > = {
-    pending: "pending",
-    queued: "pending",
-    running: "running",
-    success: "success",
-    failed: "failed",
-    cancelled: "cancelled",
-  };
-  return map[s];
-}
-
-function formatDuration(start: string | null, end: string | null): string {
-  if (!start) return "—";
-  const s = new Date(start).getTime();
-  const e = end ? new Date(end).getTime() : Date.now();
-  const secs = Math.floor((e - s) / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  return `${mins}m ${secs % 60}s`;
-}
+import { BuildCard } from "@/components/builds/build-card";
+import { statusVariant, formatDuration } from "@/lib/builds";
 
 const STATUS_TABS: { label: string; value: BuildStatus | "all" }[] = [
   { label: "All", value: "all" },
@@ -54,75 +29,6 @@ const STATUS_TABS: { label: string; value: BuildStatus | "all" }[] = [
   { label: "Success", value: "success" },
   { label: "Failed", value: "failed" },
 ];
-
-function BuildCard({
-  build,
-  pipeline,
-  project,
-}: {
-  build: Build;
-  pipeline?: Pipeline;
-  project?: Project;
-}) {
-  const router = useRouter();
-  return (
-    <div
-      onClick={() => router.push(`/builds/${build.id}`)}
-      className="cursor-pointer px-2 py-3 transition-colors hover:bg-muted/50"
-    >
-      {/* Header: number · status · time */}
-      <div className="flex items-center gap-2">
-        <span className="font-medium">#{build.number}</span>
-        <Badge variant={statusVariant(build.status)}>{build.status}</Badge>
-        <span className="ml-auto text-xs text-muted-foreground">
-          {formatDistanceToNow(new Date(build.created_at), { addSuffix: true })}
-        </span>
-      </div>
-
-      {/* Pipeline */}
-      <div className="mt-2">
-        <button
-          className="text-sm text-primary hover:underline"
-          onClick={(e) => {
-            e.stopPropagation();
-            router.push(`/pipelines/${build.pipeline_id}`);
-          }}
-        >
-          {pipeline?.name || build.pipeline_id.slice(0, 8) + "…"}
-        </button>
-      </div>
-
-      {/* Project */}
-      <div className="mt-1.5 text-sm">
-        {project ? (
-          <button
-            className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-            onClick={(e) => {
-              e.stopPropagation();
-              router.push(`/projects/${project.id}`);
-            }}
-          >
-            <FolderKanban className="h-3.5 w-3.5" />
-            {project.name}
-          </button>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        )}
-      </div>
-
-      {/* Meta: branch · duration · trigger */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <code className="rounded bg-muted px-1.5 py-0.5">
-          {build.branch || "—"}
-        </code>
-        <span>·</span>
-        <span>{formatDuration(build.started_at, build.finished_at)}</span>
-        <span>·</span>
-        <span>{build.trigger_type}</span>
-      </div>
-    </div>
-  );
-}
 
 export default function BuildsPage() {
   const router = useRouter();

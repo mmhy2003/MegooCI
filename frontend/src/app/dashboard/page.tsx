@@ -29,34 +29,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBuildUpdates } from "@/hooks/use-build-updates";
-
-function statusVariant(
-  s: BuildStatus,
-): "success" | "failed" | "running" | "pending" | "cancelled" {
-  const map: Record<
-    BuildStatus,
-    "success" | "failed" | "running" | "pending" | "cancelled"
-  > = {
-    pending: "pending",
-    queued: "pending",
-    running: "running",
-    success: "success",
-    failed: "failed",
-    cancelled: "cancelled",
-  };
-  return map[s];
-}
-
-function formatDuration(start: string | null, end: string | null): string {
-  if (!start) return "—";
-  const s = new Date(start).getTime();
-  const e = end ? new Date(end).getTime() : Date.now();
-  const secs = Math.floor((e - s) / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  const rem = secs % 60;
-  return `${mins}m ${rem}s`;
-}
+import { BuildCard } from "@/components/builds/build-card";
+import { statusVariant, formatDuration } from "@/lib/builds";
 
 /** Recalculate summary stats from the current build list. */
 function calcStats(
@@ -280,18 +254,36 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="space-y-3">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-4">
-                    <Skeleton className="h-4 w-32" />
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="h-4 w-16" />
-                    <Skeleton className="h-4 w-20" />
-                    <Skeleton className="h-5 w-16 rounded-md" />
-                    <Skeleton className="ml-auto h-4 w-24" />
-                  </div>
-                ))}
-              </div>
+              <>
+                {/* Desktop: row skeletons */}
+                <div className="hidden space-y-3 sm:block">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-4">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-4 w-16" />
+                      <Skeleton className="h-4 w-20" />
+                      <Skeleton className="h-5 w-16 rounded-md" />
+                      <Skeleton className="ml-auto h-4 w-24" />
+                    </div>
+                  ))}
+                </div>
+                {/* Mobile: card skeletons */}
+                <div className="space-y-4 sm:hidden">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-4 w-12" />
+                        <Skeleton className="h-5 w-16 rounded-md" />
+                        <Skeleton className="ml-auto h-3 w-16" />
+                      </div>
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-3 w-40" />
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : !recentBuilds?.length ? (
               <div className="py-12 text-center">
                 <Hammer className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
@@ -300,98 +292,115 @@ export default function DashboardPage() {
                 </p>
               </div>
             ) : (
-              <div className="-mx-2 overflow-x-auto px-2">
-                <table className="w-full min-w-[540px] text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th className="pb-3 pr-4 font-medium">Build</th>
-                      <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
-                        Pipeline
-                      </th>
-                      <th className="hidden pb-3 pr-4 font-medium lg:table-cell">
-                        Project
-                      </th>
-                      <th className="hidden pb-3 pr-4 font-medium md:table-cell">
-                        Branch
-                      </th>
-                      <th className="pb-3 pr-4 font-medium">Status</th>
-                      <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
-                        Duration
-                      </th>
-                      <th className="pb-3 font-medium text-right">Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentBuilds.map((build) => {
-                      const pl = pipelineMap[build.pipeline_id];
-                      const prj = pl ? projectMap[pl.project_id] : undefined;
-                      return (
-                        <tr
-                          key={build.id}
-                          className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
-                          onClick={() => router.push(`/builds/${build.id}`)}
-                        >
-                          <td className="py-3 pr-4 font-medium">
-                            #{build.number}
-                          </td>
-                          <td className="hidden py-3 pr-4 sm:table-cell">
-                            <button
-                              className="text-primary hover:underline"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                router.push(
-                                  `/pipelines/${build.pipeline_id}`,
-                                );
-                              }}
-                            >
-                              {pl?.name ||
-                                build.pipeline_id.slice(0, 8) + "…"}
-                            </button>
-                          </td>
-                          <td className="hidden py-3 pr-4 lg:table-cell">
-                            {prj ? (
+              <>
+                <div className="-mx-2 hidden overflow-x-auto px-2 sm:block">
+                  <table className="w-full min-w-[540px] text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="pb-3 pr-4 font-medium">Build</th>
+                        <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                          Pipeline
+                        </th>
+                        <th className="hidden pb-3 pr-4 font-medium lg:table-cell">
+                          Project
+                        </th>
+                        <th className="hidden pb-3 pr-4 font-medium md:table-cell">
+                          Branch
+                        </th>
+                        <th className="pb-3 pr-4 font-medium">Status</th>
+                        <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                          Duration
+                        </th>
+                        <th className="pb-3 font-medium text-right">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentBuilds.map((build) => {
+                        const pl = pipelineMap[build.pipeline_id];
+                        const prj = pl ? projectMap[pl.project_id] : undefined;
+                        return (
+                          <tr
+                            key={build.id}
+                            className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
+                            onClick={() => router.push(`/builds/${build.id}`)}
+                          >
+                            <td className="py-3 pr-4 font-medium">
+                              #{build.number}
+                            </td>
+                            <td className="hidden py-3 pr-4 sm:table-cell">
                               <button
-                                className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                                className="text-primary hover:underline"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  router.push(`/projects/${prj.id}`);
+                                  router.push(
+                                    `/pipelines/${build.pipeline_id}`,
+                                  );
                                 }}
                               >
-                                <FolderKanban className="h-3.5 w-3.5" />
-                                {prj.name}
+                                {pl?.name ||
+                                  build.pipeline_id.slice(0, 8) + "…"}
                               </button>
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
-                            )}
-                          </td>
-                          <td className="hidden py-3 pr-4 md:table-cell">
-                            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                              {build.branch || "—"}
-                            </code>
-                          </td>
-                          <td className="py-3 pr-4">
-                            <Badge variant={statusVariant(build.status)}>
-                              {build.status}
-                            </Badge>
-                          </td>
-                          <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
-                            {formatDuration(
-                              build.started_at,
-                              build.finished_at,
-                            )}
-                          </td>
-                          <td className="py-3 text-right text-muted-foreground">
-                            {formatDistanceToNow(
-                              new Date(build.created_at),
-                              { addSuffix: true },
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                            </td>
+                            <td className="hidden py-3 pr-4 lg:table-cell">
+                              {prj ? (
+                                <button
+                                  className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    router.push(`/projects/${prj.id}`);
+                                  }}
+                                >
+                                  <FolderKanban className="h-3.5 w-3.5" />
+                                  {prj.name}
+                                </button>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                            <td className="hidden py-3 pr-4 md:table-cell">
+                              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                                {build.branch || "—"}
+                              </code>
+                            </td>
+                            <td className="py-3 pr-4">
+                              <Badge variant={statusVariant(build.status)}>
+                                {build.status}
+                              </Badge>
+                            </td>
+                            <td className="hidden py-3 pr-4 text-muted-foreground sm:table-cell">
+                              {formatDuration(
+                                build.started_at,
+                                build.finished_at,
+                              )}
+                            </td>
+                            <td className="py-3 text-right text-muted-foreground">
+                              {formatDistanceToNow(
+                                new Date(build.created_at),
+                                { addSuffix: true },
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="-mx-2 divide-y sm:hidden">
+                  {recentBuilds.map((build) => {
+                    const pl = pipelineMap[build.pipeline_id];
+                    const prj = pl ? projectMap[pl.project_id] : undefined;
+                    return (
+                      <BuildCard
+                        key={build.id}
+                        build={build}
+                        pipeline={pl}
+                        project={prj}
+                        showTrigger={false}
+                      />
+                    );
+                  })}
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
