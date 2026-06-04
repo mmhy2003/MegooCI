@@ -1080,11 +1080,15 @@ export default function SettingsPage() {
                       onChange={(e) => setNewTokenScope(e.target.value)}
                       className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
-                      {scopeCatalog.map((s) => (
-                        <option key={s.key} value={s.key}>
-                          {s.label}
-                        </option>
-                      ))}
+                      {scopeCatalog.length === 0 ? (
+                        <option value="full_access">Full access</option>
+                      ) : (
+                        scopeCatalog.map((s) => (
+                          <option key={s.key} value={s.key}>
+                            {s.label}
+                          </option>
+                        ))
+                      )}
                     </select>
                     <p className="text-xs text-muted-foreground">
                       {scopeCatalog.find((s) => s.key === newTokenScope)?.description}
@@ -1107,7 +1111,12 @@ export default function SettingsPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setShowCreateToken(false)}
+                      onClick={() => {
+                        setShowCreateToken(false);
+                        setNewTokenName("");
+                        setNewTokenExpiry("");
+                        setNewTokenScope("full_access");
+                      }}
                     >
                       Cancel
                     </Button>
