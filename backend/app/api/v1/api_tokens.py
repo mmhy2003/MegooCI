@@ -4,7 +4,7 @@ Users can create, list, and revoke their own API tokens.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -131,8 +131,6 @@ async def create_token(
         )
 
     raw_token = generate_pat()
-
-    from datetime import timedelta
 
     expires_at = None
     if body.expires_in_days is not None:
