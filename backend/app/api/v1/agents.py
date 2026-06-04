@@ -104,14 +104,21 @@ async def list_agents(
     _current_user: User = Depends(require_permission("agents.read")),
 ) -> list[AgentResponse]:
     query = select(Agent).order_by(Agent.name).offset(skip).limit(limit)
-    if status_filter:
+    # "busy" is a virtual status derived after the DB read (it is never
+    # stored on the row), so it cannot be pushed into the SQL WHERE. Other
+    # status values filter at the DB level; "busy" is filtered in Python on
+    # the built responses below.
+    if status_filter and status_filter != "busy":
         query = query.where(Agent.status == status_filter)
 
     result = await db.execute(query)
     agents = list(result.scalars().all())
     for agent in agents:
         _normalize_status(agent)
-    return await _build_agent_responses(agents, db)
+    responses = await _build_agent_responses(agents, db)
+    if status_filter == "busy":
+        responses = [r for r in responses if r.status == "busy"]
+    return responses
 
 
 @router.post(
