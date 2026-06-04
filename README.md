@@ -258,7 +258,8 @@ MegooCI reads all configuration from environment variables. See [`.env.example`]
 | `MEGOOCI_JWT_REFRESH_TOKEN_EXPIRE_DAYS` | `30` | Refresh-token lifetime. |
 | `MEGOOCI_SIGNUP_ENABLED` | `true` | Public signup toggle. |
 | `MEGOOCI_STORAGE_ROOT` | `/var/lib/megooci` | Root folder for artifacts, logs, and registry blobs. |
-| `MEGOOCI_PUBLIC_URL` | `http://localhost:8000` | External URL used for webhook URLs. |
+| `MEGOOCI_PUBLIC_URL` | `http://localhost:3000` | Public URL of the frontend app (used in invite & password-reset email links). |
+| `MEGOOCI_PUBLIC_API_URL` | `http://localhost:8000` | Externally-reachable backend API URL (webhooks, registry, artifact links, agent controller URL). |
 | `MEGOOCI_AI_ENABLED` | `true` | Enable/disable the AI pipeline assistant. |
 | `MEGOOCI_AI_PROVIDER` | `openai` | `openai`, `anthropic`, `ollama`, `azure_openai`, `custom`, or `disabled`. |
 | `MEGOOCI_AI_API_KEY` | — | Provider API key (not needed for `ollama`). |

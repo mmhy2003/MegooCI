@@ -134,7 +134,7 @@ export default function AgentsPage() {
   const [tokenCopied, setTokenCopied] = React.useState(false);
 
   // Controller URL the snippets suggest to the user. Seeded from
-  // `MEGOOCI_PUBLIC_URL` via /api/v1/system/info (which is what external
+  // `MEGOOCI_PUBLIC_API_URL` via /api/v1/system/info (which is what external
   // agents should use) and toggled by the "Where will the agent run?"
   // picker — see DEPLOY_MODE comment below.
   const [publicUrl, setPublicUrl] = React.useState<string | null>(null);
@@ -174,7 +174,7 @@ export default function AgentsPage() {
   React.useEffect(() => {
     systemApi
       .info()
-      .then((info) => setPublicUrl(info.public_url || null))
+      .then((info) => setPublicUrl(info.public_api_url || null))
       .catch(() => {
         /* non-fatal; snippets fall back to `http://localhost:8000` */
       });
@@ -449,7 +449,7 @@ export default function AgentsPage() {
           // Pick a sensible default controller URL per deployment mode:
           //   compose -> internal Docker DNS `backend:8000` (reachable
           //              only inside `megooci_default`).
-          //   remote  -> MEGOOCI_PUBLIC_URL as reported by the backend,
+          //   remote  -> MEGOOCI_PUBLIC_API_URL as reported by the backend,
           //              falling back to localhost:8000 if unavailable.
           // Users can still override with the text field below.
           const presetUrl =

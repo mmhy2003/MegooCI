@@ -802,7 +802,8 @@ export interface MaintenanceInfo {
 
 export interface SystemInfo {
   version: string;
-  public_url: string;
+  public_url: string; // frontend/app URL (MEGOOCI_PUBLIC_URL)
+  public_api_url: string; // backend API URL (MEGOOCI_PUBLIC_API_URL)
   log_level: string;
   maintenance: MaintenanceInfo;
   ai: AiInfo;

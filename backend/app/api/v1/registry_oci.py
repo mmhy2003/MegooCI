@@ -83,7 +83,7 @@ def _registry_disabled_check() -> None:
 
 def _auth_challenge(scope: str | None = None, error: str | None = None) -> dict[str, str]:
     settings = get_settings()
-    realm = f"{settings.MEGOOCI_PUBLIC_URL}/v2/token"
+    realm = f"{settings.MEGOOCI_PUBLIC_API_URL}/v2/token"
     parts = [f'Bearer realm="{realm}"', f'service="{settings.MEGOOCI_REGISTRY_HOST}"']
     if scope:
         parts.append(f'scope="{scope}"')

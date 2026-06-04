@@ -36,7 +36,13 @@ class Settings(BaseSettings):
     # Meilisearch
     MEGOOCI_MEILISEARCH_URL: str = "http://localhost:7700"
     MEGOOCI_MEILISEARCH_API_KEY: str = "megooci-meili-master-key"
-    MEGOOCI_PUBLIC_URL: str = "http://localhost:8000"
+    # Public URL of the frontend app (where users access MegooCI in a browser).
+    # Used for invite / password-reset email links and other UI-facing links.
+    MEGOOCI_PUBLIC_URL: str = "http://localhost:3000"
+    # Externally-reachable URL of the backend API. Used for webhook URLs, the
+    # registry token realm, artifact download links, and the controller URL
+    # advertised to external agents.
+    MEGOOCI_PUBLIC_API_URL: str = "http://localhost:8000"
     MEGOOCI_REGISTRY_ENABLED: bool = True
     MEGOOCI_REGISTRY_HOST: str = "localhost"
     MEGOOCI_REGISTRY_PORT: int = 0
@@ -47,11 +53,6 @@ class Settings(BaseSettings):
 
     # Email / SMTP is now configured via the UI (notification channels).
     MEGOOCI_INVITE_EXPIRY_HOURS: int = 72
-
-    # Frontend base URL — used in invite and password-reset emails so that
-    # links point to the Next.js app rather than the API backend.
-    # Defaults to MEGOOCI_PUBLIC_URL when left blank (single-domain setups).
-    MEGOOCI_FRONTEND_URL: str = ""
 
     # Git provider integration (PRD §6.16)
     # OAuth client credentials are Phase 2; keep them optional so Phase 1

@@ -126,7 +126,8 @@ class MaintenanceInfo(BaseModel):
 
 class SystemInfo(BaseModel):
     version: str
-    public_url: str
+    public_url: str       # frontend/app URL (MEGOOCI_PUBLIC_URL)
+    public_api_url: str   # backend API URL (MEGOOCI_PUBLIC_API_URL)
     log_level: str
     maintenance: MaintenanceInfo
     ai: AiInfo
@@ -218,6 +219,7 @@ async def get_system_info(
     return SystemInfo(
         version="0.1.0",
         public_url=settings.MEGOOCI_PUBLIC_URL,
+        public_api_url=settings.MEGOOCI_PUBLIC_API_URL,
         log_level=settings.MEGOOCI_LOG_LEVEL,
         maintenance=maint,
         ai=_build_ai_info(overrides),

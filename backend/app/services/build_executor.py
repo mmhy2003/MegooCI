@@ -564,7 +564,7 @@ async def _load_scope_context(
             "slug": project.slug if project else "",
         },
         "megooci": {
-            "url": settings.MEGOOCI_PUBLIC_URL or "",
+            "url": settings.MEGOOCI_PUBLIC_API_URL or "",
         },
     }
 

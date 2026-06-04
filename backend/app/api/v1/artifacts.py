@@ -209,7 +209,7 @@ async def get_signed_url(
         str(artifact_id), settings.MEGOOCI_SECRET_KEY, ttl_seconds=ttl
     )
     url = (
-        f"{settings.MEGOOCI_PUBLIC_URL}/api/v1"
+        f"{settings.MEGOOCI_PUBLIC_API_URL}/api/v1"
         f"/artifacts/{artifact_id}/download?token={token}"
     )
     return {"url": url, "expires_in": ttl}

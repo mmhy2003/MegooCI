@@ -43,8 +43,8 @@ router = APIRouter()
 
 def _build_webhook_url(slug: str) -> str:
     settings = get_settings()
-    base = (settings.MEGOOCI_PUBLIC_URL or "").rstrip("/") + "/"
-    # Using urljoin to respect whatever base path MEGOOCI_PUBLIC_URL carries.
+    base = (settings.MEGOOCI_PUBLIC_API_URL or "").rstrip("/") + "/"
+    # Using urljoin to respect whatever base path MEGOOCI_PUBLIC_API_URL carries.
     return urljoin(base, f"api/v1/webhooks/git/{slug}")
 
 

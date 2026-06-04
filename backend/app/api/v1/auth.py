@@ -306,7 +306,7 @@ async def forgot_password(
             {"sub": str(user.id), "type": "reset"},
             expires_delta=timedelta(hours=1),
         )
-        frontend_base = (settings.MEGOOCI_FRONTEND_URL or settings.MEGOOCI_PUBLIC_URL).rstrip("/")
+        frontend_base = settings.MEGOOCI_PUBLIC_URL.rstrip("/")
         reset_link = f"{frontend_base}/reset-password?token={token}"
         sent = await send_password_reset_email(db, user.email, reset_link)
         if not sent:

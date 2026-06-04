@@ -361,10 +361,11 @@ All operational toggles are driven by environment variables so administrators ca
 | `MEGOOCI_AI_BASE_URL` | — | Custom base URL (e.g., for Ollama, Azure). |
 | ~~`MEGOOCI_PYTHON_PIPELINE_TIMEOUT_SECONDS`~~ | ~~`10`~~ | ~~Max time a Python pipeline definition is allowed to run during graph construction.~~ **Removed** — Python pipelines are no longer supported. |
 | `MEGOOCI_LOG_LEVEL` | `INFO` | Global log level. |
-| `MEGOOCI_PUBLIC_URL` | — | Externally reachable base URL (used for webhooks, emails). |
+| `MEGOOCI_PUBLIC_URL` | `http://localhost:3000` | Public URL of the frontend app (used in invite & password-reset email links). |
+| `MEGOOCI_PUBLIC_API_URL` | `http://localhost:8000` | Externally reachable backend API URL (used for webhooks, registry, artifact links, agent controller URL). |
 | `MEGOOCI_WEBHOOK_SIGNATURE_HEADER` | `X-MegooCI-Signature` | Header name for outgoing webhook HMAC. |
 | `MEGOOCI_REGISTRY_ENABLED` | `true` | Enable the embedded OCI/Docker registry. |
-| `MEGOOCI_REGISTRY_HOST` | value of `MEGOOCI_PUBLIC_URL` host | Hostname advertised in image references (e.g., `registry.megoo.example.com`). |
+| `MEGOOCI_REGISTRY_HOST` | value of `MEGOOCI_PUBLIC_API_URL` host | Hostname advertised in image references (e.g., `registry.megoo.example.com`). |
 | `MEGOOCI_REGISTRY_PORT` | same as controller | Dedicated port for the registry, if separated from the main API. |
 | `MEGOOCI_REGISTRY_STORAGE_PATH` | `${MEGOOCI_STORAGE_ROOT}/registry` | Root directory for registry blobs and manifests. |
 | `MEGOOCI_REGISTRY_MAX_UPLOAD_MB` | `2048` | Per-layer upload size limit. |
@@ -537,7 +538,7 @@ This section is fully UI-driven: no configuration file edits are required. Phase
 | F-16.3 | OAuth-ready data model | S | `auth_mode` + OAuth columns (`oauth_client_id`, `encrypted_oauth_client_secret`, `encrypted_refresh_token`, `token_expires_at`) ship in Phase 1 but accept only `pat` until Phase 2 lands. |
 | F-16.4 | Connection test | M | `POST /api/v1/git/connections/{id}/test` calls the provider (`GET /user` for GitHub/GitLab, `git ls-remote` for generic) with the current credential and records `validation_status` + `last_validated_at`. |
 | F-16.5 | Per-project `ProjectRepository` link | M | A project owner links a `(connection, repo_url, default_branch, display_name)` tuple to their project. A project may have N linked repositories (monorepo plus helper repos). Pipelines may optionally reference a `project_repository_id` to inherit the repo URL + default branch. |
-| F-16.6 | Manual-paste webhook setup | M | On link, MegooCI generates a 24-char `webhook_slug` and a 32-byte random secret (shown once). The UI renders provider-specific instructions: URL to paste (`{MEGOOCI_PUBLIC_URL}/api/v1/webhooks/git/{slug}`), secret to paste, which events to subscribe to, and content-type guidance. |
+| F-16.6 | Manual-paste webhook setup | M | On link, MegooCI generates a 24-char `webhook_slug` and a 32-byte random secret (shown once). The UI renders provider-specific instructions: URL to paste (`{MEGOOCI_PUBLIC_API_URL}/api/v1/webhooks/git/{slug}`), secret to paste, which events to subscribe to, and content-type guidance. |
 | F-16.7 | Per-provider HMAC verification | M | GitHub: `X-Hub-Signature-256` (HMAC-SHA256 of raw body). GitLab: `X-Gitlab-Token` constant-time compared to secret. Generic: `X-MegooCI-Signature: sha256=...` HMAC-SHA256 of raw body. All comparisons use `hmac.compare_digest`. |
 | F-16.8 | Replay protection | M | Unique `(project_repository_id, provider_delivery_id)` on `WebhookDelivery`; duplicates return 409. GitHub uses `X-GitHub-Delivery`; GitLab `X-Gitlab-Event-UUID`; generic uses `X-MegooCI-Delivery` or a random UUID. |
 | F-16.9 | Webhook delivery log | M | Every inbound request (accepted or rejected) is recorded as a `WebhookDelivery` row with event type, branch, commit sha, signature validity, the HTTP status we returned, an error string when rejected, and a 4 KB payload excerpt. Visible in the UI under **Project → Integrations → Deliveries**. |
