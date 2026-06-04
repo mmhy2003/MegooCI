@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import {
@@ -10,6 +11,7 @@ import {
   Copy,
   Check,
   Cpu,
+  Hammer,
   KeyRound,
   Monitor,
   Power,
@@ -701,6 +703,18 @@ export default function AgentsPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
+                  {agent.current_build && (
+                    <Link
+                      href={`/builds/${agent.current_build.id}`}
+                      className="flex items-center gap-1.5 font-medium text-primary hover:underline"
+                    >
+                      <Hammer className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">
+                        Building {agent.current_build.pipeline_name} #
+                        {agent.current_build.number}
+                      </span>
+                    </Link>
+                  )}
                   {(agent.os || agent.arch) && (
                     <div className="flex items-center gap-1.5 text-muted-foreground">
                       <Monitor className="h-3.5 w-3.5" />
