@@ -65,7 +65,7 @@ def _scoped_role_permissions(
     return perms
 
 
-def _apply_token_scope(role_perms: set[str], is_admin: bool, scopes) -> set[str]:
+def _apply_token_scope(role_perms: set[str], is_admin: bool, scopes: list[str] | None) -> set[str]:
     """Cap a role-permission set by the active PAT scope.
 
     - scopes is None  -> Full access / JWT session: role perms (+ "admin" if admin).
@@ -83,9 +83,8 @@ def effective_permissions(user: User) -> set[str]:
     """Global permissions a request actually has, accounting for a PAT scope."""
     role_perms = _all_role_permissions(user)
     is_admin = user.is_admin or "admin" in role_perms
-    return _apply_token_scope(
-        role_perms, is_admin, getattr(user, "active_token_scopes", None)
-    )
+    scopes = getattr(user, "active_token_scopes", None)
+    return _apply_token_scope(role_perms, is_admin, scopes)
 
 
 def effective_scoped_permissions(
@@ -94,9 +93,8 @@ def effective_scoped_permissions(
     """Resource-scoped permissions a request actually has, accounting for a PAT scope."""
     role_perms = _scoped_role_permissions(user, scope_type, scope_id)
     is_admin = user.is_admin or "admin" in role_perms
-    return _apply_token_scope(
-        role_perms, is_admin, getattr(user, "active_token_scopes", None)
-    )
+    scopes = getattr(user, "active_token_scopes", None)
+    return _apply_token_scope(role_perms, is_admin, scopes)
 
 
 async def get_current_user(

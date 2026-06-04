@@ -48,3 +48,18 @@ def test_scoped_resource_permissions_match_only_their_resource(make_user):
     )
     assert "builds.read" in effective_scoped_permissions(user, "project", pid)
     assert effective_scoped_permissions(user, "project", uuid.uuid4()) == set()
+
+
+def test_scoped_empty_list_denies_all(make_user):
+    # An empty scope list expands to nothing -> deny-all after intersection.
+    user = make_user(role_permissions={"artifacts.read"}, active_token_scopes=[])
+    assert effective_permissions(user) == set()
+
+
+def test_scoped_non_admin_zero_intersection_denies(make_user):
+    # Scope perms (builds/pipelines) don't overlap the role's perms at all.
+    user = make_user(
+        role_permissions={"artifacts.read"},
+        active_token_scopes=["automate.workflows"],
+    )
+    assert effective_permissions(user) == set()
