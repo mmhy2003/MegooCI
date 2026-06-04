@@ -10,6 +10,8 @@ dropdown, the create endpoint validates against it, and the auth layer expands
 stored scope keys to permissions through it.
 """
 
+from typing import TypedDict
+
 from app.core.permissions import VALID_PERMISSIONS
 
 # Synthetic UI-only key meaning "no restriction". Stored as NULL in the DB.
@@ -23,8 +25,14 @@ _READ_ONLY_PERMISSIONS: frozenset[str] = frozenset(
     p for p in ALL_PERMISSIONS if p.endswith(".read")
 )
 
+class ScopeEntry(TypedDict):
+    label: str
+    description: str
+    permissions: frozenset[str]
+
+
 # key -> {label, description, permissions}. Insertion order is the UI order.
-TOKEN_SCOPES: dict[str, dict] = {
+TOKEN_SCOPES: dict[str, ScopeEntry] = {
     "artifacts.download": {
         "label": "Artifacts Download",
         "description": "Download build artifacts.",
@@ -52,6 +60,10 @@ def expand_scopes(keys: list[str]) -> set[str]:
     """Union of permissions implied by the given scope keys.
 
     Unknown keys contribute nothing. Never includes the "admin" sentinel.
+
+    Do not pass FULL_ACCESS_KEY here: full access is signalled by a NULL
+    `scopes` column (no restriction), not by expanding a key to a permission
+    set. Passing it would yield an empty set (deny-all), not full access.
     """
     perms: set[str] = set()
     for key in keys:
