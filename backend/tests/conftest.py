@@ -10,6 +10,10 @@ import pytest
 from app.models.role import Role, UserRole
 from app.models.user import User
 
+# Distinguishes "no active token scope at all" (JWT-style session) from an
+# explicit Full-access token (active_token_scopes=None).
+_UNSET = object()
+
 
 @pytest.fixture
 def make_user():
@@ -17,16 +21,18 @@ def make_user():
         *,
         is_admin: bool = False,
         role_permissions: set[str] | None = None,
-        active_token_scopes: object = "__unset__",
+        active_token_scopes: object = _UNSET,
         scope_type: str = "global",
         scope_id=None,
     ) -> User:
         """Build a transient User.
 
         active_token_scopes:
-          - "__unset__" (default): JWT-style session, no active token scope.
+          - _UNSET (default): JWT-style session, no active token scope.
           - None: a Full-access token.
           - ["artifacts.download"]: a scoped token.
+
+        scope_type / scope_id only take effect when role_permissions is given.
         """
         user = User(email="t@example.com", name="Test", is_admin=is_admin, is_active=True)
         if role_permissions is not None:
@@ -34,7 +40,7 @@ def make_user():
             user.user_roles.append(
                 UserRole(role=role, scope_type=scope_type, scope_id=scope_id)
             )
-        if active_token_scopes != "__unset__":
+        if active_token_scopes is not _UNSET:
             user.active_token_scopes = active_token_scopes
         return user
 
