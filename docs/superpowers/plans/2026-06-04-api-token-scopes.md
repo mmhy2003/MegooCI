@@ -531,7 +531,7 @@ git commit -m "feat(auth): add effective_permissions scope-aware helpers" -m "Co
 
 ## Task 4: Wire enforcement into the choke points
 
-Route the three permission checks through the new helpers, and attach the active scope to the user during PAT authentication. After this task, every endpoint enforces token scopes.
+Route the three permission checks through the new helpers, attach the active scope to the user during PAT authentication, and reconcile the legacy `_collect_*` helpers so external permission readouts (the `/me` endpoint, search filtering, the AI assistant) also reflect the token's effective scope. After this task, every endpoint enforces token scopes and there is a single source of truth for permissions.
 
 **Files:**
 - Modify: `backend/app/core/deps.py`
@@ -602,6 +602,18 @@ def test_check_scoped_permission_denies_out_of_scope(make_user):
     with pytest.raises(HTTPException) as exc:
         check_scoped_permission(user, "builds.manage", "project", pid)
     assert exc.value.status_code == 403
+
+
+def test_collect_permissions_reflects_token_scope(make_user):
+    # External readouts (/me, search, AI assistant) must see the scoped set,
+    # not the full role permissions.
+    from app.core.deps import _collect_permissions
+
+    user = make_user(
+        role_permissions={"artifacts.read", "builds.manage"},
+        active_token_scopes=["artifacts.download"],
+    )
+    assert _collect_permissions(user) == {"artifacts.read"}
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -612,7 +624,7 @@ Run:
 cd backend && .venv/Scripts/python -m pytest tests/test_permission_enforcement.py -q
 ```
 
-Expected: FAIL — `test_scoped_admin_token_denied_on_admin_endpoint` fails (current `get_current_admin_user` returns early on `is_admin`), and `test_require_permission_denies_out_of_scope` fails (current `require_permission` bypasses on `is_admin` / ignores scope).
+Expected: FAIL — `test_scoped_admin_token_denied_on_admin_endpoint` fails (current `get_current_admin_user` returns early on `is_admin`), `test_require_permission_denies_out_of_scope` fails (current `require_permission` bypasses on `is_admin` / ignores scope), and `test_collect_permissions_reflects_token_scope` fails (the legacy `_collect_permissions` ignores scope).
 
 - [ ] **Step 3: Rewire `require_permission`**
 
@@ -715,7 +727,53 @@ Replace with:
         )
 ```
 
-- [ ] **Step 6: Attach the active scope during PAT auth**
+- [ ] **Step 6: Reconcile the legacy collectors (single source of truth)**
+
+Two helpers still bypass scope. `_collect_scoped_permissions` is now unused (Step 5 replaced its only caller) — delete it. `_collect_permissions` is still imported by `app/api/v1/auth.py` (the `/me` endpoint), `app/api/v1/search.py`, and `app/api/v1/ai_assistant.py`, so keep it but make it a thin, scope-aware delegator so those readouts match what enforcement does.
+
+First delete the entire `_collect_scoped_permissions` function definition. Then confirm it has no remaining references anywhere:
+
+```bash
+cd backend && grep -rn "_collect_scoped_permissions" app
+```
+Expected: no matches (its only caller, `check_scoped_permission`, was rewired in Step 5).
+
+Then replace the body of `_collect_permissions`. Find:
+
+```python
+def _collect_permissions(user: User) -> set[str]:
+    """Gather all permissions from the user's assigned roles."""
+    perms: set[str] = set()
+    if user.is_admin:
+        perms.add("admin")
+    for ur in user.user_roles:
+        if ur.role and ur.role.permissions:
+            perms.update(ur.role.permissions)
+    return perms
+```
+
+Replace with (delegate to the single source of truth; now scope-aware):
+
+```python
+def _collect_permissions(user: User) -> set[str]:
+    """Effective global permissions for *user*, with any active PAT scope applied.
+
+    Thin wrapper over :func:`effective_permissions` so external readouts
+    (the ``/me`` endpoint, search filtering, the AI assistant) see the same
+    scope-aware set that enforcement uses. For JWT/browser sessions (no active
+    token scope) this is identical to the previous behavior.
+    """
+    return effective_permissions(user)
+```
+
+Also reconcile the three call sites that read these permissions but still short-circuit on raw `is_admin` (which would ignore a scoped admin token):
+- `app/api/v1/search.py` — replace each `current_user.is_admin or "<x>.read" in perms` with `"admin" in perms or "<x>.read" in perms`.
+- `app/api/v1/ai_assistant.py` — replace `current_user.is_admin or "secrets.read" in user_perms` with `"admin" in user_perms or "secrets.read" in user_perms` (prevents a scoped token from leaking secret values into the AI context).
+- `app/api/v1/auth.py` (update-profile) — `db.refresh(current_user)` drops the transient `active_token_scopes`; capture it before the refresh and restore it after, so the returned `permissions` stay scope-aware.
+
+These modules pull heavy optional deps (redis/litellm), so verify them with `.venv/Scripts/python -m py_compile <files>` rather than importing.
+
+- [ ] **Step 7: Attach the active scope during PAT auth**
 
 In `backend/app/core/deps.py`, in `get_current_user`, the PAT branch loads `user` (currently lines ~81-89). Find:
 
@@ -765,7 +823,7 @@ Replace with (no token scope for browser/JWT sessions):
     return user
 ```
 
-- [ ] **Step 7: Run the enforcement tests and the full suite**
+- [ ] **Step 8: Run the enforcement tests and the full suite**
 
 Run:
 
@@ -773,9 +831,9 @@ Run:
 cd backend && .venv/Scripts/python -m pytest tests/test_permission_enforcement.py -q && .venv/Scripts/python -m pytest -q
 ```
 
-Expected: enforcement tests PASS (5 passed), then the full suite PASSES (21 passed total).
+Expected: enforcement tests PASS (6 passed), then the full suite PASSES with no failures (24 passed total: 10 token_scopes + 8 effective_permissions + 6 enforcement).
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add backend/app/core/deps.py backend/tests/test_permission_enforcement.py
