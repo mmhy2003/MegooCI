@@ -14,12 +14,15 @@ from app.core.security import (
 )
 from app.database import get_db
 from app.models.agent import Agent
+from app.models.build import Build
+from app.models.pipeline import Pipeline
 from app.models.user import User
 from app.schemas.agent import (
     AgentCreate,
     AgentRegistrationResponse,
     AgentResponse,
     AgentUpdate,
+    CurrentBuildInfo,
     HeartbeatRequest,
 )
 
@@ -48,6 +51,50 @@ def _normalize_status(agent: Agent) -> Agent:
     return agent
 
 
+async def _build_agent_responses(
+    agents: list[Agent], db: AsyncSession
+) -> list[AgentResponse]:
+    """Serialize agents to ``AgentResponse``, overlaying an effective
+    ``status="busy"`` and the current build for online agents holding a
+    reservation.
+
+    The overlay lives ONLY in the response objects. We never assign
+    ``agent.status = "busy"`` on the ORM instance, because ``get_db`` commits
+    on success — persisting "busy" would break ``pick_online_agent`` (which
+    requires ``status == "online"``) and would not be cleared by the
+    heartbeat (which only resets offline -> online). Callers must run
+    ``_normalize_status`` first so ``agent.status`` already reflects
+    online/offline.
+    """
+    reserved_ids = {
+        a.current_build_id for a in agents if a.current_build_id is not None
+    }
+    build_info: dict[uuid.UUID, CurrentBuildInfo] = {}
+    if reserved_ids:
+        rows = await db.execute(
+            select(Build.id, Build.number, Pipeline.name)
+            .join(Pipeline, Build.pipeline_id == Pipeline.id)
+            .where(Build.id.in_(reserved_ids))
+        )
+        for build_id, number, pipeline_name in rows.all():
+            build_info[build_id] = CurrentBuildInfo(
+                id=build_id, number=number, pipeline_name=pipeline_name
+            )
+
+    responses: list[AgentResponse] = []
+    for agent in agents:
+        resp = AgentResponse.model_validate(agent)
+        if agent.status == "online" and agent.current_build_id in build_info:
+            resp = resp.model_copy(
+                update={
+                    "status": "busy",
+                    "current_build": build_info[agent.current_build_id],
+                }
+            )
+        responses.append(resp)
+    return responses
+
+
 @router.get("", response_model=list[AgentResponse])
 async def list_agents(
     status_filter: str | None = Query(None, alias="status"),
@@ -55,7 +102,7 @@ async def list_agents(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(require_permission("agents.read")),
-) -> list[Agent]:
+) -> list[AgentResponse]:
     query = select(Agent).order_by(Agent.name).offset(skip).limit(limit)
     if status_filter:
         query = query.where(Agent.status == status_filter)
@@ -64,7 +111,7 @@ async def list_agents(
     agents = list(result.scalars().all())
     for agent in agents:
         _normalize_status(agent)
-    return agents
+    return await _build_agent_responses(agents, db)
 
 
 @router.post(
@@ -128,13 +175,15 @@ async def get_agent(
     agent_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(require_permission("agents.read")),
-) -> Agent:
+) -> AgentResponse:
     agent = await db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
-    return _normalize_status(agent)
+    _normalize_status(agent)
+    responses = await _build_agent_responses([agent], db)
+    return responses[0]
 
 
 @router.put("/{agent_id}", response_model=AgentResponse)
