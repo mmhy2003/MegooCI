@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.security import decode_token, hash_pat, is_pat
+from app.core.token_scopes import ALL_PERMISSIONS, expand_scopes
 from app.database import get_db
 from app.models.api_token import ApiToken
 from app.models.role import UserRole
@@ -38,6 +39,64 @@ def _collect_scoped_permissions(
             elif ur.scope_type == scope_type and ur.scope_id == scope_id:
                 perms.update(ur.role.permissions)
     return perms
+
+
+def _all_role_permissions(user: User) -> set[str]:
+    """Union of permissions across all of the user's role assignments."""
+    perms: set[str] = set()
+    for ur in user.user_roles:
+        if ur.role and ur.role.permissions:
+            perms.update(ur.role.permissions)
+    return perms
+
+
+def _scoped_role_permissions(
+    user: User, scope_type: str, scope_id: uuid.UUID | None
+) -> set[str]:
+    """Role permissions for a resource scope: global roles always apply, plus
+    roles assigned to the matching scope."""
+    perms: set[str] = set()
+    for ur in user.user_roles:
+        if ur.role and ur.role.permissions:
+            if ur.scope_type == "global" or (
+                ur.scope_type == scope_type and ur.scope_id == scope_id
+            ):
+                perms.update(ur.role.permissions)
+    return perms
+
+
+def _apply_token_scope(role_perms: set[str], is_admin: bool, scopes) -> set[str]:
+    """Cap a role-permission set by the active PAT scope.
+
+    - scopes is None  -> Full access / JWT session: role perms (+ "admin" if admin).
+    - scopes is a list -> scope perms ∩ ceiling. Ceiling is ALL_PERMISSIONS for
+      admins, else the role perms. Result never contains the "admin" sentinel.
+    """
+    if scopes is None:
+        return role_perms | ({"admin"} if is_admin else set())
+    scope_perms = expand_scopes(scopes)
+    ceiling = set(ALL_PERMISSIONS) if is_admin else role_perms
+    return scope_perms & ceiling
+
+
+def effective_permissions(user: User) -> set[str]:
+    """Global permissions a request actually has, accounting for a PAT scope."""
+    role_perms = _all_role_permissions(user)
+    is_admin = user.is_admin or "admin" in role_perms
+    return _apply_token_scope(
+        role_perms, is_admin, getattr(user, "active_token_scopes", None)
+    )
+
+
+def effective_scoped_permissions(
+    user: User, scope_type: str, scope_id: uuid.UUID | None
+) -> set[str]:
+    """Resource-scoped permissions a request actually has, accounting for a PAT scope."""
+    role_perms = _scoped_role_permissions(user, scope_type, scope_id)
+    is_admin = user.is_admin or "admin" in role_perms
+    return _apply_token_scope(
+        role_perms, is_admin, getattr(user, "active_token_scopes", None)
+    )
 
 
 async def get_current_user(
