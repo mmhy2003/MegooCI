@@ -16,6 +16,12 @@ from app.core.security import generate_pat, hash_pat, pat_hint
 from app.database import get_db
 from app.models.api_token import ApiToken
 from app.models.user import User
+from app.core.token_scopes import (
+    FULL_ACCESS_KEY,
+    TOKEN_SCOPES,
+    resolve_scope,
+    scope_catalog,
+)
 
 router = APIRouter()
 
@@ -23,13 +29,25 @@ router = APIRouter()
 # ── Schemas ──────────────────────────────────────────────────────────────
 
 
+class ScopeInfo(BaseModel):
+    key: str
+    label: str
+
+
+class ScopeCatalogItem(BaseModel):
+    key: str
+    label: str
+    description: str
+
+
 class CreateTokenRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     expires_in_days: int | None = Field(
         None, ge=1, le=365, description="Days until expiry (null = never)"
     )
-    scopes: list[str] | None = Field(
-        None, description="Permission scopes (null = inherit user permissions)"
+    scope: str | None = Field(
+        None,
+        description="Scope key from GET /tokens/scopes; null or 'full_access' = full access",
     )
 
 
@@ -38,6 +56,7 @@ class TokenResponse(BaseModel):
     name: str
     token_hint: str
     scopes: list[str] | None
+    scope: ScopeInfo
     expires_at: datetime | None
     is_active: bool
     last_used_at: datetime | None
@@ -52,6 +71,20 @@ class TokenCreatedResponse(TokenResponse):
 # ── Endpoints ────────────────────────────────────────────────────────────
 
 
+def _token_response(t: ApiToken) -> TokenResponse:
+    return TokenResponse(
+        id=t.id,
+        name=t.name,
+        token_hint=t.token_hint,
+        scopes=t.scopes,
+        scope=ScopeInfo(**resolve_scope(t.scopes)),
+        expires_at=t.expires_at,
+        is_active=t.is_active,
+        last_used_at=t.last_used_at,
+        created_at=t.created_at,
+    )
+
+
 @router.get("/tokens", response_model=list[TokenResponse])
 async def list_tokens(
     db: AsyncSession = Depends(get_db),
@@ -64,19 +97,15 @@ async def list_tokens(
         .order_by(ApiToken.created_at.desc())
     )
     rows = result.scalars().all()
-    return [
-        TokenResponse(
-            id=t.id,
-            name=t.name,
-            token_hint=t.token_hint,
-            scopes=t.scopes,
-            expires_at=t.expires_at,
-            is_active=t.is_active,
-            last_used_at=t.last_used_at,
-            created_at=t.created_at,
-        )
-        for t in rows
-    ]
+    return [_token_response(t) for t in rows]
+
+
+@router.get("/tokens/scopes", response_model=list[ScopeCatalogItem])
+async def list_scopes(
+    current_user: User = Depends(get_current_user),
+) -> list[ScopeCatalogItem]:
+    """List the functional scopes available when creating a token."""
+    return [ScopeCatalogItem(**item) for item in scope_catalog()]
 
 
 @router.post(
@@ -90,6 +119,17 @@ async def create_token(
     current_user: User = Depends(get_current_user),
 ) -> TokenCreatedResponse:
     """Create a new PAT.  The raw token is returned **once** — store it safely."""
+    # Resolve & validate the requested scope.
+    if body.scope is None or body.scope == FULL_ACCESS_KEY:
+        stored_scopes: list[str] | None = None
+    elif body.scope in TOKEN_SCOPES:
+        stored_scopes = [body.scope]
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown scope '{body.scope}'",
+        )
+
     raw_token = generate_pat()
 
     from datetime import timedelta
@@ -103,7 +143,7 @@ async def create_token(
         name=body.name,
         token_hash=hash_pat(raw_token),
         token_hint=pat_hint(raw_token),
-        scopes=body.scopes,
+        scopes=stored_scopes,
         expires_at=expires_at,
     )
     db.add(api_token)
@@ -111,15 +151,8 @@ async def create_token(
     await db.refresh(api_token)
 
     return TokenCreatedResponse(
-        id=api_token.id,
-        name=api_token.name,
-        token_hint=api_token.token_hint,
+        **_token_response(api_token).model_dump(),
         token=raw_token,
-        scopes=api_token.scopes,
-        expires_at=api_token.expires_at,
-        is_active=api_token.is_active,
-        last_used_at=api_token.last_used_at,
-        created_at=api_token.created_at,
     )
 
 
