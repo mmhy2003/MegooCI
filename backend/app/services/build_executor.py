@@ -78,12 +78,21 @@ async def execute_build(
             select(Build).where(Build.id == build_id)
         )
         build = result.scalar_one_or_none()
-        if build is None:
-            await redis_client.aclose()
-            return
 
-        # If the build was already cancelled or is no longer pending, bail.
-        if build.status != "pending":
+        # Bail if the build is gone, already finished, cancelled, or was
+        # claimed-and-started by a concurrent dispatcher (status != pending).
+        # CRITICAL: if we pre-claimed an agent for this build, release it
+        # first. Two dispatchers can each pre-claim a *different* free agent
+        # for the same pending build (the per-agent claim CAS doesn't guard
+        # the build). The loser lands here — and if it returns without
+        # releasing, that agent's current_build_id leaks: it stays online and
+        # idle forever but pick_online_agent will never choose it again.
+        if build is None or build.status != "pending":
+            if claimed_agent_id is not None:
+                try:
+                    await release_agent(db, claimed_agent_id, build_id)
+                except Exception:
+                    pass
             await redis_client.aclose()
             return
 
@@ -162,9 +171,14 @@ async def execute_build(
 
         await redis_client.aclose()
 
-        # Kick the next pending build now that an agent is free.
+        # Kick the next pending build now that an agent is free. Pass this
+        # worker's session_factory: the module-level async_session is bound to
+        # the import-time event loop, but each run_build task runs in a fresh
+        # loop, so reusing the global engine here raises "Future attached to a
+        # different loop" from the 2nd build onward — silently swallowed below,
+        # which would drop this (the primary) dispatch edge entirely.
         try:
-            await dispatch_pending_builds()
+            await dispatch_pending_builds(session_factory=session_factory)
         except Exception:
             pass
 

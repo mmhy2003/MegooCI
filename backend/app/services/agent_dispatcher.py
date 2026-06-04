@@ -35,8 +35,8 @@ import uuid
 from typing import Any
 
 import redis.asyncio as aioredis
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
 from app.models.agent import Agent
@@ -158,8 +158,6 @@ async def claim_agent(
     it was already busy (another build beat us to it). Uses a database-level
     conditional UPDATE to prevent races between concurrent Celery workers.
     """
-    from sqlalchemy import update
-
     result = await db.execute(
         update(Agent)
         .where(
@@ -180,8 +178,6 @@ async def release_agent(
     If *build_id* is provided, only clear if it matches (prevents a stale
     release from clobbering a newer claim).
     """
-    from sqlalchemy import update
-
     stmt = update(Agent).where(Agent.id == agent_id)
     if build_id is not None:
         stmt = stmt.where(Agent.current_build_id == build_id)
@@ -190,7 +186,88 @@ async def release_agent(
     await db.commit()
 
 
-async def dispatch_pending_builds() -> None:
+# Build statuses that mean "this build will never run on the reserved agent
+# again". A reservation pointing at one of these (or at a build that no longer
+# exists) is stale and safe to clear.
+_TERMINAL_BUILD_STATES = ("success", "failed", "cancelled")
+
+
+async def reconcile_stale_reservations(db: AsyncSession) -> int:
+    """Clear leaked ``current_build_id`` reservations and return how many.
+
+    An agent's reservation can leak when the Celery worker that claimed it dies
+    (OOM / redeploy / SIGKILL) before ``release_agent`` runs in
+    ``execute_build``'s ``finally``, or when a build is cancelled / deleted
+    while an agent is still reserved for it. Because the agent's WebSocket lives
+    in the API process — not the worker — the agent stays online and idle, yet
+    ``pick_online_agent`` skips it forever (``current_build_id IS NOT NULL``).
+    Over time this silently shrinks capacity and pending builds pile up despite
+    "free" agents.
+
+    This is the level-triggered safety net: it clears the reservation for any
+    agent whose reserved build is in a terminal state or no longer exists.
+    Builds that are still ``pending`` or ``running`` are left untouched so we
+    never yank an agent off live (or about-to-start) work. The conditional
+    UPDATE re-checks ``current_build_id`` so a concurrent re-claim is never
+    clobbered.
+    """
+    result = await db.execute(
+        select(Agent.id, Agent.current_build_id).where(
+            Agent.current_build_id.isnot(None)
+        )
+    )
+    reserved = [(aid, bid) for aid, bid in result.all() if bid is not None]
+    if not reserved:
+        return 0
+
+    build_ids = {bid for _, bid in reserved}
+    rows = await db.execute(
+        select(Build.id, Build.status).where(Build.id.in_(build_ids))
+    )
+    status_by_build = {bid: status for bid, status in rows.all()}
+
+    cleared = 0
+    for agent_id, build_id in reserved:
+        status = status_by_build.get(build_id)
+        if status is not None and status not in _TERMINAL_BUILD_STATES:
+            continue  # build still pending/running — keep the reservation
+        res = await db.execute(
+            update(Agent)
+            .where(Agent.id == agent_id, Agent.current_build_id == build_id)
+            .values(current_build_id=None)
+        )
+        cleared += res.rowcount or 0  # type: ignore[union-attr]
+
+    if cleared:
+        await db.commit()
+        logger.info("Reconciled %d stale agent reservation(s)", cleared)
+    return cleared
+
+
+async def reconcile_and_dispatch(
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> None:
+    """Periodic safety-net pass: heal leaked reservations, then run dispatch.
+
+    Invoked on a timer by Celery Beat so a missed dispatch edge (a swallowed
+    exception, a crashed worker, a lost wakeup) can never strand pending builds
+    or freed agents for longer than the beat interval.
+    """
+    if session_factory is None:
+        from app.database import async_session as session_factory
+
+    async with session_factory() as db:
+        try:
+            await reconcile_stale_reservations(db)
+        except Exception:
+            logger.exception("reconcile_stale_reservations failed")
+
+    await dispatch_pending_builds(session_factory=session_factory)
+
+
+async def dispatch_pending_builds(
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> None:
     """Check for pending builds and dispatch them if agents are available.
 
     Called after a build finishes (agent released) so queued pipelines are
@@ -205,11 +282,20 @@ async def dispatch_pending_builds() -> None:
     concurrent callers cannot race for the same agent. The claimed agent
     ID is forwarded to the worker so ``execute_build()`` can skip the
     pick-and-claim dance.
+
+    *session_factory* lets a Celery worker pass its own loop-bound engine.
+    The module-level ``async_session`` is bound to the event loop that was
+    running at import time; a worker that spins up a fresh loop per task
+    (see ``run_build``) must not reuse it or asyncpg raises "Future attached
+    to a different loop" — which, swallowed by the caller, silently drops the
+    dispatch. Defaults to the global factory for API-process callers.
     """
-    from app.database import async_session as _session_factory
     from app.tasks.build_tasks import run_build
 
-    async with _session_factory() as db:
+    if session_factory is None:
+        from app.database import async_session as session_factory
+
+    async with session_factory() as db:
         # Don't dispatch builds while maintenance mode is active.
         from app.api.v1.system import is_maintenance_mode
         if await is_maintenance_mode(db):
