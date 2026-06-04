@@ -31,6 +31,18 @@ class HeartbeatRequest(BaseModel):
     version: str | None = None
 
 
+class CurrentBuildInfo(BaseModel):
+    """The build an agent is currently reserved for.
+
+    Computed at read time from ``Agent.current_build_id`` and surfaced on the
+    agents page so the card can link to the running build. Never stored.
+    """
+
+    id: uuid.UUID
+    number: int
+    pipeline_name: str
+
+
 class AgentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -43,6 +55,9 @@ class AgentResponse(BaseModel):
     enabled: bool = True
     last_seen_at: datetime | None
     status: str
+    # Effective runtime build, present only when the agent is online and
+    # holding a reservation. Computed in the API layer; never persisted.
+    current_build: CurrentBuildInfo | None = None
     # Token metadata — the plaintext token is never returned here.
     token_prefix: str | None = None
     token_issued_at: datetime | None = None
