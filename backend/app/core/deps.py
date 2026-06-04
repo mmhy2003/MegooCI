@@ -22,24 +22,6 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 # Scope helpers
 # ---------------------------------------------------------------------------
 
-def _collect_scoped_permissions(
-    user: User,
-    scope_type: str = "global",
-    scope_id: uuid.UUID | None = None,
-) -> set[str]:
-    """Gather permissions from roles matching the given scope **plus** all
-    global roles (global permissions always apply)."""
-    perms: set[str] = set()
-    if user.is_admin:
-        perms.add("admin")
-    for ur in user.user_roles:
-        if ur.role and ur.role.permissions:
-            if ur.scope_type == "global":
-                perms.update(ur.role.permissions)
-            elif ur.scope_type == scope_type and ur.scope_id == scope_id:
-                perms.update(ur.role.permissions)
-    return perms
-
 
 def _all_role_permissions(user: User) -> set[str]:
     """Union of permissions across all of the user's role assignments."""
@@ -143,6 +125,7 @@ async def get_current_user(
         user = user_result.scalar_one_or_none()
         if user is None:
             raise credentials_exception
+        user.active_token_scopes = api_token.scopes
         return user
 
     # ── JWT path (original) ───────────────────────────────────────────
@@ -171,6 +154,7 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
+    user.active_token_scopes = None
     return user
 
 
@@ -192,10 +176,7 @@ async def get_current_admin_user(
     Accepts both the legacy ``is_admin`` boolean **and** the RBAC ``admin``
     permission so the migration to pure RBAC is non-breaking.
     """
-    if current_user.is_admin:
-        return current_user
-    perms = _collect_permissions(current_user)
-    if "admin" in perms:
+    if "admin" in effective_permissions(current_user):
         return current_user
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required"
@@ -203,14 +184,14 @@ async def get_current_admin_user(
 
 
 def _collect_permissions(user: User) -> set[str]:
-    """Gather all permissions from the user's assigned roles."""
-    perms: set[str] = set()
-    if user.is_admin:
-        perms.add("admin")
-    for ur in user.user_roles:
-        if ur.role and ur.role.permissions:
-            perms.update(ur.role.permissions)
-    return perms
+    """Effective global permissions for *user*, with any active PAT scope applied.
+
+    Thin wrapper over :func:`effective_permissions` so external readouts
+    (the ``/me`` endpoint, search filtering, the AI assistant) see the same
+    scope-aware set that enforcement uses. For JWT/browser sessions (no active
+    token scope) this is identical to the previous behavior.
+    """
+    return effective_permissions(user)
 
 
 def require_permission(permission: str) -> Callable:
@@ -219,9 +200,7 @@ def require_permission(permission: str) -> Callable:
     async def _check(
         current_user: User = Depends(get_current_active_user),
     ) -> User:
-        if current_user.is_admin:
-            return current_user
-        perms = _collect_permissions(current_user)
+        perms = effective_permissions(current_user)
         if permission not in perms and "admin" not in perms:
             import asyncio
             from app.core.audit import record as audit_record
@@ -250,9 +229,7 @@ def check_scoped_permission(
 
     Call from endpoints after resolving the resource.
     """
-    if user.is_admin:
-        return
-    perms = _collect_scoped_permissions(user, scope_type, scope_id)
+    perms = effective_scoped_permissions(user, scope_type, scope_id)
     if permission not in perms and "admin" not in perms:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
