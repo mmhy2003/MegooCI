@@ -37,12 +37,25 @@ celery_app.conf.update(
 celery_app.autodiscover_tasks(["app.tasks"], related_name="build_tasks")
 celery_app.autodiscover_tasks(["app.tasks"], related_name="registry_tasks")
 
+from datetime import timedelta
+
 from celery.schedules import crontab
 
 celery_app.conf.beat_schedule = {
     "registry-gc": {
         "task": "megooci.registry_gc",
         "schedule": crontab(hour=3, minute=0),
+        "options": {"queue": "megooci"},
+    },
+    # Level-triggered safety net for build dispatch. Dispatch is otherwise
+    # purely edge-triggered (build finishes / agent connects / etc.); a missed
+    # edge — a swallowed exception, a crashed worker that leaks an agent
+    # reservation, a lost wakeup — would otherwise leave pending builds stuck
+    # despite free agents until some unrelated event fires. This re-runs
+    # reconcile + dispatch every 30s so worst-case stranding is bounded.
+    "reconcile-and-dispatch": {
+        "task": "megooci.reconcile_and_dispatch",
+        "schedule": timedelta(seconds=30),
         "options": {"queue": "megooci"},
     },
 }
