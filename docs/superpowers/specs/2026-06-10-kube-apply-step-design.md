@@ -51,7 +51,8 @@ secret per cluster and referencing the appropriate one per step.
     directories, relative to the build workspace). Directories are applied
     non-recursively, matching `kubectl apply -f <dir>` default behavior.
   - `namespace`, `context`: optional strings.
-  - `timeout`: optional positive integer (seconds); default 300.
+  - `timeout`: optional positive number (seconds); default 300. Booleans are
+    rejected (Python `bool` is an `int` subclass).
 
 ### Backend: dispatch and secrets
 
