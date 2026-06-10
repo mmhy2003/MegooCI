@@ -1,10 +1,13 @@
 package executor
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -119,5 +122,126 @@ func TestWriteKubeconfigFile(t *testing.T) {
 		if info.Mode().Perm() != 0o600 {
 			t.Errorf("kubeconfig permissions = %o, want 0600", info.Mode().Perm())
 		}
+	}
+}
+
+// drainLogs collects everything a handler writes to its logs channel so the
+// send never blocks. Returns a function that stops collection and returns
+// the accumulated content.
+func drainLogs(logs chan LogLine) func() string {
+	var mu sync.Mutex
+	var b strings.Builder
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for line := range logs {
+			mu.Lock()
+			b.WriteString(line.Content)
+			mu.Unlock()
+		}
+	}()
+	return func() string {
+		close(logs)
+		<-done
+		mu.Lock()
+		defer mu.Unlock()
+		return b.String()
+	}
+}
+
+func TestRunKubeApplyMissingKubeconfig(t *testing.T) {
+	l := NewLocal(Options{})
+	logs := make(chan LogLine, 16)
+	stop := drainLogs(logs)
+
+	res := l.runKubeApply(context.Background(), Step{
+		StepType: "kube_apply",
+		Config: map[string]interface{}{
+			"manifests": []interface{}{"k8s/deployment.yaml"},
+		},
+	}, t.TempDir(), logs)
+
+	out := stop()
+	if res.Status != "failed" {
+		t.Errorf("status = %q, want failed", res.Status)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "kubeconfig") {
+		t.Errorf("expected kubeconfig error, got %v", res.Err)
+	}
+	if !strings.Contains(out, "kubeconfig") {
+		t.Errorf("expected kubeconfig mention in logs, got %q", out)
+	}
+}
+
+func TestRunKubeApplyMissingManifests(t *testing.T) {
+	l := NewLocal(Options{})
+	logs := make(chan LogLine, 16)
+	stop := drainLogs(logs)
+
+	res := l.runKubeApply(context.Background(), Step{
+		StepType: "kube_apply",
+		Config: map[string]interface{}{
+			"kubeconfig": "apiVersion: v1\nkind: Config\n",
+		},
+	}, t.TempDir(), logs)
+
+	_ = stop()
+	if res.Status != "failed" {
+		t.Errorf("status = %q, want failed", res.Status)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "manifests") {
+		t.Errorf("expected manifests error, got %v", res.Err)
+	}
+}
+
+func TestRunKubeApplyCleansUpKubeconfigOnFailure(t *testing.T) {
+	// Verify the workdir holds no .kubeconfig-* file after a failed run.
+	dir := t.TempDir()
+	l := NewLocal(Options{})
+	logs := make(chan LogLine, 64)
+	stop := drainLogs(logs)
+
+	t.Setenv("PATH", dir) // no kubectl resolvable
+
+	_ = l.runKubeApply(context.Background(), Step{
+		StepType: "kube_apply",
+		Config: map[string]interface{}{
+			"kubeconfig": "apiVersion: v1\nkind: Config\n",
+			"manifests":  []interface{}{"k8s/deployment.yaml"},
+		},
+	}, dir, logs)
+	_ = stop()
+
+	leftovers, err := filepath.Glob(filepath.Join(dir, ".kubeconfig-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Errorf("kubeconfig temp file leaked: %v", leftovers)
+	}
+}
+
+func TestRunKubeApplyKubectlNotFound(t *testing.T) {
+	dir := t.TempDir()
+	l := NewLocal(Options{})
+	logs := make(chan LogLine, 16)
+	stop := drainLogs(logs)
+
+	t.Setenv("PATH", dir) // empty dir → kubectl not resolvable
+
+	res := l.runKubeApply(context.Background(), Step{
+		StepType: "kube_apply",
+		Config: map[string]interface{}{
+			"kubeconfig": "apiVersion: v1\nkind: Config\n",
+			"manifests":  []interface{}{"k8s/deployment.yaml"},
+		},
+	}, dir, logs)
+
+	out := stop()
+	if res.Status != "failed" {
+		t.Errorf("status = %q, want failed", res.Status)
+	}
+	if !strings.Contains(out, "kubectl not found on agent") {
+		t.Errorf("expected friendly kubectl-missing error, got %q", out)
 	}
 }
