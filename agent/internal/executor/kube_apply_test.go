@@ -194,30 +194,116 @@ func TestRunKubeApplyMissingManifests(t *testing.T) {
 	}
 }
 
+// writeFakeKubectl installs an executable fake kubectl script into dir and
+// points PATH at dir so exec.LookPath resolves it. Skips on Windows.
+func writeFakeKubectl(t *testing.T, dir, script string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake kubectl shell script not supported on windows")
+	}
+	path := filepath.Join(dir, "kubectl")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+}
+
 func TestRunKubeApplyCleansUpKubeconfigOnFailure(t *testing.T) {
-	// Verify the workdir holds no .kubeconfig-* file after a failed run.
-	dir := t.TempDir()
+	// A fake kubectl that always fails gets the handler past LookPath, so
+	// the kubeconfig temp file is genuinely written, the apply stage fails,
+	// and the deferred cleanup must remove the file.
+	binDir := t.TempDir()
+	workdir := t.TempDir()
+	writeFakeKubectl(t, binDir, "#!/bin/sh\nexit 1\n")
+
 	l := NewLocal(Options{})
 	logs := make(chan LogLine, 64)
 	stop := drainLogs(logs)
 
-	t.Setenv("PATH", dir) // no kubectl resolvable
-
-	_ = l.runKubeApply(context.Background(), Step{
+	res := l.runKubeApply(context.Background(), Step{
 		StepType: "kube_apply",
 		Config: map[string]interface{}{
 			"kubeconfig": "apiVersion: v1\nkind: Config\n",
 			"manifests":  []interface{}{"k8s/deployment.yaml"},
 		},
-	}, dir, logs)
+	}, workdir, logs)
 	_ = stop()
 
-	leftovers, err := filepath.Glob(filepath.Join(dir, ".kubeconfig-*"))
+	if res.Status != "failed" {
+		t.Errorf("status = %q, want failed", res.Status)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "kubectl apply") {
+		t.Errorf("expected failure at the apply stage (kubeconfig already written), got %v", res.Err)
+	}
+	leftovers, err := filepath.Glob(filepath.Join(workdir, ".kubeconfig-*"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(leftovers) != 0 {
 		t.Errorf("kubeconfig temp file leaked: %v", leftovers)
+	}
+}
+
+func TestRunKubeApplyHappyPathWaitsForRollout(t *testing.T) {
+	binDir := t.TempDir()
+	workdir := t.TempDir()
+	writeFakeKubectl(t, binDir, "#!/bin/sh\necho deployment.apps/web\nexit 0\n")
+
+	l := NewLocal(Options{})
+	logs := make(chan LogLine, 64)
+	stop := drainLogs(logs)
+
+	res := l.runKubeApply(context.Background(), Step{
+		StepType: "kube_apply",
+		Config: map[string]interface{}{
+			"kubeconfig": "apiVersion: v1\nkind: Config\n",
+			"manifests":  []interface{}{"k8s/deployment.yaml"},
+		},
+	}, workdir, logs)
+
+	out := stop()
+	if res.Status != "success" || res.ExitCode != 0 {
+		t.Fatalf("status=%q exit=%d, want success/0 (logs: %q)", res.Status, res.ExitCode, out)
+	}
+	if !strings.Contains(out, "rollout status deployment.apps/web") {
+		t.Errorf("expected rollout wait for deployment.apps/web in logs, got %q", out)
+	}
+	leftovers, err := filepath.Glob(filepath.Join(workdir, ".kubeconfig-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Errorf("kubeconfig temp file leaked on success: %v", leftovers)
+	}
+}
+
+func TestRunKubeApplyCancelledContext(t *testing.T) {
+	binDir := t.TempDir()
+	workdir := t.TempDir()
+	writeFakeKubectl(t, binDir, "#!/bin/sh\nexit 0\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	l := NewLocal(Options{})
+	logs := make(chan LogLine, 64)
+	stop := drainLogs(logs)
+
+	res := l.runKubeApply(ctx, Step{
+		StepType: "kube_apply",
+		Config: map[string]interface{}{
+			"kubeconfig": "apiVersion: v1\nkind: Config\n",
+			"manifests":  []interface{}{"k8s/deployment.yaml"},
+		},
+	}, workdir, logs)
+	_ = stop()
+
+	if res.Status != "cancelled" {
+		t.Errorf("status = %q, want cancelled", res.Status)
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(workdir, ".kubeconfig-*"))
+	if len(leftovers) != 0 {
+		t.Errorf("kubeconfig temp file leaked on cancel: %v", leftovers)
 	}
 }
 

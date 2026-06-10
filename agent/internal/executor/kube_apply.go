@@ -89,6 +89,20 @@ func parseRolloutTargets(output string) []string {
 	return targets
 }
 
+// echoNamespaceContext renders the optional `-n <ns>` / `--context <ctx>`
+// flags for the echoed `$ kubectl ...` log lines so debugging output shows
+// where a deploy is actually targeted. Returns "" when neither is set.
+func echoNamespaceContext(namespace, kubeContext string) string {
+	var s string
+	if namespace != "" {
+		s += " -n " + namespace
+	}
+	if kubeContext != "" {
+		s += " --context " + kubeContext
+	}
+	return s
+}
+
 // writeKubeconfigFile writes kubeconfig content to a 0600 temp file inside
 // dir and returns its path. The caller is responsible for removing it.
 func writeKubeconfigFile(dir, content string) (string, error) {
@@ -149,7 +163,7 @@ func (l *Local) runKubeApply(ctx context.Context, step Step, workdir string, log
 
 	var applyOutput strings.Builder
 	for _, m := range manifests {
-		logs <- LogLine{Stream: protocol.StreamStdout, Content: fmt.Sprintf("$ kubectl apply -f %s -o name\n", m)}
+		logs <- LogLine{Stream: protocol.StreamStdout, Content: fmt.Sprintf("$ kubectl apply -f %s -o name%s\n", m, echoNamespaceContext(namespace, kubeContext))}
 		out, code, err := l.runKubectl(ctx, kubectlApplyArgs(kcPath, m, namespace, kubeContext), workdir, step.Env, logs)
 		if ctx.Err() != nil {
 			return Result{ExitCode: -1, Status: protocol.StatusCancelled, Err: ctx.Err()}
@@ -170,7 +184,7 @@ func (l *Local) runKubeApply(ctx context.Context, step Step, workdir string, log
 	}
 
 	for _, target := range targets {
-		logs <- LogLine{Stream: protocol.StreamStdout, Content: fmt.Sprintf("$ kubectl rollout status %s --timeout=%ds\n", target, timeoutSec)}
+		logs <- LogLine{Stream: protocol.StreamStdout, Content: fmt.Sprintf("$ kubectl rollout status %s --timeout=%ds%s\n", target, timeoutSec, echoNamespaceContext(namespace, kubeContext))}
 		_, code, err := l.runKubectl(ctx, kubectlRolloutArgs(kcPath, target, namespace, kubeContext, timeoutSec), workdir, step.Env, logs)
 		if ctx.Err() != nil {
 			return Result{ExitCode: -1, Status: protocol.StatusCancelled, Err: ctx.Err()}
@@ -229,8 +243,13 @@ func (l *Local) runKubectl(ctx context.Context, args []string, workdir string, e
 		pipeLines(stderr, protocol.StreamStderr, logs, ctx)
 	}()
 
-	waitErr := cmd.Wait()
+	// Drain both pipes before Wait: per the os/exec StdoutPipe contract,
+	// Wait closes the pipes and could truncate the tail of captured stdout,
+	// which determines which rollouts we wait on. The scanners reach EOF
+	// when the process exits (or return on ctx.Done), so this cannot hang;
+	// CommandContext kills the child on cancel.
 	wg.Wait()
+	waitErr := cmd.Wait()
 
 	exitCode := 0
 	if waitErr != nil {
