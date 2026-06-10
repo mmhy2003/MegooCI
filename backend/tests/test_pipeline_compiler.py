@@ -119,6 +119,29 @@ def test_non_numeric_timeout_fails():
     assert any("timeout must be a positive number" in e for e in errors)
 
 
+def test_bool_timeout_fails():
+    yaml_doc = _pipeline(
+        "      - kube_apply:\n"
+        "          kubeconfig: ${{ secrets.KUBECONFIG }}\n"
+        "          manifests:\n"
+        "            - k8s/deployment.yaml\n"
+        "          timeout: true\n"
+    )
+    errors = validate_pipeline(yaml_doc)
+    assert any("timeout must be a positive number" in e for e in errors)
+
+
+def test_float_timeout_passes():
+    yaml_doc = _pipeline(
+        "      - kube_apply:\n"
+        "          kubeconfig: ${{ secrets.KUBECONFIG }}\n"
+        "          manifests:\n"
+        "            - k8s/deployment.yaml\n"
+        "          timeout: 30.5\n"
+    )
+    assert validate_pipeline(yaml_doc) == []
+
+
 def test_kube_apply_must_be_a_mapping():
     yaml_doc = _pipeline("      - kube_apply: just-a-string\n")
     errors = validate_pipeline(yaml_doc)
