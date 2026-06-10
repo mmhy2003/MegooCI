@@ -282,7 +282,10 @@ credentials — never hardcode passwords or keys in the YAML.
 The kubeconfig must come from a secret — never inline it. After applying, the \
 step waits for every applied Deployment/StatefulSet/DaemonSet to finish \
 rolling out and fails the build if any doesn't become ready within the \
-timeout. Directory entries in `manifests` are applied non-recursively.
+timeout. Directory entries in `manifests` are applied non-recursively. All \
+manifests in a step should target the step's `namespace` — the rollout wait \
+looks there, so a manifest declaring a different `metadata.namespace` would \
+fail the wait.
 
 ### wait_webhook — Pause until an external webhook callback
 ```yaml
