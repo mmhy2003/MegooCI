@@ -12,6 +12,7 @@ Supports:
    deploy tokens use the fixed username 'deploy-token' and a token value)
 - git_clone / git_pull / git_push
 - ssh_exec (remote commands)
+- kube_apply (apply Kubernetes manifests and wait for rollout)
 - wait_webhook / wait_input (pipeline gates)
 - trigger_pipeline (trigger another pipeline)
 - parallel step groups
@@ -36,6 +37,7 @@ STEP_TYPE_KEYS = {
     "git_pull",
     "git_push",
     "ssh_exec",
+    "kube_apply",
     "wait_webhook",
     "wait_input",
     "copy_files",
@@ -476,6 +478,31 @@ def _validate_step(step: dict[str, Any], stage_name: str, step_index: int) -> li
                 errors.append(f"{prefix}: 'ssh_exec' requires 'host'")
             if not value.get("commands"):
                 errors.append(f"{prefix}: 'ssh_exec' requires 'commands'")
+
+    elif step_type == "kube_apply":
+        if not isinstance(value, dict):
+            errors.append(f"{prefix}: 'kube_apply' must be a mapping")
+        else:
+            if not value.get("kubeconfig"):
+                errors.append(f"{prefix}: 'kube_apply' requires 'kubeconfig'")
+            manifests = value.get("manifests")
+            if not manifests:
+                errors.append(
+                    f"{prefix}: 'kube_apply' requires at least one entry in 'manifests'"
+                )
+            elif not isinstance(manifests, list):
+                errors.append(f"{prefix}: 'kube_apply' 'manifests' must be a list")
+            elif not all(isinstance(m, str) and m.strip() for m in manifests):
+                errors.append(
+                    f"{prefix}: 'kube_apply' 'manifests' entries must be non-empty strings"
+                )
+            timeout = value.get("timeout")
+            if timeout is not None and (
+                not isinstance(timeout, (int, float))
+                or isinstance(timeout, bool)
+                or timeout <= 0
+            ):
+                errors.append(f"{prefix}: 'kube_apply' timeout must be a positive number")
 
     elif step_type == "wait_webhook":
         if value is not None and not isinstance(value, dict):

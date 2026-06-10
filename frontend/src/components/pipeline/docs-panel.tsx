@@ -4,6 +4,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import {
   Bell,
+  Boxes,
   ChevronDown,
   ChevronRight,
   Terminal,
@@ -309,6 +310,21 @@ stages:
     password: \${{ secrets.SSH_PASSWORD }}
     commands:
       - "systemctl restart myapp"`,
+  },
+  {
+    id: "kube_apply",
+    title: "Kubernetes Apply",
+    icon: <Boxes className="h-4 w-4" />,
+    description:
+      "Apply Kubernetes manifests and wait for all applied Deployments, StatefulSets, and DaemonSets to finish rolling out. Store the kubeconfig as a secret — never inline it. Directories in manifests are applied non-recursively, and all manifests in a step should target the step's namespace — the rollout wait looks there. The build fails if any apply fails or a workload doesn't become ready within the timeout.",
+    yaml: `- kube_apply:
+    kubeconfig: \${{ secrets.PROD_KUBECONFIG }}
+    manifests:
+      - k8s/deployment.yaml
+      - k8s/service.yaml
+    namespace: production   # optional
+    context: prod-cluster   # optional kubeconfig context
+    timeout: 300            # optional rollout wait in seconds (default 300)`,
   },
   {
     id: "wait_webhook",

@@ -1,6 +1,6 @@
 # Multi-stage build for the MegooCI agent. The final image ships a batteries-
 # included toolchain (Python, Node/npm/pnpm, uv, build-essential, Docker CLI,
-# Temurin JDK 21, Maven, Dart SDK) so most pipeline steps work without needing
+# Temurin JDK 21, Maven, Dart SDK, kubectl) so most pipeline steps work without needing
 # the user to bring their own base image. The Docker CLI is client-only —
 # bind-mount the host socket or run a DinD sidecar to enable `docker build` /
 # `docker run` inside pipelines.
@@ -138,6 +138,22 @@ RUN curl -fsSL https://dl-ssl.google.com/linux/linux_signing_key.pub \
  && apt-get update && apt-get install -y --no-install-recommends dart \
  && rm -rf /var/lib/apt/lists/*
 ENV PATH="/usr/lib/dart/bin:${PATH}"
+
+# ── kubectl (Kubernetes CLI, pinned) ───────────────────────────────────────
+# Required by `kube_apply` pipeline steps. Static binary from the official
+# Kubernetes release bucket; arch follows the image platform (amd64/arm64).
+# Verified against the published sha256. Version skew policy: kubectl
+# supports ±1 minor vs the API server — bump when clusters reach v1.38.
+ARG KUBECTL_VERSION=v1.36.1
+RUN ARCH=$(dpkg --print-architecture) \
+ && curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" \
+      -o /usr/local/bin/kubectl \
+ && curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl.sha256" \
+      -o /tmp/kubectl.sha256 \
+ && echo "$(cat /tmp/kubectl.sha256)  /usr/local/bin/kubectl" | sha256sum -c - \
+ && rm /tmp/kubectl.sha256 \
+ && chmod 0755 /usr/local/bin/kubectl \
+ && kubectl version --client
 
 # ── Non-root user ──────────────────────────────────────────────────────────
 # Create a 'docker' group so the socket GID can be mapped at runtime via

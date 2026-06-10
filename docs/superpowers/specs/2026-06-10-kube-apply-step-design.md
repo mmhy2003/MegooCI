@@ -51,13 +51,18 @@ secret per cluster and referencing the appropriate one per step.
     directories, relative to the build workspace). Directories are applied
     non-recursively, matching `kubectl apply -f <dir>` default behavior.
   - `namespace`, `context`: optional strings.
-  - `timeout`: optional positive integer (seconds); default 300.
+  - `timeout`: optional positive number (seconds); default 300. Booleans are
+    rejected (Python `bool` is an `int` subclass).
 
 ### Backend: dispatch and secrets
 
 - The kubeconfig value is interpolated server-side through the existing
-  secret-interpolation mechanism, and masked in logs by the existing
-  masking — no new secrets machinery.
+  secret-interpolation mechanism — no new secrets machinery. The handler
+  never writes kubeconfig content to the build log (only file paths and
+  kubectl output). Note: agent-streamed log lines are not passed through
+  `mask_secrets_in_log` at WS ingestion — a pre-existing platform gap shared
+  with all agent-side step types (ssh_exec, docker_login, …), tracked as a
+  follow-up.
 - The step is dispatched to an agent over the existing Redis task queue,
   identically to other agent-side step types.
 
