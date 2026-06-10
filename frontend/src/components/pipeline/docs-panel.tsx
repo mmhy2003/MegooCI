@@ -316,7 +316,7 @@ stages:
     title: "Kubernetes Apply",
     icon: <Boxes className="h-4 w-4" />,
     description:
-      "Apply Kubernetes manifests and wait for the rollout to become ready. Store the kubeconfig as a secret — never inline it. The build fails if any apply fails or a workload doesn't become ready within the timeout.",
+      "Apply Kubernetes manifests and wait for all applied Deployments, StatefulSets, and DaemonSets to finish rolling out. Store the kubeconfig as a secret — never inline it. Directories in manifests are applied non-recursively. The build fails if any apply fails or a workload doesn't become ready within the timeout.",
     yaml: `- kube_apply:
     kubeconfig: \${{ secrets.PROD_KUBECONFIG }}
     manifests:

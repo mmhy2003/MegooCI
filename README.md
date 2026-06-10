@@ -162,14 +162,14 @@ To deploy to Kubernetes instead, store a kubeconfig as a secret and use `kube_ap
     when:
       branch: main
     steps:
-      - name: deploy to production
-        kube_apply:
+      - kube_apply:
           kubeconfig: ${{ secrets.PROD_KUBECONFIG }}
           manifests:
             - k8s/deployment.yaml
             - k8s/service.yaml
-          namespace: production   # optional
-          timeout: 300            # optional rollout wait in seconds (default 300)
+          namespace: production    # optional
+          context: prod-cluster    # optional kubeconfig context
+          timeout: 300             # optional rollout wait in seconds (default 300)
 ```
 
 Link the pipeline to a project whose repository points at your GitHub / GitLab repo — a push triggers the webhook and the pipeline runs on the next available agent.
