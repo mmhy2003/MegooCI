@@ -14,8 +14,8 @@ func kubeApplyTimeoutSec(cfg map[string]interface{}) int {
 	if t, ok := cfg["timeout"]; ok {
 		switch v := t.(type) {
 		case float64:
-			if v > 0 {
-				return int(v)
+			if n := int(v); n > 0 {
+				return n
 			}
 		case int:
 			if v > 0 {

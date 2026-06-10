@@ -68,6 +68,10 @@ func TestParseRolloutTargetsEmptyAndGarbage(t *testing.T) {
 	if got := parseRolloutTargets("Warning: something\nno-slash-line\n"); len(got) != 0 {
 		t.Errorf("expected no targets for garbage output, got %v", got)
 	}
+	got := parseRolloutTargets("deployment.apps/web\r\nservice/api\r\n")
+	if !reflect.DeepEqual(got, []string{"deployment.apps/web"}) {
+		t.Errorf("CRLF handling: got %v", got)
+	}
 }
 
 func TestKubeApplyTimeoutSec(t *testing.T) {
@@ -82,6 +86,7 @@ func TestKubeApplyTimeoutSec(t *testing.T) {
 		{"float64", map[string]interface{}{"timeout": float64(90)}, 90},
 		{"nonpositive falls back", map[string]interface{}{"timeout": 0}, 300},
 		{"garbage falls back", map[string]interface{}{"timeout": "soon"}, 300},
+		{"sub-second falls back", map[string]interface{}{"timeout": 0.5}, 300},
 	}
 	for _, tc := range cases {
 		if got := kubeApplyTimeoutSec(tc.cfg); got != tc.want {
