@@ -25,7 +25,7 @@ Most teams use ~20 % of Jenkins' surface area. MegooCI re-implements that 20 % w
 ### Core
 
 - **Declarative YAML pipelines** — schema-validated `megooci.yaml` with stages, steps, conditional `when`, and matrix builds. Edited in-browser with a **CodeMirror 6** syntax-highlighted editor.
-- **10 built-in step action types** — `run` (shell), `docker_build`, `docker_login`, `docker_push`, `git_clone`, `git_pull`, `git_push`, `ssh_exec`, `wait_webhook`, and `wait_input`. Template interpolation resolves `${{ secrets.NAME }}` and `${{ env.NAME }}` at runtime.
+- **11 built-in step action types** — `run` (shell), `docker_build`, `docker_login`, `docker_push`, `git_clone`, `git_pull`, `git_push`, `ssh_exec`, `kube_apply`, `wait_webhook`, and `wait_input`. Template interpolation resolves `${{ secrets.NAME }}` and `${{ env.NAME }}` at runtime.
 - **AI pipeline assistant** — chat-based interface that generates and refines YAML from natural-language prompts, with project-context awareness (available secrets / env vars) and one-click apply.
 - **Remote build agents** — self-hosted `megooci-agent` Go binary (~15 MB static binary) connects to the controller over an authenticated WebSocket and runs steps on remote hosts. Falls back to local execution when no agent is online.
 - **Embedded OCI / Docker registry** — OCI Distribution Spec v1.1 compliant. `docker login`, `push`, and `pull` work out of the box. Deploy tokens, anonymous pull, immutable tags, per-project quotas, and automatic garbage collection included.
@@ -153,6 +153,23 @@ stages:
           commands:
             - "cd /opt/app && docker compose pull"
             - "docker compose up -d"
+```
+
+To deploy to Kubernetes instead, store a kubeconfig as a secret and use `kube_apply` — it applies the manifests, then waits for every applied Deployment/StatefulSet/DaemonSet to finish rolling out:
+
+```yaml
+  - name: deploy
+    when:
+      branch: main
+    steps:
+      - name: deploy to production
+        kube_apply:
+          kubeconfig: ${{ secrets.PROD_KUBECONFIG }}
+          manifests:
+            - k8s/deployment.yaml
+            - k8s/service.yaml
+          namespace: production   # optional
+          timeout: 300            # optional rollout wait in seconds (default 300)
 ```
 
 Link the pipeline to a project whose repository points at your GitHub / GitLab repo — a push triggers the webhook and the pipeline runs on the next available agent.

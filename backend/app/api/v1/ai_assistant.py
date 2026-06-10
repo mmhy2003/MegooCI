@@ -267,6 +267,23 @@ For password auth, `sshpass` must be installed in the agent environment (include
 by default in the official MegooCI agent image). Always use `${{ secrets.X }}` for \
 credentials — never hardcode passwords or keys in the YAML.
 
+### kube_apply — Apply Kubernetes manifests and wait for rollout
+```yaml
+- kube_apply:
+    kubeconfig: ${{ secrets.PROD_KUBECONFIG }}
+    manifests:
+      - k8s/deployment.yaml
+      - k8s/service.yaml
+    namespace: production    # optional
+    context: prod-cluster    # optional kubeconfig context
+    timeout: 300             # optional rollout wait in seconds (default 300)
+```
+
+The kubeconfig must come from a secret — never inline it. After applying, the \
+step waits for every applied Deployment/StatefulSet/DaemonSet to finish \
+rolling out and fails the build if any doesn't become ready within the \
+timeout. Directory entries in `manifests` are applied non-recursively.
+
 ### wait_webhook — Pause until an external webhook callback
 ```yaml
 - wait_webhook:
