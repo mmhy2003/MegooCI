@@ -142,9 +142,16 @@ ENV PATH="/usr/lib/dart/bin:${PATH}"
 # ── kubectl (Kubernetes CLI, pinned) ───────────────────────────────────────
 # Required by `kube_apply` pipeline steps. Static binary from the official
 # Kubernetes release bucket; arch follows the image platform (amd64/arm64).
+# Verified against the published sha256. Version skew policy: kubectl
+# supports ±1 minor vs the API server — bump when clusters reach v1.38.
 ARG KUBECTL_VERSION=v1.36.1
-RUN curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/$(dpkg --print-architecture)/kubectl" \
+RUN ARCH=$(dpkg --print-architecture) \
+ && curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" \
       -o /usr/local/bin/kubectl \
+ && curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl.sha256" \
+      -o /tmp/kubectl.sha256 \
+ && echo "$(cat /tmp/kubectl.sha256)  /usr/local/bin/kubectl" | sha256sum -c - \
+ && rm /tmp/kubectl.sha256 \
  && chmod 0755 /usr/local/bin/kubectl \
  && kubectl version --client
 
