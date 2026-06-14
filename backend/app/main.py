@@ -77,5 +77,8 @@ async def health() -> dict[str, str]:
 from app.api.v1.router import api_v1_router
 from app.api.v1.registry_oci import router as registry_oci_router
 
-app.include_router(api_v1_router)
+# Mount with the "/api/v1" prefix here (not on the APIRouter itself) so the
+# include goes through FastAPI's prefixed-include path, which tolerates the
+# empty-path routes (@router.get("")) used by our list/create endpoints.
+app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(registry_oci_router, tags=["registry-oci"])

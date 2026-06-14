@@ -26,7 +26,13 @@ from app.api.v1 import (
     websocket,
 )
 
-api_v1_router = APIRouter(prefix="/api/v1")
+# The "/api/v1" prefix is applied where this router is mounted
+# (app.include_router(api_v1_router, prefix="/api/v1") in main.py) rather than
+# here. FastAPI 0.137 rejects including a router with NO prefix when it carries
+# empty-path routes (our list/create endpoints use @router.get("")); mounting
+# with an explicit prefix takes the prefixed include path and avoids that
+# check. Final routes are identical either way.
+api_v1_router = APIRouter()
 
 api_v1_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_v1_router.include_router(projects.router, prefix="/projects", tags=["projects"])
