@@ -10,7 +10,9 @@ Uses the same in-memory SQLite + ``@compiles`` shim as ``test_agent_dispatch``
 so the real ``retry_build`` endpoint handler runs against a lightweight DB.
 """
 
+import json
 import os
+import sqlite3
 import sys
 import types
 import uuid
@@ -31,6 +33,17 @@ from sqlalchemy.pool import StaticPool
 # out below, so no real connection is ever attempted.
 os.environ.setdefault("MEGOOCI_REDIS_URL", "redis://localhost:6379/0")
 
+# Postgres ARRAY columns (Stage.artifact_paths) have no SQLite-side processor:
+# binding a raw list fails, and on read ARRAY's result_processor iterates a
+# returned string into a list of characters. So we (1) adapt lists to JSON text
+# on write and (2) register a PARSE_DECLTYPES converter keyed to the ARRAY
+# columns' unique declared type ("TEXTARRAY", see @compiles below) that loads
+# them back into real lists *before* ARRAY's processor sees them. The distinct
+# type name keeps this away from JSONB columns (declared "JSON"), whose own
+# type already round-trips dicts correctly.
+sqlite3.register_adapter(list, json.dumps)
+sqlite3.register_converter("TEXTARRAY", lambda b: json.loads(b.decode()))
+
 
 @compiles(UUID, "sqlite")
 def _uuid_sqlite(element, compiler, **kw):  # pragma: no cover - DDL glue
@@ -45,7 +58,9 @@ def _json_sqlite(element, compiler, **kw):  # pragma: no cover - DDL glue
 
 @compiles(ARRAY, "sqlite")
 def _array_sqlite(element, compiler, **kw):  # pragma: no cover - DDL glue
-    return "JSON"
+    # Unique declared type so the PARSE_DECLTYPES converter above only touches
+    # ARRAY columns, not JSONB ("JSON") ones.
+    return "TEXTARRAY"
 
 
 @pytest_asyncio.fixture
@@ -55,7 +70,10 @@ async def session_factory():
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
         poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
+        connect_args={
+            "check_same_thread": False,
+            "detect_types": sqlite3.PARSE_DECLTYPES,
+        },
     )
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Build.__table__.create(c))
@@ -90,7 +108,7 @@ def _patch_side_effects(monkeypatch):
     monkeypatch.setitem(sys.modules, "app.services.in_app_notifications", stub_notif)
 
 
-async def _seed_original(sf, *, runs_on):
+async def _seed_original(sf, *, runs_on=None, stage_artifacts=None):
     from app.models.build import Build, Stage, Step
 
     build_id = uuid.uuid4()
@@ -108,7 +126,10 @@ async def _seed_original(sf, *, runs_on):
         db.add(build)
         await db.flush()
 
-        stage = Stage(build_id=build.id, name="build", status="success", sort_order=0)
+        stage = Stage(
+            build_id=build.id, name="build", status="success", sort_order=0,
+            artifact_paths=stage_artifacts,
+        )
         db.add(stage)
         await db.flush()
 
@@ -142,6 +163,36 @@ async def test_retry_preserves_runs_on(session_factory, runs_on):
     assert new_build.runs_on == runs_on, (
         "retry dropped the runs_on constraint — the rerun would be dispatched "
         "to any online agent regardless of os/arch/labels"
+    )
+
+
+async def test_retry_preserves_stage_artifact_paths(session_factory):
+    """The retried build's stages must keep the original's artifact_paths,
+    otherwise reruns silently collect no artifacts (build_executor only sends
+    artifact_paths to the agent when stage.artifact_paths is set)."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.api.v1.builds import retry_build
+    from app.models.build import Build, Stage
+
+    artifacts = ["dist/**", "coverage/report.html"]
+    original_id = await _seed_original(session_factory, stage_artifacts=artifacts)
+    current_user = types.SimpleNamespace(id=uuid.uuid4())
+
+    async with session_factory() as db:
+        new_build = await retry_build(original_id, db=db, current_user=current_user)
+
+        result = await db.execute(
+            select(Build)
+            .where(Build.id == new_build.id)
+            .options(selectinload(Build.stages))
+        )
+        reloaded = result.scalar_one()
+
+    assert [s.artifact_paths for s in reloaded.stages] == [artifacts], (
+        "retry dropped stage artifact_paths — rerun builds would collect no "
+        "artifacts even though the original build did"
     )
 
 

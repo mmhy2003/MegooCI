@@ -279,6 +279,10 @@ async def retry_build(
             name=stage.name,
             status="pending",
             sort_order=stage.sort_order,
+            # Carry the stage's artifact globs so the rerun collects the same
+            # artifacts; without this the copied stage has artifact_paths=NULL
+            # and build_executor never tells the agent to collect anything.
+            artifact_paths=stage.artifact_paths,
         )
         db.add(new_stage)
         await db.flush()
