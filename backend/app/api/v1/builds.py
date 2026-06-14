@@ -263,6 +263,12 @@ async def retry_build(
         triggered_by=current_user.id,
         trigger_type="retry",
         params_json=original_build.params_json,
+        # Preserve the original's frozen agent-routing constraint. The retry
+        # re-runs the original's copied stage/step graph (not a fresh compile
+        # of the current YAML), so its runs_on snapshot must travel with it —
+        # otherwise the rerun has runs_on=NULL and is dispatched to any online
+        # agent, ignoring the pipeline's os/arch/labels requirement.
+        runs_on=original_build.runs_on,
     )
     db.add(new_build)
     await db.flush()
@@ -273,6 +279,10 @@ async def retry_build(
             name=stage.name,
             status="pending",
             sort_order=stage.sort_order,
+            # Carry the stage's artifact globs so the rerun collects the same
+            # artifacts; without this the copied stage has artifact_paths=NULL
+            # and build_executor never tells the agent to collect anything.
+            artifact_paths=stage.artifact_paths,
         )
         db.add(new_stage)
         await db.flush()
