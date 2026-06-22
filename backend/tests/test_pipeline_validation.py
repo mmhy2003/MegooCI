@@ -115,3 +115,37 @@ def test_backcompat_validate_pipeline_returns_strings():
     errors = validate_pipeline(bad)
     assert all(isinstance(e, str) for e in errors)
     assert any("requires 'kubeconfig'" in e for e in errors)
+
+
+def test_assert_pipeline_valid_raises_with_structured_errors():
+    import pytest
+
+    from app.services.pipeline_compiler import (
+        PipelineError,
+        PipelineValidationError,
+        assert_pipeline_valid,
+    )
+
+    with pytest.raises(PipelineValidationError) as exc_info:
+        assert_pipeline_valid("name: demo\nstages: []\n")
+
+    errors = exc_info.value.errors
+    assert errors and all(isinstance(e, PipelineError) for e in errors)
+
+
+def test_assert_pipeline_valid_passes_for_good_yaml():
+    from app.services.pipeline_compiler import assert_pipeline_valid
+
+    assert assert_pipeline_valid(VALID) is None
+
+
+def test_validation_error_accepts_legacy_string_list():
+    from app.services.pipeline_compiler import (
+        PipelineError,
+        PipelineValidationError,
+    )
+
+    err = PipelineValidationError(["Invalid YAML: boom"])
+    assert len(err.errors) == 1
+    assert isinstance(err.errors[0], PipelineError)
+    assert err.errors[0].message == "Invalid YAML: boom"

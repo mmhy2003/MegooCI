@@ -148,6 +148,13 @@ def validate_pipeline_definition(yaml_content: str | None) -> list[PipelineError
     return _structure_errors(data, line_map)
 
 
+def assert_pipeline_valid(yaml_content: str | None) -> None:
+    """Raise PipelineValidationError if the pipeline YAML is invalid."""
+    errors = validate_pipeline_definition(yaml_content)
+    if errors:
+        raise PipelineValidationError(errors)
+
+
 def _structure_errors(data: Any, line_map: dict[int, int]) -> list[PipelineError]:
     errors: list[PipelineError] = []
 
@@ -255,9 +262,17 @@ def _structure_errors(data: Any, line_map: dict[int, int]) -> list[PipelineError
 
 
 class PipelineValidationError(Exception):
-    def __init__(self, errors: list[str]) -> None:
-        self.errors = errors
-        super().__init__(f"Pipeline validation failed: {'; '.join(errors)}")
+    def __init__(self, errors: list) -> None:
+        # Accept legacy list[str] or list[PipelineError].
+        normalized: list[PipelineError] = [
+            e if isinstance(e, PipelineError) else PipelineError(message=str(e))
+            for e in errors
+        ]
+        self.errors: list[PipelineError] = normalized
+        super().__init__(
+            "Pipeline validation failed: "
+            + "; ".join(e.message for e in normalized)
+        )
 
 
 def parse_yaml_pipeline(yaml_content: str) -> dict[str, Any]:
