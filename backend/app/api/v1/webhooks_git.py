@@ -24,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.security import decrypt_webhook_secret
 from app.database import get_db
-from app.models.build import Build
 from app.models.git_integration import (
     GitProviderConnection,
     ProjectRepository,

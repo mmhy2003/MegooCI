@@ -4,7 +4,7 @@ import types
 import uuid
 
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import ARRAY, JSON as PG_JSON, JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
