@@ -28,6 +28,28 @@ function extractErrorMessage(status: number, body: unknown): string {
   if (body && typeof body === "object" && "detail" in body) {
     const detail = (body as { detail: unknown }).detail;
     if (typeof detail === "string" && detail.trim()) return detail;
+    // Structured pipeline-validation detail: { message, errors: [{message, line}] }
+    if (
+      detail &&
+      typeof detail === "object" &&
+      !Array.isArray(detail) &&
+      "errors" in detail
+    ) {
+      const errs = (detail as { errors: unknown }).errors;
+      if (Array.isArray(errs) && errs.length) {
+        const msgs = errs
+          .map((e) => {
+            if (e && typeof e === "object" && "message" in e) {
+              const m = String((e as { message: unknown }).message);
+              const ln = (e as { line?: unknown }).line;
+              return typeof ln === "number" ? `Line ${ln}: ${m}` : m;
+            }
+            return null;
+          })
+          .filter((m): m is string => Boolean(m));
+        if (msgs.length) return msgs.join("; ");
+      }
+    }
     if (Array.isArray(detail)) {
       const msgs = detail
         .map((e) =>
@@ -373,6 +395,18 @@ export interface CreatePipelineRequest {
   yaml_content?: string;
 }
 
+export interface PipelineValidationError {
+  message: string;
+  line: number | null;
+  column: number | null;
+  severity: string;
+}
+
+export interface PipelineValidationResult {
+  valid: boolean;
+  errors: PipelineValidationError[];
+}
+
 export const pipelinesApi = {
   list: (params?: { project_id?: string; skip?: number; limit?: number }) => {
     const qs = new URLSearchParams();
@@ -401,6 +435,12 @@ export const pipelinesApi = {
 
   delete: (id: string) =>
     fetchApi<void>(`/api/v1/pipelines/${id}`, { method: "DELETE" }),
+
+  validate: (yaml_content: string) =>
+    fetchApi<PipelineValidationResult>(`/api/v1/pipelines/validate`, {
+      method: "POST",
+      body: JSON.stringify({ yaml_content }),
+    }),
 };
 
 // ------------------------------------------------------------------
