@@ -103,7 +103,7 @@ async def validate_pipeline_yaml(
     not the YAML is valid (invalid YAML is a normal result, not an HTTP error)."""
     if len(body.yaml_content.encode("utf-8")) > _MAX_VALIDATE_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=413,
             detail="Pipeline YAML is too large to validate",
         )
     errors = validate_pipeline_definition(body.yaml_content)
