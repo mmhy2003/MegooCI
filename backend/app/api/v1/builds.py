@@ -88,7 +88,7 @@ async def trigger_build(
             build.runs_on = normalize_runs_on(pipeline_def.get("runs_on"))
             stage_defs = compile_to_build_graph(pipeline_def)
             for sort_order, stage_def in enumerate(stage_defs):
-                from app.models.build import Stage, Step
+                from app.models.build import Step
                 stage = Stage(
                     build_id=build.id, name=stage_def["name"], status="pending",
                     sort_order=sort_order, artifact_paths=stage_def.get("artifacts"),
@@ -254,6 +254,7 @@ async def retry_build(
         trigger_type="retry",
     )
 
+    # Coalesced retry: absorbed into the pipeline's existing queued run (latest wins). The original build's frozen stages and runs_on are intentionally not carried over — the queued run keeps its own. (See spec: "a retry can be absorbed into the queued run".)
     if created:
         build.runs_on = original_build.runs_on
         from app.models.build import Step

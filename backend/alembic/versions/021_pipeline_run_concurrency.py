@@ -35,7 +35,7 @@ def _reconcile_duplicates(status: str) -> None:
                 WHERE status = :status
                 ORDER BY pipeline_id, created_at DESC
               )
-            """
+            """  # PostgreSQL-only (DISTINCT ON); this migration only ever runs on Postgres.
         ).bindparams(status=status)
     )
 

@@ -1,7 +1,6 @@
 """dispatch_pending_builds skips pending builds whose pipeline already has a
 running build."""
 
-import types
 import uuid
 
 import pytest_asyncio
