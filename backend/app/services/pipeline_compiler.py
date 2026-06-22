@@ -23,6 +23,7 @@ Supports:
 - artifacts collection (stage-level glob paths)
 """
 
+from dataclasses import dataclass
 from typing import Any
 
 import yaml
@@ -46,6 +47,95 @@ STEP_TYPE_KEYS = {
     "trigger_pipeline",
     "ai_agent",
 }
+
+
+@dataclass
+class PipelineError:
+    """A single validation problem. `line`/`column` are 1-based and may be
+    None when the problem cannot be attributed to a specific position."""
+
+    message: str
+    line: int | None = None
+    column: int | None = None
+    severity: str = "error"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "message": self.message,
+            "line": self.line,
+            "column": self.column,
+            "severity": self.severity,
+        }
+
+
+class _LineTrackingLoader(yaml.SafeLoader):
+    """SafeLoader that records the 1-based source line of every mapping node,
+    keyed by the id() of the constructed dict, in `self.line_map`.
+
+    The line is stored in a side table rather than injected into the data so
+    the compiler's own parse stays clean. The parsed structure must be kept
+    alive while `line_map` is read (id() reuse is impossible while the objects
+    live), which is exactly how validate_pipeline_definition uses it.
+    """
+
+    def __init__(self, stream: Any) -> None:
+        super().__init__(stream)
+        self.line_map: dict[int, int] = {}
+
+    def construct_mapping(self, node: Any, deep: bool = False) -> dict[Any, Any]:
+        mapping = super().construct_mapping(node, deep=deep)
+        self.line_map[id(mapping)] = node.start_mark.line + 1
+        return mapping
+
+
+def _syntax_hint(problem: str) -> str:
+    """A short, friendly nudge for the most common YAML mistakes."""
+    p = problem.lower()
+    if "could not find expected ':'" in p or "mapping values are not allowed" in p:
+        return " — check indentation and that each key has a space after ':'"
+    if "\\t" in p or "tab" in p:
+        return " — YAML does not allow tabs for indentation; use spaces"
+    if "unexpected end of stream" in p or "expected <block end>" in p:
+        return " — check for an unclosed quote or bracket"
+    return ""
+
+
+def _syntax_error_from(exc: yaml.MarkedYAMLError) -> PipelineError:
+    mark = getattr(exc, "problem_mark", None)
+    line = (mark.line + 1) if mark is not None else None
+    column = (mark.column + 1) if mark is not None else None
+    problem = (getattr(exc, "problem", None) or "could not parse YAML").strip()
+    context = getattr(exc, "context", None)
+    where = f" on line {line}, column {column}" if line is not None else ""
+    ctx = f" ({context})" if context else ""
+    return PipelineError(
+        message=f"YAML syntax error{where}: {problem}{ctx}{_syntax_hint(problem)}",
+        line=line,
+        column=column,
+    )
+
+
+def validate_pipeline_definition(yaml_content: str | None) -> list[PipelineError]:
+    """Validate a pipeline YAML string. Returns a list of structured errors
+    (empty = valid). Syntax errors short-circuit structural checks.
+
+    NOTE (Task 1): only the syntax phase is implemented here; Task 2 replaces
+    the trailing `return []` with the structure phase.
+    """
+    loader = _LineTrackingLoader(yaml_content or "")
+    try:
+        try:
+            data = loader.get_single_data()
+        except yaml.MarkedYAMLError as exc:
+            return [_syntax_error_from(exc)]
+        except yaml.YAMLError as exc:  # pragma: no cover - defensive
+            return [PipelineError(message=f"YAML syntax error: {exc}")]
+        line_map = dict(loader.line_map)
+    finally:
+        loader.dispose()
+
+    _ = (data, line_map)  # consumed by the structure phase in Task 2
+    return []
 
 
 class PipelineValidationError(Exception):
