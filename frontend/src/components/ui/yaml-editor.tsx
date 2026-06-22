@@ -4,6 +4,7 @@ import * as React from "react";
 import CodeMirror, { type ReactCodeMirrorProps } from "@uiw/react-codemirror";
 import { yaml } from "@codemirror/lang-yaml";
 import { EditorView } from "@codemirror/view";
+import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import { type Extension } from "@codemirror/state";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
@@ -95,6 +96,13 @@ const darkEditorTheme = EditorView.theme(
 const lightTheme: Extension = [lightEditorTheme, syntaxHighlighting(cyberpunkLightHighlight)];
 const darkTheme: Extension = [darkEditorTheme, syntaxHighlighting(cyberpunkDarkHighlight)];
 
+export interface EditorDiagnostic {
+  line: number | null;
+  column: number | null;
+  message: string;
+  severity?: "error" | "warning";
+}
+
 interface YamlEditorProps {
   value: string;
   onChange?: (value: string) => void;
@@ -103,6 +111,7 @@ interface YamlEditorProps {
   maxHeight?: string;
   className?: string;
   placeholder?: string;
+  diagnostics?: EditorDiagnostic[];
 }
 
 export function YamlEditor({
@@ -113,6 +122,7 @@ export function YamlEditor({
   maxHeight,
   className,
   placeholder,
+  diagnostics,
 }: YamlEditorProps) {
   const [isDark, setIsDark] = React.useState(false);
 
@@ -136,6 +146,31 @@ export function YamlEditor({
     }
     return exts;
   }, [readOnly]);
+
+  const viewRef = React.useRef<EditorView | null>(null);
+
+  React.useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const doc = view.state.doc;
+    const diags: Diagnostic[] = (diagnostics ?? [])
+      .filter((d) => d.line != null)
+      .map((d) => {
+        const lineNo = Math.min(Math.max(d.line ?? 1, 1), doc.lines);
+        const lineObj = doc.line(lineNo);
+        const from =
+          d.column != null
+            ? Math.min(lineObj.from + (d.column - 1), lineObj.to)
+            : lineObj.from;
+        return {
+          from,
+          to: lineObj.to,
+          severity: d.severity ?? "error",
+          message: d.message,
+        } as Diagnostic;
+      });
+    view.dispatch(setDiagnostics(view.state, diags));
+  }, [diagnostics]);
 
   const handleChange = React.useCallback<
     NonNullable<ReactCodeMirrorProps["onChange"]>
@@ -166,6 +201,9 @@ export function YamlEditor({
         }}
         minHeight={minHeight}
         maxHeight={maxHeight}
+        onCreateEditor={(view) => {
+          viewRef.current = view;
+        }}
       />
     </div>
   );

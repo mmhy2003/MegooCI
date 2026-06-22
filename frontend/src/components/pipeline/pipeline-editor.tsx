@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { BookOpen, Pencil, Sparkles, Variable } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { YamlEditor } from "@/components/ui/yaml-editor";
+import { pipelinesApi, type PipelineValidationError } from "@/lib/api";
 
 // ── Shortcut helpers ────────────────────────────────────────────────────
 
@@ -102,6 +103,25 @@ export function PipelineEditor({
     onToggleEdit,
     onCancelEdit,
   };
+
+  const [problems, setProblems] = React.useState<PipelineValidationError[]>([]);
+
+  React.useEffect(() => {
+    if (readOnly || !value.trim()) {
+      setProblems([]);
+      return;
+    }
+    const handle = setTimeout(async () => {
+      try {
+        const res = await pipelinesApi.validate(value);
+        setProblems(res.errors);
+      } catch {
+        // A failing lint request must never block editing.
+        setProblems([]);
+      }
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [value, readOnly]);
 
   React.useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -242,7 +262,24 @@ export function PipelineEditor({
         minHeight={minHeight}
         maxHeight="calc(100vh - 300px)"
         placeholder={placeholder}
+        diagnostics={problems.map((p) => ({
+          line: p.line,
+          column: p.column,
+          message: p.message,
+          severity: "error" as const,
+        }))}
       />
+
+      {!readOnly && problems.length > 0 && (
+        <ul className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs">
+          {problems.map((p, i) => (
+            <li key={i} className="font-mono text-destructive">
+              {p.line != null ? `Line ${p.line}: ` : ""}
+              {p.message}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
