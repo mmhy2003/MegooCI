@@ -84,7 +84,15 @@ class _LineTrackingLoader(yaml.SafeLoader):
 
     def construct_mapping(self, node: Any, deep: bool = False) -> dict[Any, Any]:
         mapping = super().construct_mapping(node, deep=deep)
-        self.line_map[id(mapping)] = node.start_mark.line + 1
+        line_num = node.start_mark.line + 1
+        # Store the line number directly in the mapping as a hidden attribute
+        # so it can be retrieved even if object IDs change due to garbage collection
+        try:
+            mapping["__yaml_line__"] = line_num
+        except (TypeError, AttributeError):
+            pass  # In case mapping doesn't support item assignment
+        # Also store in line_map as a fallback (though __yaml_line__ is the primary source)
+        self.line_map[id(mapping)] = line_num
         return mapping
 
 
@@ -118,9 +126,6 @@ def _syntax_error_from(exc: yaml.MarkedYAMLError) -> PipelineError:
 def validate_pipeline_definition(yaml_content: str | None) -> list[PipelineError]:
     """Validate a pipeline YAML string. Returns a list of structured errors
     (empty = valid). Syntax errors short-circuit structural checks.
-
-    NOTE (Task 1): only the syntax phase is implemented here; Task 2 replaces
-    the trailing `return []` with the structure phase.
     """
     loader = _LineTrackingLoader(yaml_content or "")
     try:
@@ -134,8 +139,114 @@ def validate_pipeline_definition(yaml_content: str | None) -> list[PipelineError
     finally:
         loader.dispose()
 
-    _ = (data, line_map)  # consumed by the structure phase in Task 2
-    return []
+    return _structure_errors(data, line_map)
+
+
+def _structure_errors(data: Any, line_map: dict[int, int]) -> list[PipelineError]:
+    errors: list[PipelineError] = []
+
+    if data is None:
+        return [PipelineError(message="Empty pipeline definition", line=1)]
+
+    if isinstance(data, list):
+        data = {"stages": data}
+
+    if not isinstance(data, dict):
+        return [
+            PipelineError(
+                message="Pipeline definition must be a mapping or a list of stages",
+                line=1,
+            )
+        ]
+
+    top_line = line_map.get(id(data)) or 1
+
+    runs_on = data.get("runs_on")
+    if runs_on is not None:
+        for msg in _validate_runs_on(runs_on):
+            errors.append(PipelineError(message=msg, line=top_line))
+
+    stages = data.get("stages")
+
+    if not stages:
+        errors.append(
+            PipelineError(message="Pipeline must define at least one stage", line=top_line)
+        )
+        return errors
+
+    if not isinstance(stages, list):
+        errors.append(PipelineError(message="'stages' must be a list", line=top_line))
+        return errors
+
+    stage_names: set[str] = set()
+    for i, stage in enumerate(stages):
+        if not isinstance(stage, dict):
+            errors.append(PipelineError(message=f"Stage {i} must be a mapping"))
+            continue
+
+        # Try to get line from the hidden attribute first, fall back to line_map
+        stage_line = stage.get("__yaml_line__") or line_map.get(id(stage))
+        name = stage.get("name")
+        if not name:
+            errors.append(
+                PipelineError(message=f"Stage {i} is missing a 'name' field", line=stage_line)
+            )
+        elif name in stage_names:
+            errors.append(
+                PipelineError(message=f"Duplicate stage name: '{name}'", line=stage_line)
+            )
+        else:
+            stage_names.add(name)
+
+        steps = stage.get("steps")
+        if not steps:
+            errors.append(
+                PipelineError(
+                    message=f"Stage '{name or i}' must define at least one step",
+                    line=stage_line,
+                )
+            )
+        elif not isinstance(steps, list):
+            errors.append(
+                PipelineError(
+                    message=f"Stage '{name or i}': 'steps' must be a list", line=stage_line
+                )
+            )
+        else:
+            for j, step in enumerate(steps):
+                if isinstance(step, str):
+                    continue
+                if not isinstance(step, dict):
+                    errors.append(
+                        PipelineError(
+                            message=f"Stage '{name or i}', step {j}: must be a string or mapping"
+                        )
+                    )
+                    continue
+                step_line = step.get("__yaml_line__") or line_map.get(id(step))
+                for msg in _validate_step(step, stage_name=name or str(i), step_index=j):
+                    errors.append(PipelineError(message=msg, line=step_line))
+
+        when = stage.get("when")
+        if when is not None and not isinstance(when, dict):
+            errors.append(
+                PipelineError(
+                    message=f"Stage '{name or i}': 'when' must be a mapping", line=stage_line
+                )
+            )
+
+        if "runs_on" in stage:
+            errors.append(
+                PipelineError(
+                    message=(
+                        f"Stage '{name or i}': 'runs_on' is a pipeline-level field; "
+                        f"move it to the top of the YAML, not inside the stage."
+                    ),
+                    line=stage_line,
+                )
+            )
+
+    return errors
 
 
 class PipelineValidationError(Exception):
@@ -340,81 +451,8 @@ def _detect_step_type(step_def: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
 
 def validate_pipeline(yaml_content: str) -> list[str]:
-    """Validate a YAML pipeline and return a list of error messages (empty = valid)."""
-    errors: list[str] = []
-
-    try:
-        data = yaml.safe_load(yaml_content)
-    except yaml.YAMLError as exc:
-        return [f"Invalid YAML syntax: {exc}"]
-
-    if data is None:
-        return ["Empty pipeline definition"]
-
-    if isinstance(data, list):
-        data = {"stages": data}
-
-    if not isinstance(data, dict):
-        return ["Pipeline definition must be a mapping or a list of stages"]
-
-    runs_on = data.get("runs_on")
-    if runs_on is not None:
-        errors.extend(_validate_runs_on(runs_on))
-
-    stages = data.get("stages")
-    if not stages:
-        errors.append("Pipeline must define at least one stage")
-        return errors
-
-    if not isinstance(stages, list):
-        errors.append("'stages' must be a list")
-        return errors
-
-    stage_names: set[str] = set()
-    for i, stage in enumerate(stages):
-        if not isinstance(stage, dict):
-            errors.append(f"Stage {i} must be a mapping")
-            continue
-
-        name = stage.get("name")
-        if not name:
-            errors.append(f"Stage {i} is missing a 'name' field")
-        elif name in stage_names:
-            errors.append(f"Duplicate stage name: '{name}'")
-        else:
-            stage_names.add(name)
-
-        steps = stage.get("steps")
-        if not steps:
-            errors.append(f"Stage '{name or i}' must define at least one step")
-        elif not isinstance(steps, list):
-            errors.append(f"Stage '{name or i}': 'steps' must be a list")
-        else:
-            for j, step in enumerate(steps):
-                if isinstance(step, str):
-                    continue
-                if not isinstance(step, dict):
-                    errors.append(
-                        f"Stage '{name or i}', step {j}: must be a string or mapping"
-                    )
-                    continue
-
-                step_errors = _validate_step(step, stage_name=name or str(i), step_index=j)
-                errors.extend(step_errors)
-
-        when = stage.get("when")
-        if when is not None and not isinstance(when, dict):
-            errors.append(f"Stage '{name or i}': 'when' must be a mapping")
-
-        # `runs_on` is pipeline-level only — flag it here so users don't
-        # silently get the wrong behaviour after moving it onto a stage.
-        if "runs_on" in stage:
-            errors.append(
-                f"Stage '{name or i}': 'runs_on' is a pipeline-level field; "
-                f"move it to the top of the YAML, not inside the stage."
-            )
-
-    return errors
+    """Back-compat: returns just the messages from validate_pipeline_definition."""
+    return [e.message for e in validate_pipeline_definition(yaml_content)]
 
 
 def _validate_runs_on(value: Any) -> list[str]:

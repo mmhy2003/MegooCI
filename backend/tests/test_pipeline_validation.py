@@ -57,3 +57,61 @@ def test_unclosed_quote_reports_line():
     errors = validate_pipeline_definition(bad)
     assert len(errors) == 1
     assert errors[0].line is not None
+
+
+def test_missing_stage_name_has_line():
+    bad = (
+        "name: demo\n"
+        "stages:\n"
+        "  - steps:\n"
+        "      - run: echo hi\n"
+    )
+    errors = validate_pipeline_definition(bad)
+    assert any("missing a 'name'" in e.message for e in errors)
+    err = next(e for e in errors if "missing a 'name'" in e.message)
+    assert err.line == 3  # the line of the stage mapping ("- steps:")
+
+
+def test_empty_input_reports_empty():
+    errors = validate_pipeline_definition("")
+    assert len(errors) == 1
+    assert errors[0].message == "Empty pipeline definition"
+
+
+def test_none_input_reports_empty():
+    errors = validate_pipeline_definition(None)
+    assert len(errors) == 1
+    assert errors[0].message == "Empty pipeline definition"
+
+
+def test_kube_apply_missing_kubeconfig_has_line():
+    bad = (
+        "name: demo\n"
+        "stages:\n"
+        "  - name: deploy\n"
+        "    steps:\n"
+        "      - kube_apply:\n"
+        "          manifests:\n"
+        "            - k8s/\n"
+    )
+    errors = validate_pipeline_definition(bad)
+    match = [e for e in errors if "requires 'kubeconfig'" in e.message]
+    assert match, "kube_apply rule did not fire"
+    assert match[0].line == 5  # the step mapping line
+
+
+def test_backcompat_validate_pipeline_returns_strings():
+    from app.services.pipeline_compiler import validate_pipeline
+
+    bad = (
+        "name: demo\n"
+        "stages:\n"
+        "  - name: deploy\n"
+        "    steps:\n"
+        "      - kube_apply:\n"
+        "          manifests:\n"
+        "            - k8s/\n"
+    )
+    errors = validate_pipeline(bad)
+    assert all(isinstance(e, str) for e in errors)
+    assert any("requires 'kubeconfig'" in e for e in errors)
