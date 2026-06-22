@@ -69,31 +69,37 @@ class PipelineError:
 
 
 class _LineTrackingLoader(yaml.SafeLoader):
-    """SafeLoader that records the 1-based source line of every mapping node,
-    keyed by the id() of the constructed dict, in `self.line_map`.
+    """SafeLoader that records each mapping's 1-based source line in a side
+    table (``self.line_map``), keyed by ``id()`` of the constructed dict — the
+    parsed data itself is never polluted with bookkeeping keys.
 
-    The line is stored in a side table rather than injected into the data so
-    the compiler's own parse stays clean. The parsed structure must be kept
-    alive while `line_map` is read (id() reuse is impossible while the objects
-    live), which is exactly how validate_pipeline_definition uses it.
+    We override the *map constructor* (below) rather than ``construct_mapping``
+    because PyYAML builds a block mapping in two steps: it creates the real
+    dict, yields it (this is the object that ends up in the parsed structure),
+    then merges a separate temporary dict returned by ``construct_mapping``
+    into it. Keying off ``construct_mapping``'s return value would record the
+    id() of that throwaway dict; keying off the yielded dict gives a stable
+    id() that ``_structure_errors`` can look up. The parsed structure must be
+    kept alive while ``line_map`` is read (id() reuse is impossible while the
+    objects live), which is exactly how ``validate_pipeline_definition`` uses it.
     """
 
     def __init__(self, stream: Any) -> None:
         super().__init__(stream)
         self.line_map: dict[int, int] = {}
 
-    def construct_mapping(self, node: Any, deep: bool = False) -> dict[Any, Any]:
-        mapping = super().construct_mapping(node, deep=deep)
-        line_num = node.start_mark.line + 1
-        # Store the line number directly in the mapping as a hidden attribute
-        # so it can be retrieved even if object IDs change due to garbage collection
-        try:
-            mapping["__yaml_line__"] = line_num
-        except (TypeError, AttributeError):
-            pass  # In case mapping doesn't support item assignment
-        # Also store in line_map as a fallback (though __yaml_line__ is the primary source)
-        self.line_map[id(mapping)] = line_num
-        return mapping
+
+def _construct_mapping_with_line(loader: "_LineTrackingLoader", node: Any):
+    data: dict[Any, Any] = {}
+    yield data
+    value = loader.construct_mapping(node)
+    data.update(value)
+    loader.line_map[id(data)] = node.start_mark.line + 1
+
+
+_LineTrackingLoader.add_constructor(
+    "tag:yaml.org,2002:map", _construct_mapping_with_line
+)
 
 
 def _syntax_hint(problem: str) -> str:
@@ -184,8 +190,7 @@ def _structure_errors(data: Any, line_map: dict[int, int]) -> list[PipelineError
             errors.append(PipelineError(message=f"Stage {i} must be a mapping"))
             continue
 
-        # Try to get line from the hidden attribute first, fall back to line_map
-        stage_line = stage.get("__yaml_line__") or line_map.get(id(stage))
+        stage_line = line_map.get(id(stage))
         name = stage.get("name")
         if not name:
             errors.append(
@@ -223,7 +228,7 @@ def _structure_errors(data: Any, line_map: dict[int, int]) -> list[PipelineError
                         )
                     )
                     continue
-                step_line = step.get("__yaml_line__") or line_map.get(id(step))
+                step_line = line_map.get(id(step))
                 for msg in _validate_step(step, stage_name=name or str(i), step_index=j):
                     errors.append(PipelineError(message=msg, line=step_line))
 
