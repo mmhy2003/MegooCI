@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.build import Build
 
@@ -34,6 +35,26 @@ async def pipeline_has_running_build(
     if exclude_build_id is not None:
         stmt = stmt.where(Build.id != exclude_build_id)
     return (await db.scalar(stmt.limit(1))) is not None
+
+
+def dispatchable_pending_builds_stmt(limit: int = 20):
+    """Select pending builds whose pipeline has NO running build, oldest first.
+    Used by the dispatcher so it never starts a build for a busy pipeline."""
+    running_sibling = aliased(Build)
+    return (
+        select(Build)
+        .where(
+            Build.status == "pending",
+            ~select(running_sibling.id)
+            .where(
+                running_sibling.pipeline_id == Build.pipeline_id,
+                running_sibling.status == "running",
+            )
+            .exists(),
+        )
+        .order_by(Build.created_at.asc())
+        .limit(limit)
+    )
 
 
 async def try_start_build(db: AsyncSession, build: Build) -> bool:
