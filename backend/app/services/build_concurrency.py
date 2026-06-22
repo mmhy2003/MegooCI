@@ -48,3 +48,81 @@ async def try_start_build(db: AsyncSession, build: Build) -> bool:
         await db.rollback()
         return False
     return True
+
+
+async def _find_pending(db: AsyncSession, pipeline_id: uuid.UUID) -> Build | None:
+    return await db.scalar(
+        select(Build)
+        .where(Build.pipeline_id == pipeline_id, Build.status == "pending")
+        .limit(1)
+    )
+
+
+async def _coalesce(
+    db: AsyncSession, existing: Build, *, default_branch, branch, commit_sha,
+    params, triggered_by, trigger_type,
+) -> tuple[Build, bool]:
+    existing.branch = branch or default_branch
+    existing.commit_sha = commit_sha
+    existing.params_json = params
+    existing.trigger_type = trigger_type
+    existing.triggered_by = triggered_by
+    await db.commit()
+    return existing, False
+
+
+async def create_or_coalesce_build(
+    db: AsyncSession,
+    *,
+    pipeline_id: uuid.UUID,
+    default_branch: str,
+    branch: str | None,
+    commit_sha: str | None,
+    params: dict | None,
+    triggered_by: uuid.UUID | None,
+    trigger_type: str,
+) -> tuple[Build, bool]:
+    """Create a pending build for the pipeline, or coalesce into the existing
+    pending one (latest wins). Returns ``(build, created)``.
+
+    Contract: ``created=True`` → the build is flushed but NOT committed; the
+    caller compiles stages/steps and commits. ``created=False`` → already
+    committed; the caller does nothing further (no compile, no enqueue).
+    """
+    existing = await _find_pending(db, pipeline_id)
+    if existing is not None:
+        return await _coalesce(
+            db, existing, default_branch=default_branch, branch=branch,
+            commit_sha=commit_sha, params=params, triggered_by=triggered_by,
+            trigger_type=trigger_type,
+        )
+
+    max_number = await db.scalar(
+        select(func.coalesce(func.max(Build.number), 0)).where(
+            Build.pipeline_id == pipeline_id
+        )
+    )
+    build = Build(
+        pipeline_id=pipeline_id,
+        number=(max_number or 0) + 1,
+        branch=branch or default_branch,
+        commit_sha=commit_sha,
+        status="pending",
+        triggered_by=triggered_by,
+        trigger_type=trigger_type,
+        params_json=params,
+    )
+    db.add(build)
+    try:
+        await db.flush()  # fires uq_one_pending_build_per_pipeline on a race
+    except IntegrityError:
+        await db.rollback()
+        existing = await _find_pending(db, pipeline_id)
+        if existing is None:  # pragma: no cover - pending vanished post-rollback
+            raise
+        return await _coalesce(
+            db, existing, default_branch=default_branch, branch=branch,
+            commit_sha=commit_sha, params=params, triggered_by=triggered_by,
+            trigger_type=trigger_type,
+        )
+    return build, True
