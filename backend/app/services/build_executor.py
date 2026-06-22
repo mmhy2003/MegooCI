@@ -33,6 +33,7 @@ from app.services.agent_dispatcher import (
     release_agent,
     send_build_finished,
 )
+from app.services.build_concurrency import pipeline_has_running_build, try_start_build
 from app.services.step_actions import get_handler
 from app.services.step_actions.base import LogLine, StepContext, StepResult
 from app.services.step_actions.interpolation import (
@@ -102,6 +103,18 @@ async def execute_build(
             # Leave the build as pending — it will be picked up when
             # maintenance mode is disabled and dispatch_pending_builds()
             # is called.  Release pre-claimed agent if any.
+            if claimed_agent_id is not None:
+                try:
+                    await release_agent(db, claimed_agent_id, build_id)
+                except Exception:
+                    pass
+            await redis_client.aclose()
+            return
+
+        # Don't claim an agent for a build whose pipeline is already running
+        # one. Leave it pending; dispatch_pending_builds will retry it after
+        # the running build finishes. (Authoritative guard is try_start_build.)
+        if await pipeline_has_running_build(db, build.pipeline_id, exclude_build_id=build.id):
             if claimed_agent_id is not None:
                 try:
                     await release_agent(db, claimed_agent_id, build_id)
@@ -202,9 +215,12 @@ async def _run_build_stages(
         if build is None:
             return
 
-        build.status = "running"
-        build.started_at = datetime.now(timezone.utc)
-        await db.commit()
+        # Serialize: only start if no sibling of this pipeline is already
+        # running. The partial unique index makes this atomic across workers;
+        # on conflict the build stays pending and is re-dispatched when the
+        # running build finishes.
+        if not await try_start_build(db, build):
+            return
 
         await _publish(redis_client, channel, {
             "event": "build_started",
