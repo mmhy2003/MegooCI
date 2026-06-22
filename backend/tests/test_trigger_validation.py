@@ -31,7 +31,10 @@ def _json_sqlite(element, compiler, **kw):  # pragma: no cover - DDL glue
 
 @compiles(ARRAY, "sqlite")
 def _array_sqlite(element, compiler, **kw):  # pragma: no cover - DDL glue
-    return "TEXT"
+    # MUST match tests/test_build_retry.py — @compiles is process-global and
+    # last-write-wins across collected modules; a divergent mapping breaks that
+    # file's artifact_paths round-trip when the suites run together.
+    return "TEXTARRAY"
 
 
 @pytest_asyncio.fixture
