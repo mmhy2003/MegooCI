@@ -177,6 +177,7 @@ async def _enqueue_matching_builds(
     after the DB commit).
     """
     from app.models.build import Stage, Step
+    from app.services.build_concurrency import create_or_coalesce_build
     from app.services.pipeline_compiler import (
         compile_to_build_graph,
         normalize_runs_on,
@@ -209,65 +210,50 @@ async def _enqueue_matching_builds(
         ):
             continue
 
-        max_number = await db.scalar(
-            select(func.coalesce(func.max(Build.number), 0)).where(
-                Build.pipeline_id == pipeline.id
-            )
-        )
-        build = Build(
+        build, created = await create_or_coalesce_build(
+            db,
             pipeline_id=pipeline.id,
-            number=(max_number or 0) + 1,
-            branch=event.branch or pipeline.default_branch,
+            default_branch=pipeline.default_branch,
+            branch=event.branch,
             commit_sha=event.commit_sha,
-            status="pending",
+            params=None,
             triggered_by=None,
             trigger_type="webhook",
-            params_json=None,
         )
-        db.add(build)
-        await db.flush()
+        if not created:
+            continue  # coalesced into the existing queued run — already committed
 
-        # ── Compile YAML → stages/steps (same as manual trigger) ──
         if pipeline.yaml_content:
             validation_errors = validate_pipeline_definition(pipeline.yaml_content)
             if validation_errors:
-                from app.services.build_validation import (
-                    record_pipeline_validation_failure,
-                )
-
+                from app.services.build_validation import record_pipeline_validation_failure
                 await record_pipeline_validation_failure(db, build, validation_errors)
-            else:
-                pipeline_def = parse_yaml_pipeline(pipeline.yaml_content)
-                build.runs_on = normalize_runs_on(pipeline_def.get("runs_on"))
-                stage_defs = compile_to_build_graph(pipeline_def)
+                await db.commit()
+                new_build_ids.append(build.id)  # failed build (enqueue is a harmless no-op)
+                continue
 
-                for sort_order, stage_def in enumerate(stage_defs):
-                    stage = Stage(
-                        build_id=build.id,
-                        name=stage_def["name"],
-                        status="pending",
-                        sort_order=sort_order,
-                        artifact_paths=stage_def.get("artifacts"),
-                    )
-                    db.add(stage)
-                    await db.flush()
+            pipeline_def = parse_yaml_pipeline(pipeline.yaml_content)
+            build.runs_on = normalize_runs_on(pipeline_def.get("runs_on"))
+            stage_defs = compile_to_build_graph(pipeline_def)
+            for sort_order, stage_def in enumerate(stage_defs):
+                stage = Stage(
+                    build_id=build.id, name=stage_def["name"], status="pending",
+                    sort_order=sort_order, artifact_paths=stage_def.get("artifacts"),
+                )
+                db.add(stage)
+                await db.flush()
+                for step_order, step_def in enumerate(stage_def.get("steps", [])):
+                    step_type = step_def.get("step_type", "run")
+                    config = step_def.get("config", {})
+                    command = config.get("command") if step_type == "run" else None
+                    db.add(Step(
+                        stage_id=stage.id, name=step_def.get("name", f"step-{step_order}"),
+                        step_type=step_type, command=command,
+                        config_json=config if config else None,
+                        status="pending", sort_order=step_order,
+                    ))
 
-                    for step_order, step_def in enumerate(stage_def.get("steps", [])):
-                        step_type = step_def.get("step_type", "run")
-                        config = step_def.get("config", {})
-                        command = config.get("command") if step_type == "run" else None
-
-                        step = Step(
-                            stage_id=stage.id,
-                            name=step_def.get("name", f"step-{step_order}"),
-                            step_type=step_type,
-                            command=command,
-                            config_json=config if config else None,
-                            status="pending",
-                            sort_order=step_order,
-                        )
-                        db.add(step)
-
+        await db.commit()
         new_build_ids.append(build.id)
 
     return new_build_ids
