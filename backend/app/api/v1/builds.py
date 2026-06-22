@@ -15,6 +15,7 @@ from app.services.pipeline_compiler import (
     compile_to_build_graph,
     normalize_runs_on,
     parse_yaml_pipeline,
+    validate_pipeline_definition,
 )
 from app.tasks.build_tasks import run_build
 
@@ -55,6 +56,19 @@ async def trigger_build(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Pipeline is disabled"
         )
+
+    # Validate the pipeline YAML before doing any work. Invalid YAML must not
+    # create a build — surface the line-level errors to the caller instead.
+    if pipeline.yaml_content:
+        validation_errors = validate_pipeline_definition(pipeline.yaml_content)
+        if validation_errors:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Pipeline validation failed",
+                    "errors": [e.to_dict() for e in validation_errors],
+                },
+            )
 
     max_number = await db.scalar(
         select(func.coalesce(func.max(Build.number), 0)).where(

@@ -26,7 +26,11 @@ from sqlalchemy.orm import selectinload
 
 from app.models.build import Build, Stage, Step
 from app.models.pipeline import Pipeline
-from app.services.pipeline_compiler import compile_to_build_graph, parse_yaml_pipeline
+from app.services.pipeline_compiler import (
+    compile_to_build_graph,
+    parse_yaml_pipeline,
+    validate_pipeline_definition,
+)
 from app.tasks.build_tasks import run_build
 
 from . import register
@@ -102,6 +106,32 @@ class TriggerPipelineHandler(StepActionHandler):
         await db.flush()
 
         if target.yaml_content:
+            validation_errors = validate_pipeline_definition(target.yaml_content)
+            if validation_errors:
+                from app.services.build_validation import (
+                    format_validation_errors,
+                    record_pipeline_validation_failure,
+                )
+
+                await record_pipeline_validation_failure(
+                    db, child_build, validation_errors
+                )
+                await db.commit()
+                detail = format_validation_errors(validation_errors)
+                yield LogLine(
+                    stream="stderr",
+                    content=(
+                        f"Error: target pipeline '{target.name}' has invalid YAML:\n"
+                        f"{detail}\n"
+                    ),
+                )
+                yield StepResult(
+                    exit_code=1,
+                    status="failed",
+                    error=f"Target pipeline '{target.name}' has invalid YAML",
+                )
+                return
+
             pipeline_def = parse_yaml_pipeline(target.yaml_content)
             stage_defs = compile_to_build_graph(pipeline_def)
 

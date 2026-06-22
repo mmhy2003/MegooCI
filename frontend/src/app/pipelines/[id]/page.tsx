@@ -119,8 +119,10 @@ export default function PipelineDetailPage() {
       const build = await buildsApi.trigger(id);
       toast.success("Build triggered!");
       router.push(`/builds/${build.id}`);
-    } catch {
-      toast.error("Failed to trigger build");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to trigger build",
+      );
     }
   }
 

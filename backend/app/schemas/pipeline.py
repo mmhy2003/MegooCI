@@ -44,3 +44,19 @@ class PipelineResponse(BaseModel):
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime | None
+
+
+class PipelineValidateRequest(BaseModel):
+    yaml_content: str = ""
+
+
+class PipelineErrorItem(BaseModel):
+    message: str
+    line: int | None = None
+    column: int | None = None
+    severity: str = "error"
+
+
+class PipelineValidationResponse(BaseModel):
+    valid: bool
+    errors: list[PipelineErrorItem]
