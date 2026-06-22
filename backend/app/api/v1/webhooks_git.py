@@ -181,6 +181,7 @@ async def _enqueue_matching_builds(
         compile_to_build_graph,
         normalize_runs_on,
         parse_yaml_pipeline,
+        validate_pipeline_definition,
     )
 
     result = await db.execute(
@@ -228,7 +229,14 @@ async def _enqueue_matching_builds(
 
         # ── Compile YAML → stages/steps (same as manual trigger) ──
         if pipeline.yaml_content:
-            try:
+            validation_errors = validate_pipeline_definition(pipeline.yaml_content)
+            if validation_errors:
+                from app.services.build_validation import (
+                    record_pipeline_validation_failure,
+                )
+
+                await record_pipeline_validation_failure(db, build, validation_errors)
+            else:
                 pipeline_def = parse_yaml_pipeline(pipeline.yaml_content)
                 build.runs_on = normalize_runs_on(pipeline_def.get("runs_on"))
                 stage_defs = compile_to_build_graph(pipeline_def)
@@ -259,10 +267,6 @@ async def _enqueue_matching_builds(
                             sort_order=step_order,
                         )
                         db.add(step)
-            except Exception:
-                # If YAML parsing fails, the build will still be created
-                # but with no stages — the executor will mark it as failed.
-                pass
 
         new_build_ids.append(build.id)
 
