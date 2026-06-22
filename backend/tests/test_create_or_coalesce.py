@@ -68,7 +68,7 @@ async def test_coalesces_into_existing_pending(session_factory):
     async with session_factory() as db:
         first, c1 = await create_or_coalesce_build(
             db, pipeline_id=pid, default_branch="main", branch="main",
-            commit_sha="aaa", params=None, triggered_by=None, trigger_type="webhook")
+            commit_sha="aaa", params=None, triggered_by=None, trigger_type="manual")
         assert c1 is True
         await db.commit()
 
@@ -79,6 +79,7 @@ async def test_coalesces_into_existing_pending(session_factory):
         assert second.id == first.id       # same build row
         assert second.commit_sha == "bbb"  # latest wins
         assert second.params_json == {"x": "1"}
+        assert second.trigger_type == "webhook"  # latest wins
 
         count = await db.scalar(
             select(func.count()).select_from(Build).where(
