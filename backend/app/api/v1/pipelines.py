@@ -9,9 +9,19 @@ from app.database import get_db
 from app.models.pipeline import Pipeline
 from app.models.project import Project
 from app.models.user import User
-from app.schemas.pipeline import PipelineCreate, PipelineResponse, PipelineUpdate
+from app.schemas.pipeline import (
+    PipelineCreate,
+    PipelineErrorItem,
+    PipelineResponse,
+    PipelineUpdate,
+    PipelineValidateRequest,
+    PipelineValidationResponse,
+)
+from app.services.pipeline_compiler import validate_pipeline_definition
 
 router = APIRouter()
+
+_MAX_VALIDATE_BYTES = 256 * 1024
 
 
 @router.get("", response_model=list[PipelineResponse])
@@ -82,6 +92,25 @@ async def create_pipeline(
     await index_pipeline(pipeline)
 
     return pipeline
+
+
+@router.post("/validate", response_model=PipelineValidationResponse)
+async def validate_pipeline_yaml(
+    body: PipelineValidateRequest,
+    _current_user: User = Depends(require_permission("pipelines.read")),
+) -> PipelineValidationResponse:
+    """Lint a pipeline YAML string. Returns 200 with the error list whether or
+    not the YAML is valid (invalid YAML is a normal result, not an HTTP error)."""
+    if len(body.yaml_content.encode("utf-8")) > _MAX_VALIDATE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Pipeline YAML is too large to validate",
+        )
+    errors = validate_pipeline_definition(body.yaml_content)
+    return PipelineValidationResponse(
+        valid=not errors,
+        errors=[PipelineErrorItem(**e.to_dict()) for e in errors],
+    )
 
 
 @router.get("/{pipeline_id}", response_model=PipelineResponse)
