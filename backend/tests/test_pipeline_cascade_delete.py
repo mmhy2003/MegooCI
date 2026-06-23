@@ -169,3 +169,40 @@ async def test_deleting_build_cascades_notification_deliveries(session_factory):
         gone = await db.get(NotificationDelivery, seed.delivery_id)
 
     assert gone is None, "notification_delivery was not cascade-deleted with its build"
+
+
+async def test_notify_agents_of_cancel_signals_running_steps(session_factory, monkeypatch):
+    """Only running steps that have an agent_id get a cancel signal."""
+    from app.models.build import Stage, Step
+    from app.services import agent_dispatcher
+
+    seed = await _seed(session_factory, build_statuses=("running",))
+    build_id = seed.build_ids[0]
+    running_agent = uuid.uuid4()
+
+    async with session_factory() as db:
+        stage = Stage(build_id=build_id, name="s", status="running", sort_order=0)
+        db.add(stage)
+        await db.flush()
+        db.add(Step(
+            stage_id=stage.id, name="running-step", step_type="run",
+            status="running", agent_id=running_agent, sort_order=0,
+        ))
+        db.add(Step(
+            stage_id=stage.id, name="idle-step", step_type="run",
+            status="pending", agent_id=uuid.uuid4(), sort_order=1,
+        ))
+        await db.commit()
+
+    calls = []
+
+    async def _spy(agent_id, step_id):
+        calls.append((agent_id, step_id))
+
+    monkeypatch.setattr(agent_dispatcher, "signal_cancel_step", _spy)
+
+    async with session_factory() as db:
+        await agent_dispatcher.notify_agents_of_cancel(db, build_id)
+
+    assert len(calls) == 1, "exactly the one running step should be signalled"
+    assert calls[0][0] == running_agent

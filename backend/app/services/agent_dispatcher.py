@@ -484,6 +484,29 @@ async def signal_cancel_step(agent_id: uuid.UUID, step_id: uuid.UUID) -> None:
         await redis_client.aclose()
 
 
+async def notify_agents_of_cancel(db: AsyncSession, build_id: uuid.UUID) -> None:
+    """Publish cancel frames for every running step of ``build_id`` that has an
+    ``agent_id``. Best-effort: per-step errors are swallowed so callers (single
+    build cancel, pipeline cascade-delete) never fail on a flaky agent channel."""
+    from app.models.build import Stage, Step
+
+    result = await db.execute(
+        select(Step)
+        .join(Stage, Step.stage_id == Stage.id)
+        .where(
+            Stage.build_id == build_id,
+            Step.status == "running",
+            Step.agent_id.isnot(None),
+        )
+    )
+    for step in result.scalars().all():
+        try:
+            if step.agent_id is not None:
+                await signal_cancel_step(step.agent_id, step.id)
+        except Exception:
+            pass
+
+
 async def send_build_finished(agent_id: uuid.UUID, build_id: uuid.UUID) -> None:
     """Tell the agent that a build is fully complete so it can release the
     shared workspace directory.
