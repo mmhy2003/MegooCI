@@ -104,6 +104,7 @@ func (l *Local) Run(ctx context.Context, step Step, logs chan<- LogLine) Result 
 	}
 
 	cmd := buildCommand(ctx, command)
+	configureProcessGroup(cmd)
 	cmd.Dir = workdir
 	cmd.Env = mergeEnv(os.Environ(), step.Env)
 
@@ -691,6 +692,7 @@ func (l *Local) runAiAgent(ctx context.Context, step Step, workdir string, logs 
 
 	// Execute pi directly (no shell wrapper) to avoid prompt escaping issues.
 	cmd := exec.CommandContext(ctx, "pi", args...)
+	configureProcessGroup(cmd)
 	cmd.Dir = workdir
 
 	// Inject the API key as the provider-specific env var.
