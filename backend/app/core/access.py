@@ -10,7 +10,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import effective_permissions, effective_scoped_permissions
+from app.core.deps import effective_scoped_permissions
 from app.models.user import User
 
 

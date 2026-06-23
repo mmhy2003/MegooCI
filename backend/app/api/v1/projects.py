@@ -104,12 +104,12 @@ async def update_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> Project:
-    check_scoped_permission(current_user, "projects.manage", "project", project_id)
     project = await db.get(Project, project_id)
     if project is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
         )
+    check_scoped_permission(current_user, "projects.manage", "project", project_id)
 
     update_data = body.model_dump(exclude_unset=True)
     if "name" in update_data:

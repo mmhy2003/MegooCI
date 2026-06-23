@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import check_scoped_permission, get_current_active_user, require_permission
+from app.core.deps import check_scoped_permission, get_current_active_user
 from app.core.security import (
     encrypt_webhook_secret,
     generate_webhook_secret,
@@ -188,9 +188,10 @@ async def rotate_webhook_secret(
     project_id: uuid.UUID,
     repo_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("projects.manage")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> ProjectRepositoryWithSecretResponse:
     repo = await _get_repo_or_404(db, project_id, repo_id)
+    check_scoped_permission(_current_user, "projects.manage", "project", repo.project_id)
     settings = get_settings()
     plaintext_secret = generate_webhook_secret()
     repo.webhook_secret_hash = encrypt_webhook_secret(
@@ -209,9 +210,10 @@ async def list_deliveries(
     repo_id: uuid.UUID,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("projects.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> list[WebhookDelivery]:
-    await _get_repo_or_404(db, project_id, repo_id)
+    repo = await _get_repo_or_404(db, project_id, repo_id)
+    check_scoped_permission(_current_user, "projects.read", "project", repo.project_id)
     result = await db.execute(
         select(WebhookDelivery)
         .where(WebhookDelivery.project_repository_id == repo_id)
