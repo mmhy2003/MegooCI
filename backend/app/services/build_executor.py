@@ -236,10 +236,17 @@ async def _run_build_stages(
         secrets, env_vars, builtins = await _load_scope_context(db, build)
 
         build_failed = False
+        cancelled = False
         build_agent_ids: set[uuid.UUID] = set()
 
         for stage in sorted(build.stages, key=lambda s: s.sort_order):
+            # Re-read the authoritative status: the cancel endpoint commits
+            # build.status="cancelled" from a *different* session, and this
+            # worker session has expire_on_commit=False, so the in-memory copy
+            # would otherwise never change (this is the original bug).
+            await db.refresh(build, ["status"])
             if build.status == "cancelled":
+                cancelled = True
                 break
 
             stage.status = "running"
@@ -255,7 +262,9 @@ async def _run_build_stages(
             stage_failed = False
 
             for step in sorted(stage.steps, key=lambda s: s.sort_order):
+                await db.refresh(build, ["status"])
                 if build.status == "cancelled":
+                    cancelled = True
                     break
 
                 step.status = "running"
@@ -283,8 +292,6 @@ async def _run_build_stages(
                     claimed_agent_id=claimed_agent_id,
                 )
 
-                # Persist error messages as visible log lines so users
-                # see exactly why a step failed in the build UI.
                 if step_result.error:
                     await _emit_system_log(
                         step, db, redis_client, channel,
@@ -307,7 +314,17 @@ async def _run_build_stages(
                     stage_failed = True
                     break
 
-            stage.status = "failed" if stage_failed else "success"
+            # A cancel can land while the *last* step of the stage is running,
+            # after that step's top-of-loop check. Re-read once more so the
+            # stage isn't wrongly finalized as success.
+            if not cancelled:
+                await db.refresh(build, ["status"])
+                cancelled = build.status == "cancelled"
+
+            if cancelled:
+                stage.status = "cancelled"
+            else:
+                stage.status = "failed" if stage_failed else "success"
             stage.finished_at = datetime.now(timezone.utc)
             await db.commit()
 
@@ -317,17 +334,25 @@ async def _run_build_stages(
                 "status": stage.status,
             })
 
+            if cancelled:
+                break
             if stage_failed:
                 build_failed = True
                 break
 
-        await db.refresh(build)
-        if build.status == "cancelled":
+        # Refresh only the status column \u2014 a full refresh() could expire the
+        # eager-loaded stages/steps collections that _cancel_remaining iterates,
+        # and re-touching them would force an illegal async lazy-load.
+        await db.refresh(build, ["status"])
+        if cancelled or build.status == "cancelled":
             final_status = "cancelled"
         elif build_failed:
             final_status = "failed"
         else:
             final_status = "success"
+
+        if final_status == "cancelled":
+            await _cancel_remaining(db, build)
 
         build.status = final_status
         build.finished_at = datetime.now(timezone.utc)
@@ -355,6 +380,24 @@ async def _run_build_stages(
         await _send_build_finished_notification(
             db, redis_client, build, final_status
         )
+
+
+async def _cancel_remaining(db: AsyncSession, build: Build) -> None:
+    """Flip any not-yet-terminal stages/steps of *build* to 'cancelled' so the
+    UI shows a fully terminal pipeline instead of one frozen mid-run. Relies on
+    build.stages / stage.steps already being eager-loaded by the caller."""
+    _ACTIVE = ("pending", "running")
+    now = datetime.now(timezone.utc)
+    for stage in build.stages:
+        if stage.status in _ACTIVE:
+            stage.status = "cancelled"
+            if stage.finished_at is None:
+                stage.finished_at = now
+        for step in stage.steps:
+            if step.status in _ACTIVE:
+                step.status = "cancelled"
+                if step.finished_at is None:
+                    step.finished_at = now
 
 
 async def _execute_step(
