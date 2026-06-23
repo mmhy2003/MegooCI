@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_permission
+from app.core.access import accessible_project_ids, ALL_PROJECTS, project_id_for_pipeline
+from app.core.deps import check_scoped_permission, get_current_active_user, require_permission
 from app.database import get_db
 from app.models.pipeline import Pipeline
 from app.models.project import Project
@@ -30,14 +31,19 @@ async def list_pipelines(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("pipelines.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> list[Pipeline]:
+    pids = accessible_project_ids(_current_user, "pipelines.read")
+    if pids is not ALL_PROJECTS and not pids:
+        return []
+    if project_id is not None and pids is not ALL_PROJECTS and project_id not in pids:
+        return []
     query = select(Pipeline).order_by(Pipeline.created_at.desc())
     if project_id is not None:
         query = query.where(Pipeline.project_id == project_id)
-    query = query.offset(skip).limit(limit)
-
-    result = await db.execute(query)
+    elif pids is not ALL_PROJECTS:
+        query = query.where(Pipeline.project_id.in_(pids))
+    result = await db.execute(query.offset(skip).limit(limit))
     return list(result.scalars().all())
 
 
@@ -45,13 +51,14 @@ async def list_pipelines(
 async def create_pipeline(
     body: PipelineCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("pipelines.manage")),
+    current_user: User = Depends(get_current_active_user),
 ) -> Pipeline:
     project = await db.get(Project, body.project_id)
     if project is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
         )
+    check_scoped_permission(current_user, "pipelines.manage", "project", body.project_id)
 
     # If the pipeline is linked to a ProjectRepository, validate the link
     # belongs to the same project and inherit repo_url + branch when the
@@ -117,13 +124,14 @@ async def validate_pipeline_yaml(
 async def get_pipeline(
     pipeline_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("pipelines.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> Pipeline:
     pipeline = await db.get(Pipeline, pipeline_id)
     if pipeline is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found"
         )
+    check_scoped_permission(_current_user, "pipelines.read", "project", pipeline.project_id)
     return pipeline
 
 
@@ -132,13 +140,14 @@ async def update_pipeline(
     pipeline_id: uuid.UUID,
     body: PipelineUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("pipelines.manage")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> Pipeline:
     pipeline = await db.get(Pipeline, pipeline_id)
     if pipeline is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found"
         )
+    check_scoped_permission(_current_user, "pipelines.manage", "project", pipeline.project_id)
 
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -165,7 +174,7 @@ async def delete_pipeline(
         ),
     ),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("pipelines.manage")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> None:
     """Delete a pipeline.
 
@@ -182,6 +191,7 @@ async def delete_pipeline(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found"
         )
+    check_scoped_permission(_current_user, "pipelines.manage", "project", pipeline.project_id)
 
     build_count = await db.scalar(
         select(func.count()).select_from(Build).where(Build.pipeline_id == pipeline_id)

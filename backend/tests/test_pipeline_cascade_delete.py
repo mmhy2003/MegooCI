@@ -255,7 +255,8 @@ async def test_notify_agents_of_cancel_falls_back_to_reserved_agent(
 
 
 async def _make_user_stub():
-    return types.SimpleNamespace(id=uuid.uuid4())
+    from tests._rbac import make_user
+    return make_user(is_admin=True)
 
 
 async def test_delete_missing_pipeline_404(session_factory):
