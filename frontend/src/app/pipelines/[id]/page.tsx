@@ -127,6 +127,10 @@ export default function PipelineDetailPage() {
   }
 
   async function handleDelete() {
+    // First attempt: plain delete. The backend returns 409 with a human-
+    // readable detail listing the builds/triggers/webhooks in the way. We
+    // catch that, surface the detail, and offer a cascade ("Delete everything")
+    // path that retries with ?force=true. Mirrors the project delete flow.
     const ok = await confirm({
       title: "Delete this pipeline?",
       description: (
@@ -134,8 +138,7 @@ export default function PipelineDetailPage() {
           <span className="font-medium text-foreground">
             {pipeline?.name ?? "This pipeline"}
           </span>{" "}
-          and all of its build history will be permanently removed. This action
-          cannot be undone.
+          will be removed. This action cannot be undone.
         </>
       ),
       confirmText: "Delete pipeline",
@@ -143,12 +146,59 @@ export default function PipelineDetailPage() {
       tone: "destructive",
     });
     if (!ok) return;
+
     try {
       await pipelinesApi.delete(id);
       toast.success("Pipeline deleted");
       router.push("/pipelines");
-    } catch {
-      toast.error("Failed to delete pipeline");
+      return;
+    } catch (err: unknown) {
+      const body = (err as { body?: { detail?: string } } | undefined)?.body;
+      const detail = body?.detail;
+
+      const isDependentsConflict =
+        typeof detail === "string" &&
+        detail.toLowerCase().includes("cannot delete pipeline");
+
+      if (!isDependentsConflict) {
+        toast.error(
+          detail ||
+            (err instanceof Error ? err.message : "Failed to delete pipeline"),
+        );
+        return;
+      }
+
+      const forceOk = await confirm({
+        title: "Delete pipeline and all its builds?",
+        description: (
+          <>
+            <p>{detail}</p>
+            <p className="mt-2 text-sm">
+              Proceeding will permanently remove{" "}
+              <span className="font-medium text-foreground">
+                all builds, logs, artifacts, triggers, and webhook endpoints
+              </span>{" "}
+              for this pipeline, then delete the pipeline itself.
+            </p>
+          </>
+        ),
+        confirmText: "Delete everything",
+        cancelText: "Cancel",
+        tone: "destructive",
+      });
+      if (!forceOk) return;
+
+      try {
+        await pipelinesApi.delete(id, { force: true });
+        toast.success("Pipeline and its builds deleted");
+        router.push("/pipelines");
+      } catch (err2: unknown) {
+        const body2 = (err2 as { body?: { detail?: string } } | undefined)?.body;
+        toast.error(
+          body2?.detail ||
+            (err2 instanceof Error ? err2.message : "Failed to delete pipeline"),
+        );
+      }
     }
   }
 

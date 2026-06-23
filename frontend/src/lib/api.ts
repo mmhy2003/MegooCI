@@ -433,8 +433,11 @@ export const pipelinesApi = {
       body: JSON.stringify(data),
     }),
 
-  delete: (id: string) =>
-    fetchApi<void>(`/api/v1/pipelines/${id}`, { method: "DELETE" }),
+  delete: (id: string, opts?: { force?: boolean }) =>
+    fetchApi<void>(
+      `/api/v1/pipelines/${id}${opts?.force ? "?force=true" : ""}`,
+      { method: "DELETE" },
+    ),
 
   validate: (yaml_content: string) =>
     fetchApi<PipelineValidationResult>(`/api/v1/pipelines/validate`, {
