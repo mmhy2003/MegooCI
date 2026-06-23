@@ -484,6 +484,44 @@ async def signal_cancel_step(agent_id: uuid.UUID, step_id: uuid.UUID) -> None:
         await redis_client.aclose()
 
 
+# How long the per-build cancel flag lives in Redis. Longer than the longest
+# server-side gate (wait_input defaults to 86400s) so it never expires while a
+# build is still parked on a gate, but bounded so it self-cleans afterwards.
+_CANCEL_FLAG_TTL_SECONDS = 90000
+
+
+def build_cancel_flag_key(build_id: uuid.UUID | str) -> str:
+    """Redis key set when a build has been cancelled. Long-lived server-side
+    gate loops poll this so they can bail without holding a DB transaction
+    open for the gate's whole (up-to-24h) lifetime."""
+    return f"build:{build_id}:cancel"
+
+
+async def set_build_cancel_flag(redis_client, build_id: uuid.UUID) -> None:
+    """Mark a build cancelled for fast fan-out to gate loops."""
+    await redis_client.set(
+        build_cancel_flag_key(build_id), "1", ex=_CANCEL_FLAG_TTL_SECONDS
+    )
+
+
+async def build_cancel_requested(redis_client, build_id: uuid.UUID) -> bool:
+    """True if a cancel has been signalled for *build_id*."""
+    return await redis_client.get(build_cancel_flag_key(build_id)) is not None
+
+
+async def signal_build_cancel(
+    db: AsyncSession, build_id: uuid.UUID, redis_client
+) -> None:
+    """Fan out a build cancellation: set the Redis cancel flag (so gate loops
+    bail) and push cancel frames to any agent running this build's steps.
+
+    *redis_client* is passed in so this stays usable from both the API process
+    and a Celery worker without importing a loop-bound global.
+    """
+    await set_build_cancel_flag(redis_client, build_id)
+    await notify_agents_of_cancel(db, build_id)
+
+
 async def notify_agents_of_cancel(db: AsyncSession, build_id: uuid.UUID) -> None:
     """Publish cancel frames for every running step of ``build_id`` that has an
     ``agent_id``. Best-effort: per-step errors are swallowed so callers (single
