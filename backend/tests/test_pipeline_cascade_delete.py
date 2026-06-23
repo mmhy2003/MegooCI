@@ -177,7 +177,7 @@ async def test_deleting_build_cascades_notification_deliveries(session_factory):
 
 
 async def test_notify_agents_of_cancel_signals_running_steps(session_factory, monkeypatch):
-    """Only running steps that have an agent_id get a cancel signal."""
+    """A running step with an agent_id is signalled via that agent_id; the reserved-agent fallback is covered separately."""
     from app.models.build import Stage, Step
     from app.services import agent_dispatcher
 

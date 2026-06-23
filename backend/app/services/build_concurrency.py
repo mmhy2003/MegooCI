@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -60,14 +60,30 @@ def dispatchable_pending_builds_stmt(limit: int = 20):
 async def try_start_build(db: AsyncSession, build: Build) -> bool:
     """Atomically flip ``build`` from pending to running, respecting the
     one-running-per-pipeline index. Returns True if it became running, False if
-    the pipeline already has a running build (build is left ``pending``)."""
-    build.status = "running"
-    build.started_at = datetime.now(timezone.utc)
+    the pipeline already has a running build OR the build is no longer pending
+    (e.g. it was cancelled in the gap before start). The conditional UPDATE
+    (``WHERE status='pending'``) closes the resurrection window where a build
+    cancelled while pending could be flipped back to running."""
+    started = datetime.now(timezone.utc)
+    stmt = (
+        update(Build)
+        .where(Build.id == build.id, Build.status == "pending")
+        .values(status="running", started_at=started)
+    )
     try:
+        result = await db.execute(stmt)
+        if result.rowcount == 0:
+            # No longer pending (cancelled / already started / gone).
+            await db.rollback()
+            return False
         await db.commit()
     except IntegrityError:
         await db.rollback()
         return False
+    # Core UPDATE bypasses the ORM, so sync the in-memory instance (callers and
+    # tests read build.status / build.started_at right after this returns).
+    build.status = "running"
+    build.started_at = started
     return True
 
 

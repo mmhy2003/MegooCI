@@ -6,7 +6,6 @@ shims as the other dispatcher/executor tests.
 import os
 import uuid
 
-import pytest
 import pytest_asyncio
 from sqlalchemy.dialects.postgresql import ARRAY, JSON as PG_JSON, JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -38,9 +37,11 @@ class FakeAsyncRedis:
     """Minimal dict-backed stand-in for redis.asyncio used in cancel tests."""
     def __init__(self, store=None):
         self.store = dict(store or {})
+        self.ttls = {}
 
     async def set(self, key, value, ex=None):
         self.store[key] = value
+        self.ttls[key] = ex
 
     async def get(self, key):
         return self.store.get(key)
@@ -84,6 +85,9 @@ async def test_set_and_read_cancel_flag():
     await set_build_cancel_flag(redis, bid)
     assert redis.store[build_cancel_flag_key(bid)] == "1"
     assert await build_cancel_requested(redis, bid) is True
+    recorded_ttl = redis.ttls[build_cancel_flag_key(bid)]
+    assert recorded_ttl == 90000, f"cancel flag TTL must be 90000s, got {recorded_ttl}"
+    assert recorded_ttl > 86400, "TTL must exceed the wait_input default (86400s)"
 
 
 async def test_signal_build_cancel_sets_flag_and_notifies(session_factory, monkeypatch):
@@ -170,6 +174,7 @@ async def test_executor_stops_advancing_on_cancel(session_factory, monkeypatch):
         stages = (await db.execute(select(Stage).where(Stage.build_id == bid))).scalars().all()
         assert stages[0].status == "cancelled", "stage must not be stamped success on cancel"
         steps = (await db.execute(select(Step).order_by(Step.sort_order))).scalars().all()
+        assert steps[0].status == "success", "completed step must not be retroactively cancelled"
         assert steps[1].status == "cancelled", "un-run step should be flipped to cancelled"
 
 
@@ -285,3 +290,38 @@ async def test_wait_input_bails_on_cancel_flag(monkeypatch):
         _make_ctx(bid), None,
     )
     assert result is not None and result.status == "cancelled"
+
+
+async def test_executor_does_not_resurrect_build_cancelled_while_pending(
+    session_factory, monkeypatch
+):
+    """A build cancelled while still pending (before _run_build_stages starts it)
+    must NOT be flipped to running and run — try_start_build's conditional
+    transition closes that window."""
+    from app.models.build import Build
+    from app.services.build_executor import _run_build_stages
+    from app.services.step_actions.base import StepResult
+
+    bid = await _seed_build(session_factory, n_stages=1, steps_per_stage=1)
+    calls = {"n": 0}
+
+    async def fake_step(*, step, build, **kw):
+        calls["n"] += 1
+        return StepResult(exit_code=0, status="success")
+
+    _patch_executor(monkeypatch, fake_step)
+
+    # Cancel lands BEFORE the executor starts the build.
+    async with session_factory() as db:
+        b = await db.get(Build, bid)
+        b.status = "cancelled"
+        await db.commit()
+
+    await _run_build_stages(
+        build_id=bid, claimed_agent_id=uuid.uuid4(),
+        session_factory=session_factory, redis_client=FakeAsyncRedis(), channel="x",
+    )
+
+    assert calls["n"] == 0, "no step may run for a build cancelled while pending"
+    async with session_factory() as db:
+        assert (await db.get(Build, bid)).status == "cancelled", "cancel must not be overwritten"
