@@ -302,18 +302,18 @@ async def dispatch_pending_builds(
             return
 
         # Scan the queue head; bounded so this stays cheap even with a
-        # large backlog.
-        result = await db.execute(
-            select(Build)
-            .where(Build.status == "pending")
-            .order_by(Build.created_at.asc())
-            .limit(20)
-        )
+        # large backlog. Only include builds whose pipeline has no running
+        # build so we never pre-claim agents for builds that can't start.
+        from app.services.build_concurrency import dispatchable_pending_builds_stmt
+        result = await db.execute(dispatchable_pending_builds_stmt())
         pending_builds = list(result.scalars())
         if not pending_builds:
             return
 
+        dispatched_pipelines: set[uuid.UUID] = set()
         for pending in pending_builds:
+            if pending.pipeline_id in dispatched_pipelines:
+                continue  # already dispatched one build for this pipeline this pass
             agent = await pick_online_agent(db, requirements=pending.runs_on)
             if agent is None:
                 # No more free agents — stop trying further builds.
@@ -328,6 +328,7 @@ async def dispatch_pending_builds(
                 # (pick_online_agent will skip this agent now).
                 continue
 
+            dispatched_pipelines.add(pending.pipeline_id)
             logger.info(
                 "Dispatching pending build %s to pre-claimed agent %s",
                 pending.id, agent.name,
@@ -366,6 +367,10 @@ async def dispatch_single_build(build_id: uuid.UUID) -> bool:
         )
         build = result.scalar_one_or_none()
         if build is None or build.status != "pending":
+            return False
+
+        from app.services.build_concurrency import pipeline_has_running_build
+        if await pipeline_has_running_build(db, build.pipeline_id, exclude_build_id=build.id):
             return False
 
         agent = await pick_online_agent(db, requirements=build.runs_on)

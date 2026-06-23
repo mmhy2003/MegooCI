@@ -20,12 +20,12 @@ import asyncio
 import uuid
 from typing import Any, AsyncIterator
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.models.build import Build, Stage, Step
+from app.models.build import Stage, Step
 from app.models.pipeline import Pipeline
+from app.services.build_concurrency import create_or_coalesce_build
 from app.services.pipeline_compiler import (
     compile_to_build_graph,
     parse_yaml_pipeline,
@@ -86,26 +86,18 @@ class TriggerPipelineHandler(StepActionHandler):
             yield StepResult(exit_code=1, status="failed", error=f"Pipeline '{target.name}' is disabled")
             return
 
-        max_number = await db.scalar(
-            select(func.coalesce(func.max(Build.number), 0)).where(
-                Build.pipeline_id == target.id
-            )
-        )
-        next_number = (max_number or 0) + 1
-
-        child_build = Build(
+        child_build, created = await create_or_coalesce_build(
+            db,
             pipeline_id=target.id,
-            number=next_number,
-            branch=branch or target.default_branch,
-            status="pending",
+            default_branch=target.default_branch,
+            branch=branch,
+            commit_sha=None,
+            params=params if params else None,
             triggered_by=None,
             trigger_type="pipeline",
-            params_json=params if params else None,
         )
-        db.add(child_build)
-        await db.flush()
 
-        if target.yaml_content:
+        if created and target.yaml_content:
             validation_errors = validate_pipeline_definition(target.yaml_content)
             if validation_errors:
                 from app.services.build_validation import (
@@ -113,9 +105,7 @@ class TriggerPipelineHandler(StepActionHandler):
                     record_pipeline_validation_failure,
                 )
 
-                await record_pipeline_validation_failure(
-                    db, child_build, validation_errors
-                )
+                await record_pipeline_validation_failure(db, child_build, validation_errors)
                 await db.commit()
                 detail = format_validation_errors(validation_errors)
                 yield LogLine(
@@ -150,7 +140,7 @@ class TriggerPipelineHandler(StepActionHandler):
                     step_config = step_def.get("config", {})
                     command = step_config.get("command") if step_type == "run" else None
 
-                    step = Step(
+                    db.add(Step(
                         stage_id=stage.id,
                         name=step_def.get("name", f"step-{step_order}"),
                         step_type=step_type,
@@ -158,10 +148,10 @@ class TriggerPipelineHandler(StepActionHandler):
                         config_json=step_config if step_config else None,
                         status="pending",
                         sort_order=step_order,
-                    )
-                    db.add(step)
+                    ))
 
-        await db.commit()
+        if created:
+            await db.commit()
         await db.refresh(child_build)
 
         yield LogLine(
@@ -169,7 +159,8 @@ class TriggerPipelineHandler(StepActionHandler):
             content=f"Triggered pipeline '{target.name}' — build #{child_build.number} ({child_build.id})\n",
         )
 
-        run_build.delay(str(child_build.id))
+        if created:
+            run_build.delay(str(child_build.id))
 
         if not wait:
             yield StepResult(

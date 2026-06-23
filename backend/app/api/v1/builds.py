@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,6 +11,7 @@ from app.models.build import Build, Stage
 from app.models.pipeline import Pipeline
 from app.models.user import User
 from app.schemas.build import BuildDetailResponse, BuildResponse, BuildTriggerRequest
+from app.services.build_concurrency import create_or_coalesce_build
 from app.services.pipeline_compiler import (
     compile_to_build_graph,
     normalize_runs_on,
@@ -70,69 +71,51 @@ async def trigger_build(
                 },
             )
 
-    max_number = await db.scalar(
-        select(func.coalesce(func.max(Build.number), 0)).where(
-            Build.pipeline_id == pipeline_id
-        )
-    )
-    next_number = (max_number or 0) + 1
-
-    build = Build(
+    build, created = await create_or_coalesce_build(
+        db,
         pipeline_id=pipeline_id,
-        number=next_number,
-        branch=body.branch or pipeline.default_branch,
+        default_branch=pipeline.default_branch,
+        branch=body.branch,
         commit_sha=body.commit_sha,
-        status="pending",
+        params=body.params,
         triggered_by=current_user.id,
         trigger_type="manual",
-        params_json=body.params,
     )
-    db.add(build)
-    await db.flush()
 
-    if pipeline.yaml_content:
-        pipeline_def = parse_yaml_pipeline(pipeline.yaml_content)
-        build.runs_on = normalize_runs_on(pipeline_def.get("runs_on"))
-        stage_defs = compile_to_build_graph(pipeline_def)
-
-        for sort_order, stage_def in enumerate(stage_defs):
-            from app.models.build import Stage, Step
-
-            stage = Stage(
-                build_id=build.id,
-                name=stage_def["name"],
-                status="pending",
-                sort_order=sort_order,
-                artifact_paths=stage_def.get("artifacts"),
-            )
-            db.add(stage)
-            await db.flush()
-
-            for step_order, step_def in enumerate(stage_def.get("steps", [])):
-                step_type = step_def.get("step_type", "run")
-                config = step_def.get("config", {})
-                command = config.get("command") if step_type == "run" else None
-
-                step = Step(
-                    stage_id=stage.id,
-                    name=step_def.get("name", f"step-{step_order}"),
-                    step_type=step_type,
-                    command=command,
-                    config_json=config if config else None,
-                    status="pending",
-                    sort_order=step_order,
+    if created:
+        if pipeline.yaml_content:
+            pipeline_def = parse_yaml_pipeline(pipeline.yaml_content)
+            build.runs_on = normalize_runs_on(pipeline_def.get("runs_on"))
+            stage_defs = compile_to_build_graph(pipeline_def)
+            for sort_order, stage_def in enumerate(stage_defs):
+                from app.models.build import Step
+                stage = Stage(
+                    build_id=build.id, name=stage_def["name"], status="pending",
+                    sort_order=sort_order, artifact_paths=stage_def.get("artifacts"),
                 )
-                db.add(step)
+                db.add(stage)
+                await db.flush()
+                for step_order, step_def in enumerate(stage_def.get("steps", [])):
+                    step_type = step_def.get("step_type", "run")
+                    config = step_def.get("config", {})
+                    command = config.get("command") if step_type == "run" else None
+                    db.add(Step(
+                        stage_id=stage.id, name=step_def.get("name", f"step-{step_order}"),
+                        step_type=step_type, command=command,
+                        config_json=config if config else None,
+                        status="pending", sort_order=step_order,
+                    ))
+        await db.commit()
 
-    await db.commit()
     await db.refresh(build)
 
     from app.services.search import index_build
     await index_build(build)
 
-    run_build.delay(str(build.id))
+    if created:
+        run_build.delay(str(build.id))
 
-    # Best-effort: publish to the global builds:updates channel.
+    # Best-effort publish to the global builds:updates channel (unchanged).
     from app.config import get_settings
     import redis.asyncio as aioredis
     from app.services.in_app_notifications import publish_build_update
@@ -260,81 +243,57 @@ async def retry_build(
             detail="Cannot re-run a build that is currently running",
         )
 
-    max_number = await db.scalar(
-        select(func.coalesce(func.max(Build.number), 0)).where(
-            Build.pipeline_id == original_build.pipeline_id
-        )
-    )
-
-    from app.models.build import Step
-
-    new_build = Build(
+    build, created = await create_or_coalesce_build(
+        db,
         pipeline_id=original_build.pipeline_id,
-        number=(max_number or 0) + 1,
+        default_branch=original_build.branch or "main",
         branch=original_build.branch,
         commit_sha=original_build.commit_sha,
-        status="pending",
+        params=original_build.params_json,
         triggered_by=current_user.id,
         trigger_type="retry",
-        params_json=original_build.params_json,
-        # Preserve the original's frozen agent-routing constraint. The retry
-        # re-runs the original's copied stage/step graph (not a fresh compile
-        # of the current YAML), so its runs_on snapshot must travel with it —
-        # otherwise the rerun has runs_on=NULL and is dispatched to any online
-        # agent, ignoring the pipeline's os/arch/labels requirement.
-        runs_on=original_build.runs_on,
     )
-    db.add(new_build)
-    await db.flush()
 
-    for stage in original_build.stages:
-        new_stage = Stage(
-            build_id=new_build.id,
-            name=stage.name,
-            status="pending",
-            sort_order=stage.sort_order,
-            # Carry the stage's artifact globs so the rerun collects the same
-            # artifacts; without this the copied stage has artifact_paths=NULL
-            # and build_executor never tells the agent to collect anything.
-            artifact_paths=stage.artifact_paths,
-        )
-        db.add(new_stage)
-        await db.flush()
-
-        for step in stage.steps:
-            new_step = Step(
-                stage_id=new_stage.id,
-                name=step.name,
-                step_type=step.step_type,
-                command=step.command,
-                config_json=step.config_json,
-                status="pending",
-                sort_order=step.sort_order,
+    # Coalesced retry: absorbed into the pipeline's existing queued run (latest wins). The original build's frozen stages and runs_on are intentionally not carried over — the queued run keeps its own. (See spec: "a retry can be absorbed into the queued run".)
+    if created:
+        build.runs_on = original_build.runs_on
+        from app.models.build import Step
+        for stage in original_build.stages:
+            new_stage = Stage(
+                build_id=build.id, name=stage.name, status="pending",
+                sort_order=stage.sort_order, artifact_paths=stage.artifact_paths,
             )
-            db.add(new_step)
+            db.add(new_stage)
+            await db.flush()
+            for step in stage.steps:
+                db.add(Step(
+                    stage_id=new_stage.id, name=step.name, step_type=step.step_type,
+                    command=step.command, config_json=step.config_json,
+                    status="pending", sort_order=step.sort_order,
+                ))
+        await db.commit()
 
-    await db.commit()
-    await db.refresh(new_build)
+    await db.refresh(build)
 
     from app.services.search import index_build
-    await index_build(new_build)
+    await index_build(build)
 
-    run_build.delay(str(new_build.id))
+    if created:
+        run_build.delay(str(build.id))
 
-    # Best-effort: publish new build to the global builds:updates channel.
     from app.config import get_settings
     import redis.asyncio as aioredis
     from app.services.in_app_notifications import publish_build_update
     settings = get_settings()
     _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
     try:
-        await publish_build_update(_redis, new_build)
+        await publish_build_update(_redis, build)
     except Exception:
         pass
     finally:
         await _redis.aclose()
 
-    return new_build
+    return build
 
 
 @router.post("/{build_id}/dispatch", response_model=BuildResponse)
