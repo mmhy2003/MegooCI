@@ -69,6 +69,38 @@ def make_user(*, is_admin: bool = False, global_role=None, project_roles=()):
     return user
 
 
+async def seed_user(db) -> uuid.UUID:
+    """Insert a minimal User row and return its id."""
+    from app.models.user import User
+    u = User(id=uuid.uuid4(), email=f"{uuid.uuid4().hex}@e.com", name="U", is_active=True)
+    db.add(u)
+    await db.flush()
+    return u.id
+
+
+async def seed_role(db, name=None, permissions=None) -> uuid.UUID:
+    """Insert a Role row with an empty permissions list and return its id.
+
+    Role.permissions is a PostgreSQL ARRAY that maps to JSON in SQLite.
+    We bypass the ORM binding by inserting via raw SQL so the permissions list
+    is serialised as a JSON string rather than a Python list object.
+    """
+    import json
+    from sqlalchemy import text
+    role_id = uuid.uuid4()
+    role_name = name or f"r-{uuid.uuid4().hex[:8]}"
+    perms_json = json.dumps(permissions or [])
+    await db.execute(
+        text(
+            "INSERT INTO roles (id, name, permissions, is_system)"
+            " VALUES (:id, :name, :permissions, 0)"
+        ),
+        {"id": role_id.hex, "name": role_name, "permissions": perms_json},
+    )
+    await db.flush()
+    return role_id
+
+
 async def seed_project(db, name="P", created_by=None) -> uuid.UUID:
     from app.models.project import Project
     from app.models.user import User

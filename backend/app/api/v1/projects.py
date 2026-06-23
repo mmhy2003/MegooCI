@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import check_scoped_permission, require_permission
+from app.core.access import ALL_PROJECTS, accessible_project_ids
+from app.core.deps import check_scoped_permission, get_current_active_user, require_permission
 from app.database import get_db
 from app.models.git_integration import ProjectRepository, WebhookDelivery
 from app.models.pipeline import Pipeline
@@ -29,11 +30,15 @@ async def list_projects(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("projects.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> list[Project]:
-    result = await db.execute(
-        select(Project).order_by(Project.created_at.desc()).offset(skip).limit(limit)
-    )
+    pids = accessible_project_ids(_current_user, "projects.read")
+    if pids is not ALL_PROJECTS and not pids:
+        return []
+    query = select(Project).order_by(Project.created_at.desc())
+    if pids is not ALL_PROJECTS:
+        query = query.where(Project.id.in_(pids))
+    result = await db.execute(query.offset(skip).limit(limit))
     return list(result.scalars().all())
 
 
@@ -81,7 +86,7 @@ async def create_project(
 async def get_project(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("projects.read")),
+    current_user: User = Depends(get_current_active_user),
 ) -> Project:
     project = await db.get(Project, project_id)
     if project is None:
@@ -97,7 +102,7 @@ async def update_project(
     project_id: uuid.UUID,
     body: ProjectUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("projects.manage")),
+    current_user: User = Depends(get_current_active_user),
 ) -> Project:
     check_scoped_permission(current_user, "projects.manage", "project", project_id)
     project = await db.get(Project, project_id)
@@ -143,7 +148,7 @@ async def delete_project(
         ),
     ),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("projects.manage")),
+    current_user: User = Depends(get_current_active_user),
 ) -> None:
     """Delete a project.
 
@@ -337,6 +342,12 @@ async def delete_project(
                 )
             )
 
+    from app.models.role import UserRole
+    await db.execute(
+        sa_delete(UserRole).where(
+            UserRole.scope_type == "project", UserRole.scope_id == project_id
+        )
+    )
     await db.delete(project)
     await db.commit()
 
