@@ -64,6 +64,16 @@ def _patch_side_effects(monkeypatch):
     stub_notif.publish_build_update = _noop
     monkeypatch.setitem(sys.modules, "app.services.in_app_notifications", stub_notif)
 
+    # These tests exercise coalesce logic, not RBAC.
+    # Bypass the project-scoped access check so the SimpleNamespace user stub works.
+    import uuid as _uuid
+
+    async def _dummy_project_id_for_pipeline(db, pipeline_id):
+        return _uuid.uuid4()
+
+    monkeypatch.setattr("app.api.v1.builds.project_id_for_pipeline", _dummy_project_id_for_pipeline)
+    monkeypatch.setattr("app.api.v1.builds.check_scoped_permission", lambda *a, **k: None)
+
 
 async def _seed_pipeline(sf, yaml_content=None):
     from app.models.pipeline import Pipeline

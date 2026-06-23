@@ -107,6 +107,14 @@ def _patch_side_effects(monkeypatch):
     stub_notif.publish_build_update = _noop_async
     monkeypatch.setitem(sys.modules, "app.services.in_app_notifications", stub_notif)
 
+    # These tests exercise business logic (runs_on/artifact propagation), not RBAC.
+    # Bypass the project-scoped access check so the SimpleNamespace user stub works.
+    async def _dummy_project_id(db, build_id):
+        return uuid.uuid4()
+
+    monkeypatch.setattr("app.api.v1.builds.project_id_for_build", _dummy_project_id)
+    monkeypatch.setattr("app.api.v1.builds.check_scoped_permission", lambda *a, **k: None)
+
 
 async def _seed_original(sf, *, runs_on=None, stage_artifacts=None):
     from app.models.build import Build, Stage, Step

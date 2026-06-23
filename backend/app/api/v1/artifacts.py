@@ -15,7 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import require_permission
+from app.core.access import ALL_PROJECTS, accessible_project_ids, project_id_for_build
+from app.core.deps import check_scoped_permission, get_current_active_user, require_permission
 from app.database import get_db
 from app.models.artifact import Artifact
 from app.models.build import Build
@@ -35,10 +36,13 @@ async def list_all_artifacts(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("artifacts.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> list[ArtifactListItem]:
     """Return all artifacts across all builds, newest first."""
-    result = await db.execute(
+    pids = accessible_project_ids(_current_user, "artifacts.read")
+    if pids is not ALL_PROJECTS and not pids:
+        return []
+    query = (
         select(
             Artifact.id,
             Artifact.build_id,
@@ -60,6 +64,9 @@ async def list_all_artifacts(
         .offset(skip)
         .limit(limit)
     )
+    if pids is not ALL_PROJECTS:
+        query = query.where(Project.id.in_(pids))
+    result = await db.execute(query)
     rows = result.all()
     return [
         ArtifactListItem(
@@ -90,8 +97,15 @@ async def list_all_artifacts(
 async def list_artifacts(
     build_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("artifacts.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> list[Artifact]:
+    project_id = await project_id_for_build(db, build_id)
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
+        )
+    check_scoped_permission(_current_user, "artifacts.read", "project", project_id)
+
     build = await db.get(Build, build_id)
     if build is None:
         raise HTTPException(
@@ -117,8 +131,15 @@ async def upload_artifact(
     build_id: uuid.UUID,
     file: UploadFile,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("artifacts.manage")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> Artifact:
+    project_id = await project_id_for_build(db, build_id)
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
+        )
+    check_scoped_permission(_current_user, "artifacts.manage", "project", project_id)
+
     settings = get_settings()
     build = await db.get(Build, build_id)
     if build is None:
@@ -193,7 +214,7 @@ async def get_signed_url(
     artifact_id: uuid.UUID,
     ttl: int = Query(300, ge=30, le=3600),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("artifacts.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> dict:
     """Generate a short-lived, HMAC-signed download URL for an artifact."""
     artifact = await db.get(Artifact, artifact_id)
@@ -201,6 +222,12 @@ async def get_signed_url(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found"
         )
+    project_id = await project_id_for_build(db, artifact.build_id)
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found"
+        )
+    check_scoped_permission(_current_user, "artifacts.read", "project", project_id)
 
     settings = get_settings()
     from app.core.security import generate_signed_artifact_url
@@ -288,13 +315,19 @@ async def download_artifact(
 async def delete_artifact(
     artifact_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("artifacts.manage")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> None:
     artifact = await db.get(Artifact, artifact_id)
     if artifact is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found"
         )
+    project_id = await project_id_for_build(db, artifact.build_id)
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found"
+        )
+    check_scoped_permission(_current_user, "artifacts.manage", "project", project_id)
 
     # Remove file from disk (ignore if already gone).
     path = Path(artifact.storage_path)

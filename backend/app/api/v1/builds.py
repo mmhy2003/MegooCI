@@ -5,7 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.deps import require_permission
+from app.core.access import ALL_PROJECTS, accessible_project_ids, project_id_for_build, project_id_for_pipeline
+from app.core.deps import check_scoped_permission, get_current_active_user, require_permission
 from app.database import get_db
 from app.models.build import Build, Stage
 from app.models.pipeline import Pipeline
@@ -29,14 +30,24 @@ async def list_builds(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("builds.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> list[Build]:
+    pids = accessible_project_ids(_current_user, "builds.read")
+    if pids is not ALL_PROJECTS and not pids:
+        return []
     query = select(Build).order_by(Build.created_at.desc())
+    if pids is not ALL_PROJECTS:
+        query = query.join(Pipeline, Build.pipeline_id == Pipeline.id).where(
+            Pipeline.project_id.in_(pids)
+        )
     if pipeline_id is not None:
+        # If filtering to one pipeline, ensure it's in an accessible project.
+        if pids is not ALL_PROJECTS:
+            proj = await db.scalar(select(Pipeline.project_id).where(Pipeline.id == pipeline_id))
+            if proj is None or proj not in pids:
+                return []
         query = query.where(Build.pipeline_id == pipeline_id)
-    query = query.offset(skip).limit(limit)
-
-    result = await db.execute(query)
+    result = await db.execute(query.offset(skip).limit(limit))
     return list(result.scalars().all())
 
 
@@ -45,8 +56,15 @@ async def trigger_build(
     pipeline_id: uuid.UUID,
     body: BuildTriggerRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("builds.manage")),
+    current_user: User = Depends(get_current_active_user),
 ) -> Build:
+    project_id = await project_id_for_pipeline(db, pipeline_id)
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found"
+        )
+    check_scoped_permission(current_user, "builds.manage", "project", project_id)
+
     pipeline = await db.get(Pipeline, pipeline_id)
     if pipeline is None:
         raise HTTPException(
@@ -135,8 +153,15 @@ async def trigger_build(
 async def get_build(
     build_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("builds.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> Build:
+    project_id = await project_id_for_build(db, build_id)
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
+        )
+    check_scoped_permission(_current_user, "builds.read", "project", project_id)
+
     result = await db.execute(
         select(Build)
         .where(Build.id == build_id)
@@ -154,8 +179,15 @@ async def get_build(
 async def cancel_build(
     build_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("builds.manage")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> Build:
+    project_id = await project_id_for_build(db, build_id)
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
+        )
+    check_scoped_permission(_current_user, "builds.manage", "project", project_id)
+
     build = await db.get(Build, build_id)
     if build is None:
         raise HTTPException(
@@ -202,8 +234,15 @@ async def cancel_build(
 async def retry_build(
     build_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("builds.manage")),
+    current_user: User = Depends(get_current_active_user),
 ) -> Build:
+    project_id = await project_id_for_build(db, build_id)
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
+        )
+    check_scoped_permission(current_user, "builds.manage", "project", project_id)
+
     original = await db.execute(
         select(Build)
         .where(Build.id == build_id)
@@ -278,7 +317,7 @@ async def retry_build(
 async def dispatch_build(
     build_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("builds.manage")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> Build:
     """Manually dispatch a pending build to a free agent.
 
@@ -286,6 +325,13 @@ async def dispatch_build(
     agent is available. The endpoint pre-claims an agent and enqueues the
     build for execution.
     """
+    project_id = await project_id_for_build(db, build_id)
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
+        )
+    check_scoped_permission(_current_user, "builds.manage", "project", project_id)
+
     build = await db.get(Build, build_id)
     if build is None:
         raise HTTPException(
@@ -330,7 +376,7 @@ async def dispatch_build(
 async def get_build_logs(
     build_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("builds.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> list[dict]:
     """Return persisted log lines for a completed build.
 
@@ -338,6 +384,13 @@ async def get_build_logs(
     stage sort_order, step sort_order, then chunk seq.
     """
     from app.models.build import LogChunk, Step
+
+    project_id = await project_id_for_build(db, build_id)
+    if project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Build not found"
+        )
+    check_scoped_permission(_current_user, "builds.read", "project", project_id)
 
     build = await db.get(Build, build_id)
     if build is None:
