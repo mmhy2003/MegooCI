@@ -231,3 +231,57 @@ async def test_executor_cancelled_step_result_without_real_cancel_continues(
     assert calls["n"] == 2, "second step should still run when build wasn't cancelled"
     async with session_factory() as db:
         assert (await db.get(Build, bid)).status == "success"
+
+
+def _make_ctx(build_id):
+    from app.services.step_actions.base import StepContext
+    return StepContext(
+        build_id=build_id, step_id=uuid.uuid4(), step_name="gate",
+        stage_name="s", pipeline_id=uuid.uuid4(), project_id=uuid.uuid4(),
+        branch="main", commit_sha=None, env={}, secrets={},
+    )
+
+
+async def _drain_handler(handler, config, ctx, db):
+    from app.services.step_actions.base import StepResult
+    last = None
+    async for item in handler.execute(config, ctx, db):
+        if isinstance(item, StepResult):
+            last = item
+    return last
+
+
+async def test_wait_webhook_bails_on_cancel_flag(monkeypatch):
+    import app.services.step_actions.wait as wait_mod
+    from app.services.agent_dispatcher import build_cancel_flag_key
+
+    bid = uuid.uuid4()
+    fake = FakeAsyncRedis({build_cancel_flag_key(bid): "1"})
+    monkeypatch.setattr(wait_mod.aioredis, "from_url", lambda *a, **k: fake)
+
+    result = await _drain_handler(
+        wait_mod.WaitWebhookHandler(), {"timeout": 5, "name": "cb"},
+        _make_ctx(bid), None,
+    )
+    assert result is not None and result.status == "cancelled"
+
+
+async def test_wait_input_bails_on_cancel_flag(monkeypatch):
+    import app.services.step_actions.wait as wait_mod
+    from app.services.agent_dispatcher import build_cancel_flag_key
+
+    async def _noop(*a, **k):
+        return []
+
+    monkeypatch.setattr(wait_mod, "_resolve_approver_user_ids", _noop)
+    monkeypatch.setattr(wait_mod, "notify_users", _noop)
+
+    bid = uuid.uuid4()
+    fake = FakeAsyncRedis({build_cancel_flag_key(bid): "1"})
+    monkeypatch.setattr(wait_mod.aioredis, "from_url", lambda *a, **k: fake)
+
+    result = await _drain_handler(
+        wait_mod.WaitInputHandler(), {"timeout": 5, "prompt": "ok", "allowed_users": []},
+        _make_ctx(bid), None,
+    )
+    assert result is not None and result.status == "cancelled"

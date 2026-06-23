@@ -39,6 +39,7 @@ from app.services.in_app_notifications import (
     get_admin_user_ids,
     notify_users,
 )
+from app.services.agent_dispatcher import build_cancel_requested
 
 from . import register
 from .base import LogLine, StepActionHandler, StepContext, StepResult
@@ -133,6 +134,10 @@ class WaitWebhookHandler(StepActionHandler):
             elapsed = 0.0
             last_log = 0.0
             while elapsed < timeout:
+                if await build_cancel_requested(redis_client, ctx.build_id):
+                    yield LogLine(stream="system", content="Build cancelled.\n")
+                    yield StepResult(exit_code=1, status="cancelled")
+                    return
                 raw = await redis_client.get(key)
                 if raw is not None:
                     try:
@@ -244,6 +249,10 @@ class WaitInputHandler(StepActionHandler):
             elapsed = 0.0
             last_log = 0.0
             while elapsed < timeout:
+                if await build_cancel_requested(redis_client, ctx.build_id):
+                    yield LogLine(stream="system", content="Build cancelled.\n")
+                    yield StepResult(exit_code=1, status="cancelled")
+                    return
                 raw = await redis_client.get(key)
                 if raw is not None:
                     try:
