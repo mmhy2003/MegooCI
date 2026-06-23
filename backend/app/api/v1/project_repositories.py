@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import require_permission
+from app.core.deps import check_scoped_permission, get_current_active_user, require_permission
 from app.core.security import (
     encrypt_webhook_secret,
     generate_webhook_secret,
@@ -94,9 +94,10 @@ def _with_secret_response(
 async def list_repositories(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("projects.read")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> list[ProjectRepository]:
     await _get_project_or_404(db, project_id)
+    check_scoped_permission(_current_user, "projects.read", "project", project_id)
     result = await db.execute(
         select(ProjectRepository)
         .where(ProjectRepository.project_id == project_id)
@@ -114,9 +115,10 @@ async def link_repository(
     project_id: uuid.UUID,
     body: ProjectRepositoryCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("projects.manage")),
+    current_user: User = Depends(get_current_active_user),
 ) -> ProjectRepositoryWithSecretResponse:
     await _get_project_or_404(db, project_id)
+    check_scoped_permission(current_user, "projects.manage", "project", project_id)
     connection = await db.get(GitProviderConnection, body.connection_id)
     if connection is None:
         raise HTTPException(
@@ -151,9 +153,10 @@ async def update_repository(
     repo_id: uuid.UUID,
     body: ProjectRepositoryUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("projects.manage")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> ProjectRepository:
     repo = await _get_repo_or_404(db, project_id, repo_id)
+    check_scoped_permission(_current_user, "projects.manage", "project", project_id)
     if body.default_branch is not None:
         repo.default_branch = body.default_branch
     if body.display_name is not None:
@@ -168,9 +171,10 @@ async def unlink_repository(
     project_id: uuid.UUID,
     repo_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("projects.manage")),
+    _current_user: User = Depends(get_current_active_user),
 ) -> None:
     repo = await _get_repo_or_404(db, project_id, repo_id)
+    check_scoped_permission(_current_user, "projects.manage", "project", project_id)
     # Cascade handles WebhookDelivery rows (models.relationship cascade).
     await db.delete(repo)
     await db.commit()
