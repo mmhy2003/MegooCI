@@ -214,10 +214,9 @@ async def delete_pipeline(
         )
 
     if force and build_count > 0:
-        # Cancel any in-flight build first, committing the cancelled status so
-        # the local executor bails cleanly between steps (it returns early when
-        # build.status != 'pending'), then signal agents running steps to stop.
-        from app.services.agent_dispatcher import notify_agents_of_cancel
+        from app.services.agent_dispatcher import signal_build_cancel
+        from app.config import get_settings
+        import redis.asyncio as aioredis
 
         active_result = await db.execute(
             select(Build).where(
@@ -230,8 +229,13 @@ async def delete_pipeline(
             for build in active_builds:
                 build.status = "cancelled"
             await db.commit()
-            for build in active_builds:
-                await notify_agents_of_cancel(db, build.id)
+            settings = get_settings()
+            _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
+            try:
+                for build in active_builds:
+                    await signal_build_cancel(db, build.id, _redis)
+            finally:
+                await _redis.aclose()
 
     await db.delete(pipeline)
     await db.commit()

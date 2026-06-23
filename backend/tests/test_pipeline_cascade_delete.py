@@ -92,6 +92,11 @@ def _patch_side_effects(monkeypatch):
         _noop_async,
         raising=False,
     )
+    monkeypatch.setattr(
+        "app.services.agent_dispatcher.set_build_cancel_flag",
+        _noop_async,
+        raising=False,
+    )
 
 
 async def _seed(sf, *, build_statuses=("success",), with_delivery=False):

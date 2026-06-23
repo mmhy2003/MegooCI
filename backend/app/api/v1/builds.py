@@ -175,23 +175,23 @@ async def cancel_build(
     from app.services.search import index_build
     await index_build(build)
 
-    # If any step of this build is currently running on an agent, tell that
-    # agent to stop. The local executor watches `build.status` between steps
-    # and bails out on its own, but a step already in-flight on an agent
-    # needs an explicit cancel frame to terminate promptly.
-    from app.services.agent_dispatcher import notify_agents_of_cancel
-    await notify_agents_of_cancel(db, build_id)
-
-    # Best-effort: publish cancellation to the global builds:updates channel.
+    # Stop the running pipeline: raise the cancel flag (server-side gates poll
+    # it) and push cancel frames to any agent running this build's steps. The
+    # executor re-reads build.status at each step/stage boundary and bails.
     from app.config import get_settings
     import redis.asyncio as aioredis
+    from app.services.agent_dispatcher import signal_build_cancel
     from app.services.in_app_notifications import publish_build_update
+
     settings = get_settings()
     _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
     try:
-        await publish_build_update(_redis, build)
-    except Exception:
-        pass
+        await signal_build_cancel(db, build_id, _redis)
+        # Best-effort: publish cancellation to the global builds:updates channel.
+        try:
+            await publish_build_update(_redis, build)
+        except Exception:
+            pass
     finally:
         await _redis.aclose()
 
