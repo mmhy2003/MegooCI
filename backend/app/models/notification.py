@@ -62,7 +62,7 @@ class NotificationDelivery(Base):
         UUID(as_uuid=True), ForeignKey("notification_channels.id")
     )
     build_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("builds.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("builds.id", ondelete="CASCADE"), nullable=True
     )
     step_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True

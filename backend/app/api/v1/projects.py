@@ -236,14 +236,13 @@ async def delete_project(
         #   Pipeline.project_repository_id → ProjectRepository
         #   ProjectRepository ← WebhookDelivery
         #   Build  ← Artifact
-        #   Build  ← NotificationDelivery (nullable FK)
+        #   Build  ← NotificationDelivery (ON DELETE CASCADE)
         #
         # So pipelines MUST be deleted before repos, and all pipeline
         # children (builds, triggers, etc.) before pipelines.
 
         from app.models.artifact import Artifact
         from app.models.build import Build, LogChunk, Stage, Step
-        from app.models.notification import NotificationDelivery
         from app.models.trigger import Trigger, WebhookEndpoint
 
         # 1) Collect pipeline IDs scoped to this project.
@@ -260,12 +259,6 @@ async def delete_project(
             build_ids = [row[0] for row in build_id_rows.all()]
 
             if build_ids:
-                # Null-out notification delivery refs (nullable FK, no cascade).
-                await db.execute(
-                    sa_delete(NotificationDelivery).where(
-                        NotificationDelivery.build_id.in_(build_ids)
-                    )
-                )
                 # Delete artifacts for these builds.
                 await db.execute(
                     sa_delete(Artifact).where(Artifact.build_id.in_(build_ids))
