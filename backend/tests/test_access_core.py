@@ -47,6 +47,18 @@ def test_zero_assignments_is_empty():
     assert accessible_project_ids(user, "projects.read") == set()
 
 
+def test_has_global_permission_excludes_scoped():
+    from app.core.access import has_global_permission
+    a = uuid.uuid4()
+    dev = make_role("developer", DEV_PERMS)
+    scoped_user = make_user(project_roles=[(a, dev)])
+    global_user = make_user(global_role=make_role("developer", DEV_PERMS))
+    admin = make_user(is_admin=True)
+    assert has_global_permission(scoped_user, "pipelines.read") is False  # scoped != global
+    assert has_global_permission(global_user, "pipelines.read") is True
+    assert has_global_permission(admin, "pipelines.read") is True
+
+
 async def test_resolvers(sf):
     from app.core.access import project_id_for_pipeline, project_id_for_build
     async with sf() as db:

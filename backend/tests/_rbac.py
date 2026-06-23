@@ -1,8 +1,7 @@
 """Shared RBAC test scaffolding: in-memory DB + seeding helpers."""
 import uuid
-from datetime import datetime, timezone
 
-from sqlalchemy import event, select
+from sqlalchemy import event
 from sqlalchemy.dialects.postgresql import ARRAY, JSON as PG_JSON, JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles

@@ -30,6 +30,18 @@ class _AllProjects:
 ALL_PROJECTS = _AllProjects()
 
 
+def has_global_permission(user: User, permission: str) -> bool:
+    """True if *user* holds *permission* GLOBALLY — via admin or a global-scope
+    role — NOT via a project-scoped role.
+
+    Use this for 'global-only' gates. Do NOT use deps.effective_permissions for
+    that purpose: it unions ALL roles regardless of scope, so a project-scoped
+    role would leak as a global grant.
+    """
+    global_perms = effective_scoped_permissions(user, "global", None)
+    return "admin" in global_perms or permission in global_perms
+
+
 def accessible_project_ids(user: User, permission: str):
     """Projects in which *user* effectively holds *permission*.
 
@@ -37,13 +49,7 @@ def accessible_project_ids(user: User, permission: str):
     otherwise the set of project_ids granted via project-scoped roles. Empty set
     when the user has no qualifying assignment.
     """
-    # Use effective_scoped_permissions for the global scope so only truly global
-    # role assignments (scope_type="global") are checked — this avoids falsely
-    # returning ALL_PROJECTS when the user holds the permission only via a
-    # project-scoped role.  effective_permissions/_all_role_permissions unions
-    # ALL roles regardless of scope, which would break the scoped-only case.
-    global_perms = effective_scoped_permissions(user, "global", None)
-    if "admin" in global_perms or permission in global_perms:
+    if has_global_permission(user, permission):
         return ALL_PROJECTS
 
     pids: set[uuid.UUID] = set()
