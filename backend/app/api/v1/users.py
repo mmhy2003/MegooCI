@@ -186,7 +186,8 @@ async def update_user(
         user.is_admin = body.is_admin
     await db.commit()
     await db.refresh(user)
-    return _user_to_detail(user)
+    pnames = await _project_name_map(db, [user])
+    return _user_to_detail(user, pnames)
 
 
 @router.post("/{user_id}/roles", response_model=UserRoleResponse, status_code=status.HTTP_201_CREATED)

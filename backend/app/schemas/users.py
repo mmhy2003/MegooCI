@@ -24,7 +24,7 @@ class UserDetailResponse(BaseModel):
     auth_provider: str
     created_at: datetime
     updated_at: datetime | None = None
-    roles: list[dict] = []
+    roles: list[UserRoleInfo] = []
 
 
 class UserCreateRequest(BaseModel):
