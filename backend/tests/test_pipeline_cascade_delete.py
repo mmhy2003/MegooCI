@@ -285,6 +285,7 @@ async def test_force_delete_cascades_pipeline_builds_and_deliveries(session_fact
 
 async def test_force_delete_cancels_running_build(session_factory, monkeypatch):
     from app.api.v1.pipelines import delete_pipeline
+    from app.models.agent import Agent
     from app.models.build import Build, Stage, Step
     from app.models.pipeline import Pipeline
     from app.services import agent_dispatcher
@@ -300,7 +301,15 @@ async def test_force_delete_cancels_running_build(session_factory, monkeypatch):
             stage_id=stage.id, name="run", step_type="run",
             status="running", agent_id=agent_id, sort_order=0,
         ))
+        # A real agent reserved on this build — deleting the build must clear
+        # its reservation via the FK's ON DELETE SET NULL.
+        agent = Agent(
+            name=f"agent-{uuid.uuid4().hex[:8]}", status="online",
+            current_build_id=build_id,
+        )
+        db.add(agent)
         await db.commit()
+        agent_row_id = agent.id
 
     calls = []
 
@@ -321,3 +330,34 @@ async def test_force_delete_cancels_running_build(session_factory, monkeypatch):
     async with session_factory() as db:
         assert await db.get(Pipeline, seed.pipeline_id) is None
         assert await db.get(Build, build_id) is None
+        reloaded_agent = await db.get(Agent, agent_row_id)
+        assert reloaded_agent is not None
+        assert reloaded_agent.current_build_id is None, (
+            "deleting the build should clear the agent's current_build_id via SET NULL"
+        )
+
+
+async def test_force_delete_with_only_triggers(session_factory):
+    """force=true on a pipeline that has a trigger but no builds cascades the
+    trigger away and deletes the pipeline (the cancel block is skipped)."""
+    from app.api.v1.pipelines import delete_pipeline
+    from app.models.pipeline import Pipeline
+    from app.models.trigger import Trigger
+
+    seed = await _seed(session_factory, build_statuses=())  # no builds
+    async with session_factory() as db:
+        db.add(Trigger(pipeline_id=seed.pipeline_id, type="webhook", config_json={}))
+        await db.commit()
+
+    async with session_factory() as db:
+        await delete_pipeline(
+            seed.pipeline_id, force=True, db=db,
+            _current_user=await _make_user_stub(),
+        )
+
+    async with session_factory() as db:
+        assert await db.get(Pipeline, seed.pipeline_id) is None
+        remaining = (
+            await db.execute(select(Trigger).where(Trigger.pipeline_id == seed.pipeline_id))
+        ).scalars().all()
+        assert remaining == []
