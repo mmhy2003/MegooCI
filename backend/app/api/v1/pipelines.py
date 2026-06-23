@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_permission
@@ -156,14 +156,83 @@ async def update_pipeline(
 @router.delete("/{pipeline_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_pipeline(
     pipeline_id: uuid.UUID,
+    force: bool = Query(
+        False,
+        description=(
+            "When true, cancel any running/queued build and cascade-delete the "
+            "pipeline together with all of its builds, logs, artifacts, "
+            "triggers, and webhook endpoints."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(require_permission("pipelines.manage")),
 ) -> None:
+    """Delete a pipeline.
+
+    By default the endpoint refuses (409) when the pipeline still has builds,
+    triggers, or webhook endpoints, and returns a human-readable list so the UI
+    can warn the user. Pass ``?force=true`` to cancel any active build and
+    cascade-delete everything the pipeline owns.
+    """
+    from app.models.build import Build
+    from app.models.trigger import Trigger, WebhookEndpoint
+
     pipeline = await db.get(Pipeline, pipeline_id)
     if pipeline is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found"
         )
+
+    build_count = await db.scalar(
+        select(func.count()).select_from(Build).where(Build.pipeline_id == pipeline_id)
+    ) or 0
+    trigger_count = await db.scalar(
+        select(func.count()).select_from(Trigger).where(Trigger.pipeline_id == pipeline_id)
+    ) or 0
+    webhook_count = await db.scalar(
+        select(func.count())
+        .select_from(WebhookEndpoint)
+        .where(WebhookEndpoint.pipeline_id == pipeline_id)
+    ) or 0
+
+    total_dependents = build_count + trigger_count + webhook_count
+    if total_dependents > 0 and not force:
+        parts: list[str] = []
+        if build_count:
+            parts.append(f"{build_count} build(s)")
+        if trigger_count:
+            parts.append(f"{trigger_count} trigger(s)")
+        if webhook_count:
+            parts.append(f"{webhook_count} webhook endpoint(s)")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Cannot delete pipeline: it still has "
+                + ", ".join(parts)
+                + ". Retry with ?force=true to cascade-delete them."
+            ),
+        )
+
+    if force and build_count > 0:
+        # Cancel any in-flight build first, committing the cancelled status so
+        # the local executor bails cleanly between steps (it returns early when
+        # build.status != 'pending'), then signal agents running steps to stop.
+        from app.services.agent_dispatcher import notify_agents_of_cancel
+
+        active_result = await db.execute(
+            select(Build).where(
+                Build.pipeline_id == pipeline_id,
+                Build.status.in_(("pending", "queued", "running")),
+            )
+        )
+        active_builds = list(active_result.scalars().all())
+        if active_builds:
+            for build in active_builds:
+                build.status = "cancelled"
+            await db.commit()
+            for build in active_builds:
+                await notify_agents_of_cancel(db, build.id)
+
     await db.delete(pipeline)
     await db.commit()
 

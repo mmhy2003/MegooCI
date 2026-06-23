@@ -206,3 +206,118 @@ async def test_notify_agents_of_cancel_signals_running_steps(session_factory, mo
 
     assert len(calls) == 1, "exactly the one running step should be signalled"
     assert calls[0][0] == running_agent
+
+
+async def _make_user_stub():
+    return types.SimpleNamespace(id=uuid.uuid4())
+
+
+async def test_delete_missing_pipeline_404(session_factory):
+    from fastapi import HTTPException
+    from app.api.v1.pipelines import delete_pipeline
+
+    async with session_factory() as db:
+        with pytest.raises(HTTPException) as exc:
+            await delete_pipeline(
+                uuid.uuid4(), force=False, db=db,
+                _current_user=await _make_user_stub(),
+            )
+    assert exc.value.status_code == 404
+
+
+async def test_delete_pipeline_without_builds_succeeds(session_factory):
+    from app.api.v1.pipelines import delete_pipeline
+    from app.models.pipeline import Pipeline
+
+    seed = await _seed(session_factory, build_statuses=())  # no builds
+    async with session_factory() as db:
+        result = await delete_pipeline(
+            seed.pipeline_id, force=False, db=db,
+            _current_user=await _make_user_stub(),
+        )
+        assert result is None
+        assert await db.get(Pipeline, seed.pipeline_id) is None
+
+
+async def test_delete_pipeline_with_builds_requires_force(session_factory):
+    from fastapi import HTTPException
+    from app.api.v1.pipelines import delete_pipeline
+    from app.models.build import Build
+    from app.models.pipeline import Pipeline
+
+    seed = await _seed(session_factory, build_statuses=("success",))
+    async with session_factory() as db:
+        with pytest.raises(HTTPException) as exc:
+            await delete_pipeline(
+                seed.pipeline_id, force=False, db=db,
+                _current_user=await _make_user_stub(),
+            )
+    assert exc.value.status_code == 409
+    assert exc.value.detail.lower().startswith("cannot delete pipeline")
+    assert "1 build(s)" in exc.value.detail
+
+    async with session_factory() as db:
+        assert await db.get(Pipeline, seed.pipeline_id) is not None
+        assert await db.get(Build, seed.build_ids[0]) is not None
+
+
+async def test_force_delete_cascades_pipeline_builds_and_deliveries(session_factory):
+    from app.api.v1.pipelines import delete_pipeline
+    from app.models.build import Build
+    from app.models.notification import NotificationDelivery
+    from app.models.pipeline import Pipeline
+
+    seed = await _seed(
+        session_factory, build_statuses=("success", "failed"), with_delivery=True,
+    )
+    async with session_factory() as db:
+        await delete_pipeline(
+            seed.pipeline_id, force=True, db=db,
+            _current_user=await _make_user_stub(),
+        )
+
+    async with session_factory() as db:
+        assert await db.get(Pipeline, seed.pipeline_id) is None
+        for bid in seed.build_ids:
+            assert await db.get(Build, bid) is None
+        assert await db.get(NotificationDelivery, seed.delivery_id) is None
+
+
+async def test_force_delete_cancels_running_build(session_factory, monkeypatch):
+    from app.api.v1.pipelines import delete_pipeline
+    from app.models.build import Build, Stage, Step
+    from app.models.pipeline import Pipeline
+    from app.services import agent_dispatcher
+
+    seed = await _seed(session_factory, build_statuses=("running",))
+    build_id = seed.build_ids[0]
+    agent_id = uuid.uuid4()
+    async with session_factory() as db:
+        stage = Stage(build_id=build_id, name="s", status="running", sort_order=0)
+        db.add(stage)
+        await db.flush()
+        db.add(Step(
+            stage_id=stage.id, name="run", step_type="run",
+            status="running", agent_id=agent_id, sort_order=0,
+        ))
+        await db.commit()
+
+    calls = []
+
+    async def _spy(a_id, step_id):
+        calls.append((a_id, step_id))
+
+    monkeypatch.setattr(agent_dispatcher, "signal_cancel_step", _spy)
+
+    async with session_factory() as db:
+        await delete_pipeline(
+            seed.pipeline_id, force=True, db=db,
+            _current_user=await _make_user_stub(),
+        )
+
+    assert len(calls) == 1 and calls[0][0] == agent_id, (
+        "the running build's agent should be signalled to cancel before delete"
+    )
+    async with session_factory() as db:
+        assert await db.get(Pipeline, seed.pipeline_id) is None
+        assert await db.get(Build, build_id) is None
