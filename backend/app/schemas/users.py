@@ -4,6 +4,15 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr
 
 
+class UserRoleInfo(BaseModel):
+    id: str
+    role_id: str
+    role_name: str | None = None
+    scope_type: str
+    scope_id: str | None = None
+    project_name: str | None = None
+
+
 class UserDetailResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

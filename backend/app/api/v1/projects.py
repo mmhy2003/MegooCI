@@ -13,7 +13,7 @@ from app.models.pipeline import Pipeline
 from app.models.project import Project
 from app.models.secret import EnvVar, Secret
 from app.models.user import User
-from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
+from app.schemas.project import ProjectCreate, ProjectMemberResponse, ProjectResponse, ProjectUpdate
 
 router = APIRouter()
 
@@ -95,6 +95,25 @@ async def get_project(
         )
     check_scoped_permission(current_user, "projects.read", "project", project_id)
     return project
+
+
+@router.get("/{project_id}/members", response_model=list[ProjectMemberResponse])
+async def list_project_members(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_permission("users.manage")),
+) -> list[dict]:
+    from app.models.role import Role, UserRole
+    from app.models.user import User as UserModel
+    rows = await db.execute(
+        select(UserModel.id, UserModel.email, UserModel.name, Role.name)
+        .join(UserRole, UserRole.user_id == UserModel.id)
+        .join(Role, Role.id == UserRole.role_id)
+        .where(UserRole.scope_type == "project", UserRole.scope_id == project_id)
+        .order_by(UserModel.email)
+    )
+    return [{"user_id": uid, "email": email, "name": name, "role_name": rn}
+            for uid, email, name, rn in rows.all()]
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)

@@ -22,7 +22,9 @@ from app.schemas.users import (
 router = APIRouter()
 
 
-def _user_to_detail(user: User) -> dict:
+def _user_to_detail(user: User, project_names: dict | None = None) -> dict:
+    if project_names is None:
+        project_names = {}
     roles = []
     for ur in user.user_roles:
         roles.append({
@@ -31,6 +33,7 @@ def _user_to_detail(user: User) -> dict:
             "role_name": ur.role.name if ur.role else None,
             "scope_type": ur.scope_type,
             "scope_id": str(ur.scope_id) if ur.scope_id else None,
+            "project_name": project_names.get(ur.scope_id) if ur.scope_type == "project" else None,
         })
     return {
         "id": user.id,
@@ -43,6 +46,20 @@ def _user_to_detail(user: User) -> dict:
         "updated_at": user.updated_at,
         "roles": roles,
     }
+
+
+async def _project_name_map(db: AsyncSession, users: list) -> dict:
+    from app.models.project import Project
+    pids = {
+        ur.scope_id
+        for u in users
+        for ur in u.user_roles
+        if ur.scope_type == "project" and ur.scope_id
+    }
+    if not pids:
+        return {}
+    rows = await db.execute(select(Project.id, Project.name).where(Project.id.in_(pids)))
+    return {pid: name for pid, name in rows.all()}
 
 
 @router.get("/", response_model=list[UserDetailResponse])
@@ -59,7 +76,9 @@ async def list_users(
         .offset(skip)
         .limit(limit)
     )
-    return [_user_to_detail(u) for u in result.scalars().all()]
+    users = list(result.scalars().all())
+    pnames = await _project_name_map(db, users)
+    return [_user_to_detail(u, pnames) for u in users]
 
 
 @router.post("/", response_model=UserCreatedResponse, status_code=status.HTTP_201_CREATED)
@@ -128,7 +147,8 @@ async def get_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return _user_to_detail(user)
+    pnames = await _project_name_map(db, [user])
+    return _user_to_detail(user, pnames)
 
 
 @router.put("/{user_id}", response_model=UserDetailResponse)
@@ -176,6 +196,8 @@ async def assign_role(
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(require_permission("users.manage")),
 ) -> dict:
+    from app.models.project import Project
+
     user_result = await db.execute(select(User).where(User.id == user_id))
     if user_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -185,6 +207,42 @@ async def assign_role(
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
 
+    # Project-scoped assignment validation.
+    if body.scope_type == "project":
+        if body.scope_id is None or await db.get(Project, body.scope_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scope_id must reference an existing project",
+            )
+        if role.name == "admin":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The admin role cannot be scoped to a project",
+            )
+        # One role per (user, project): replace any existing project-scoped row.
+        existing_proj = await db.execute(
+            select(UserRole).where(
+                UserRole.user_id == user_id,
+                UserRole.scope_type == "project",
+                UserRole.scope_id == body.scope_id,
+            )
+        )
+        prior = existing_proj.scalar_one_or_none()
+        if prior is not None:
+            prior.role_id = body.role_id
+            await db.flush()
+            await db.refresh(prior)
+            return {
+                "id": prior.id,
+                "user_id": prior.user_id,
+                "role_id": prior.role_id,
+                "scope_type": prior.scope_type,
+                "scope_id": prior.scope_id,
+                "role_name": role.name,
+                "created_at": prior.created_at,
+            }
+
+    # Exact-duplicate guard (unchanged) for non-project or first-time project rows.
     existing = await db.execute(
         select(UserRole).where(
             UserRole.user_id == user_id,

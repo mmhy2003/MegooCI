@@ -4,6 +4,13 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
+class ProjectMemberResponse(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    name: str
+    role_name: str
+
+
 class ProjectCreate(BaseModel):
     name: str
     description: str | None = None
