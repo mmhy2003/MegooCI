@@ -171,12 +171,9 @@ async def accept_invite(
     db.add(user)
     await db.flush()
 
-    user_role = UserRole(
-        user_id=user.id,
-        role_id=invite.role_id,
-        scope_type="global",
-    )
-    db.add(user_role)
+    if is_admin_role:
+        db.add(UserRole(user_id=user.id, role_id=invite.role_id, scope_type="global"))
+    # Non-admin invitees start with no role; project assignment follows.
 
     invite.status = "accepted"
     invite.accepted_at = datetime.now(timezone.utc)
