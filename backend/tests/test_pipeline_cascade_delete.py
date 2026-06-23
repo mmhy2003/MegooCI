@@ -208,6 +208,47 @@ async def test_notify_agents_of_cancel_signals_running_steps(session_factory, mo
     assert calls[0][0] == running_agent
 
 
+async def test_notify_agents_of_cancel_falls_back_to_reserved_agent(
+    session_factory, monkeypatch
+):
+    """A running step whose step_started hasn't landed yet (agent_id is NULL)
+    must still be cancelled — via the agent reserved for the build."""
+    from app.models.agent import Agent
+    from app.models.build import Stage, Step
+    from app.services import agent_dispatcher
+
+    seed = await _seed(session_factory, build_statuses=("running",))
+    build_id = seed.build_ids[0]
+    reserved_agent = uuid.uuid4()
+
+    async with session_factory() as db:
+        stage = Stage(build_id=build_id, name="s", status="running", sort_order=0)
+        db.add(stage)
+        await db.flush()
+        db.add(Step(
+            stage_id=stage.id, name="just-dispatched", step_type="run",
+            status="running", agent_id=None, sort_order=0,
+        ))
+        db.add(Agent(
+            id=reserved_agent, name=f"agent-{reserved_agent.hex[:8]}",
+            status="online", current_build_id=build_id,
+        ))
+        await db.commit()
+
+    calls = []
+
+    async def _spy(agent_id, step_id):
+        calls.append((agent_id, step_id))
+
+    monkeypatch.setattr(agent_dispatcher, "signal_cancel_step", _spy)
+
+    async with session_factory() as db:
+        await agent_dispatcher.notify_agents_of_cancel(db, build_id)
+
+    assert len(calls) == 1, "the running step should be signalled via the reserved agent"
+    assert calls[0][0] == reserved_agent
+
+
 async def _make_user_stub():
     return types.SimpleNamespace(id=uuid.uuid4())
 

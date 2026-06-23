@@ -523,10 +523,19 @@ async def signal_build_cancel(
 
 
 async def notify_agents_of_cancel(db: AsyncSession, build_id: uuid.UUID) -> None:
-    """Publish cancel frames for every running step of ``build_id`` that has an
-    ``agent_id``. Best-effort: per-step errors are swallowed so callers (single
-    build cancel, pipeline cascade-delete) never fail on a flaky agent channel."""
+    """Publish cancel frames for every running step of ``build_id``. Best-effort:
+    per-step errors are swallowed so callers (single build cancel, pipeline
+    cascade-delete) never fail on a flaky agent channel.
+
+    A step's ``agent_id`` is only set once the agent's ``step_started`` frame
+    lands, which can lag a fraction of a second behind dispatch. To avoid
+    missing a step in that window we fall back to the agent reserved for the
+    build (``Agent.current_build_id == build_id``)."""
     from app.models.build import Stage, Step
+
+    reserved_agent_id = await db.scalar(
+        select(Agent.id).where(Agent.current_build_id == build_id)
+    )
 
     result = await db.execute(
         select(Step)
@@ -534,13 +543,14 @@ async def notify_agents_of_cancel(db: AsyncSession, build_id: uuid.UUID) -> None
         .where(
             Stage.build_id == build_id,
             Step.status == "running",
-            Step.agent_id.isnot(None),
         )
     )
     for step in result.scalars().all():
+        agent_id = step.agent_id or reserved_agent_id
+        if agent_id is None:
+            continue
         try:
-            if step.agent_id is not None:
-                await signal_cancel_step(step.agent_id, step.id)
+            await signal_cancel_step(agent_id, step.id)
         except Exception:
             pass
 
