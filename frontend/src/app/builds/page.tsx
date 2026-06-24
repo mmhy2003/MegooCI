@@ -15,6 +15,7 @@ import {
   type Pipeline,
   type Project,
 } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ const STATUS_TABS: { label: string; value: BuildStatus | "all" }[] = [
 
 export default function BuildsPage() {
   const router = useRouter();
+  const { user } = useAuthStore();
   const [allBuilds, setAllBuilds] = React.useState<Build[]>([]);
   const [pipelineMap, setPipelineMap] = React.useState<
     Record<string, Pipeline>
@@ -178,11 +180,11 @@ export default function BuildsPage() {
               <div className="py-16 text-center">
                 <Hammer className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
                 <p className="text-sm text-muted-foreground">
-                  No builds found
                   {statusFilter !== "all"
-                    ? ` with status "${statusFilter}"`
-                    : ""}
-                  .
+                    ? `No builds found with status "${statusFilter}".`
+                    : allBuilds.length === 0 && !user?.is_admin
+                      ? "No projects assigned yet — ask an admin to grant you access."
+                      : "No builds found."}
                 </p>
               </div>
             ) : (

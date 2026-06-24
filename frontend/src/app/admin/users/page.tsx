@@ -34,6 +34,7 @@ import {
   type Invite,
   type InviteCreated,
 } from "@/lib/api";
+import { ProjectAssignmentsEditor } from "@/components/ProjectAssignmentsEditor";
 import {
   Card,
   CardContent,
@@ -127,9 +128,11 @@ export default function AdminUsersPage() {
   const [createEmail, setCreateEmail] = React.useState("");
   const [createName, setCreateName] = React.useState("");
   const [createRoleId, setCreateRoleId] = React.useState("");
+  const [createUserType, setCreateUserType] = React.useState<"admin" | "member">("member");
   const [creating, setCreating] = React.useState(false);
   const [createdPassword, setCreatedPassword] = React.useState<string | null>(null);
   const [createdUserEmail, setCreatedUserEmail] = React.useState("");
+  const [createdUserId, setCreatedUserId] = React.useState<string | null>(null);
 
   const isAdmin = currentUser?.is_admin ?? false;
 
@@ -330,19 +333,31 @@ export default function AdminUsersPage() {
   };
 
   const handleCreateUser = async () => {
-    if (!createEmail || !createName || !createRoleId) return;
+    // For admin type, role_id isn't strictly needed but API requires it —
+    // use any non-admin role as the initial assignment, then promote to admin.
+    const nonAdminRole = roles.find((r) => r.name !== "admin");
+    const effectiveRoleId =
+      createUserType === "admin"
+        ? (nonAdminRole?.id ?? createRoleId)
+        : createRoleId;
+    if (!createEmail || !createName || !effectiveRoleId) return;
     setCreating(true);
     try {
       const result: UserCreated = await usersApi.create({
         email: createEmail,
         name: createName,
-        role_id: createRoleId,
+        role_id: effectiveRoleId,
       });
+      if (createUserType === "admin") {
+        await usersApi.update(result.id, { is_admin: true });
+      }
       toast.success(`User ${createEmail} created`);
       setCreatedPassword(result.generated_password);
       setCreatedUserEmail(createEmail);
+      setCreatedUserId(result.id);
       setCreateEmail("");
       setCreateName("");
+      setCreateRoleId("");
       loadData();
     } catch (e: unknown) {
       const msg = (e as { body?: { detail?: string } })?.body?.detail || "Failed to create user";
@@ -384,7 +399,7 @@ export default function AdminUsersPage() {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={() => { setCreateOpen(true); setCreatedPassword(null); }}
+              onClick={() => { setCreateOpen(true); setCreatedPassword(null); setCreatedUserId(null); setCreateUserType("member"); }}
               className="gap-2"
             >
               <Plus className="h-4 w-4" />
@@ -439,7 +454,7 @@ export default function AdminUsersPage() {
                       </div>
                       <p className="text-xs text-muted-foreground truncate">{u.email}</p>
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
-                        {u.roles.map((r) => (
+                        {u.roles.filter((r) => r.scope_type === "global").map((r) => (
                           <Badge
                             key={r.id}
                             variant={roleBadgeVariant(r.role_name || "")}
@@ -451,14 +466,15 @@ export default function AdminUsersPage() {
                           >
                             {roleIcon(r.role_name || "")}
                             {r.role_name}
-                            {r.scope_type !== "global" && (
-                              <span className="opacity-60">({r.scope_type})</span>
-                            )}
                           </Badge>
                         ))}
-                        {u.roles.length === 0 && (
-                          <span className="text-xs text-muted-foreground italic">No role assigned</span>
+                        {u.roles.filter((r) => r.scope_type === "global").length === 0 && !u.is_admin && (
+                          <span className="text-xs text-muted-foreground italic">No global role</span>
                         )}
+                      </div>
+                      <div className="mt-2">
+                        <p className="mb-1 text-xs font-medium text-muted-foreground">Project access</p>
+                        <ProjectAssignmentsEditor user={u} onChanged={loadData} />
                       </div>
                     </div>
                     <DropdownMenu>
@@ -810,17 +826,58 @@ export default function AdminUsersPage() {
                   </div>
                 </div>
               </div>
+              {createUserType === "member" && createdUserId && (() => {
+                const createdUser = users.find((u) => u.id === createdUserId);
+                return createdUser ? (
+                  <div className="space-y-1.5">
+                    <p className="text-sm font-medium">Assign project access</p>
+                    <p className="text-xs text-muted-foreground">
+                      This member has no global role. Assign project-scoped access now or do it later via the Users table.
+                    </p>
+                    <ProjectAssignmentsEditor user={createdUser} onChanged={loadData} />
+                  </div>
+                ) : null;
+              })()}
               <DialogFooter>
-                <Button variant="outline" onClick={() => setCreateOpen(false)}>
+                <Button variant="outline" onClick={() => { setCreateOpen(false); setCreatedUserId(null); }}>
                   Done
                 </Button>
-                <Button onClick={() => { setCreatedPassword(null); }}>
+                <Button onClick={() => { setCreatedPassword(null); setCreatedUserId(null); }}>
                   Create another
                 </Button>
               </DialogFooter>
             </div>
           ) : (
             <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Account type</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCreateUserType("member")}
+                    className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
+                      createUserType === "member"
+                        ? "border-primary bg-primary/5 text-primary"
+                        : "border-input text-muted-foreground hover:border-primary/50"
+                    }`}
+                  >
+                    <div className="font-medium">Member</div>
+                    <div className="text-xs opacity-70">Project-scoped access</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCreateUserType("admin")}
+                    className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
+                      createUserType === "admin"
+                        ? "border-primary bg-primary/5 text-primary"
+                        : "border-input text-muted-foreground hover:border-primary/50"
+                    }`}
+                  >
+                    <div className="font-medium">Admin</div>
+                    <div className="text-xs opacity-70">Full system access</div>
+                  </button>
+                </div>
+              </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Full name</label>
                 <Input
@@ -839,22 +896,32 @@ export default function AdminUsersPage() {
                   onChange={(e) => setCreateEmail(e.target.value)}
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Role</label>
-                <Select
-                  value={createRoleId}
-                  onChange={(e) => setCreateRoleId(e.target.value)}
-                  options={roles.map((r) => ({ value: r.id, label: r.name }))}
-                  placeholder="Select a role"
-                />
-              </div>
+              {createUserType === "member" && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Initial role</label>
+                  <Select
+                    value={createRoleId}
+                    onChange={(e) => setCreateRoleId(e.target.value)}
+                    options={roles.filter((r) => r.name !== "admin").map((r) => ({ value: r.id, label: r.name }))}
+                    placeholder="Select a role"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Assign project-scoped access after creation via the Users table.
+                  </p>
+                </div>
+              )}
               <DialogFooter>
                 <Button variant="outline" onClick={() => setCreateOpen(false)}>
                   Cancel
                 </Button>
                 <Button
                   onClick={handleCreateUser}
-                  disabled={!createEmail || !createName || !createRoleId || creating}
+                  disabled={
+                    !createEmail ||
+                    !createName ||
+                    (createUserType === "member" && !createRoleId && !roles.find((r) => r.name !== "admin")) ||
+                    creating
+                  }
                   className="gap-2"
                 >
                   <Plus className="h-4 w-4" />

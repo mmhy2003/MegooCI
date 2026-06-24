@@ -364,6 +364,11 @@ export const projectsApi = {
       `/api/v1/projects/${id}${opts?.force ? "?force=true" : ""}`,
       { method: "DELETE" },
     ),
+
+  members: (projectId: string) =>
+    fetchApi<{ user_id: string; email: string; name: string; role_name: string }[]>(
+      `/api/v1/projects/${projectId}/members`,
+    ),
 };
 
 // ------------------------------------------------------------------
@@ -1190,6 +1195,7 @@ export interface UserRoleInfo {
   role_name: string | null;
   scope_type: string;
   scope_id: string | null;
+  project_name?: string | null;
 }
 
 export interface UserDetail {

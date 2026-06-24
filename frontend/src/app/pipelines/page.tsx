@@ -9,6 +9,7 @@ import { Plus, GitBranch, ExternalLink, FolderKanban } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { pipelinesApi, projectsApi, type Pipeline, type Project } from "@/lib/api";
 import { usePermission } from "@/hooks/use-permission";
+import { useAuthStore } from "@/lib/auth";
 import {
   Card,
   CardContent,
@@ -23,6 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function PipelinesPage() {
   const router = useRouter();
   const canManage = usePermission("pipelines.manage");
+  const { user } = useAuthStore();
   const [pipelines, setPipelines] = React.useState<Pipeline[]>([]);
   const [projectMap, setProjectMap] = React.useState<Record<string, Project>>({});
   const [loading, setLoading] = React.useState(true);
@@ -96,8 +98,9 @@ export default function PipelinesPage() {
               </div>
               <h3 className="mb-1 text-lg font-semibold">No pipelines yet</h3>
               <p className="mb-6 max-w-sm text-center text-sm text-muted-foreground">
-                Create your first pipeline to start automating your builds and
-                deployments.
+                {user?.is_admin
+                  ? "Create your first pipeline to start automating your builds and deployments."
+                  : "No projects assigned yet — ask an admin to grant you access."}
               </p>
               {canManage && (
                 <Button onClick={() => router.push("/pipelines/new")}>

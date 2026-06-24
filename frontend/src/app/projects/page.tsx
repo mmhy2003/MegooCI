@@ -28,10 +28,12 @@ import {
 } from "@/components/ui/dialog";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { usePermission } from "@/hooks/use-permission";
+import { useAuthStore } from "@/lib/auth";
 
 export default function ProjectsPage() {
   const confirm = useConfirm();
   const canManage = usePermission("projects.manage");
+  const { user } = useAuthStore();
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -240,7 +242,9 @@ export default function ProjectsPage() {
               </div>
               <h3 className="mb-1 text-lg font-semibold">No projects yet</h3>
               <p className="mb-6 max-w-sm text-center text-sm text-muted-foreground">
-                Create your first project to start organizing your pipelines.
+                {user?.is_admin
+                  ? "Create your first project to start organizing your pipelines."
+                  : "No projects assigned yet — ask an admin to grant you access."}
               </p>
               {canManage && (
                 <Button onClick={() => setDialogOpen(true)}>
