@@ -5,9 +5,16 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from app.core.access import accessible_project_ids
 from app.core.deps import get_current_active_user, _collect_permissions
 from app.models.user import User
-from app.services.search import multi_search
+from app.services.search import (
+    multi_search,
+    build_project_filter,
+    INDEX_PROJECTS,
+    INDEX_PIPELINES,
+    INDEX_BUILDS,
+)
 
 router = APIRouter()
 
@@ -114,7 +121,13 @@ async def search(
     if not allowed_indexes:
         return SearchResponse(query=q, results=[])
 
-    grouped = await multi_search(q, limit=limit, indexes=allowed_indexes)
+    filters = {
+        INDEX_PROJECTS: build_project_filter(accessible_project_ids(current_user, "projects.read")),
+        INDEX_PIPELINES: build_project_filter(accessible_project_ids(current_user, "pipelines.read")),
+        INDEX_BUILDS: build_project_filter(accessible_project_ids(current_user, "builds.read")),
+    }
+
+    grouped = await multi_search(q, limit=limit, indexes=allowed_indexes, filters=filters)
 
     results: list[SearchHit] = []
     results.extend(_project_hits(grouped.get("projects", [])))

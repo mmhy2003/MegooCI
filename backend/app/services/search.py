@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.core.access import ALL_PROJECTS
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +24,10 @@ INDEX_ARTIFACTS = "artifacts"
 INDEX_SETTINGS: dict[str, MeilisearchSettings] = {
     INDEX_PROJECTS: MeilisearchSettings(
         searchable_attributes=["name", "slug", "description"],
-        filterable_attributes=["created_by"],
+        filterable_attributes=["created_by", "project_id"],
         sortable_attributes=["created_at"],
         displayed_attributes=[
-            "id", "name", "slug", "description", "created_at",
+            "id", "project_id", "name", "slug", "description", "created_at",
         ],
     ),
     INDEX_PIPELINES: MeilisearchSettings(
@@ -40,10 +41,10 @@ INDEX_SETTINGS: dict[str, MeilisearchSettings] = {
     ),
     INDEX_BUILDS: MeilisearchSettings(
         searchable_attributes=["branch", "commit_sha", "status", "trigger_type"],
-        filterable_attributes=["pipeline_id", "status"],
+        filterable_attributes=["pipeline_id", "project_id", "status"],
         sortable_attributes=["created_at", "number"],
         displayed_attributes=[
-            "id", "pipeline_id", "number", "branch", "commit_sha",
+            "id", "pipeline_id", "project_id", "number", "branch", "commit_sha",
             "status", "trigger_type", "created_at",
         ],
     ),
@@ -85,6 +86,7 @@ async def ensure_indexes() -> None:
 def _project_doc(project: Any) -> dict[str, Any]:
     return {
         "id": str(project.id),
+        "project_id": str(project.id),
         "name": project.name,
         "slug": project.slug,
         "description": project.description or "",
@@ -105,10 +107,11 @@ def _pipeline_doc(pipeline: Any) -> dict[str, Any]:
     }
 
 
-def _build_doc(build: Any) -> dict[str, Any]:
+def _build_doc(build: Any, *, project_id: Any) -> dict[str, Any]:
     return {
         "id": str(build.id),
         "pipeline_id": str(build.pipeline_id),
+        "project_id": str(project_id),
         "number": build.number,
         "branch": build.branch or "",
         "commit_sha": build.commit_sha or "",
@@ -165,9 +168,19 @@ async def index_pipeline(pipeline: Any) -> None:
 
 async def index_build(build: Any) -> None:
     try:
+        from app.database import async_session
+        from app.models.pipeline import Pipeline
+        from sqlalchemy import select as sa_select
+
+        # Resolve project_id via pipeline (build row doesn't carry it directly).
+        async with async_session() as db:
+            project_id = await db.scalar(
+                sa_select(Pipeline.project_id).where(Pipeline.id == build.pipeline_id)
+            )
+
         async with _get_client() as client:
             index = client.index(INDEX_BUILDS)
-            await index.add_documents([_build_doc(build)])
+            await index.add_documents([_build_doc(build, project_id=project_id)])
     except Exception:
         logger.warning("Failed to index build %s", build.id, exc_info=True)
 
@@ -262,9 +275,12 @@ async def sync_all(db: AsyncSession) -> None:
 
         # Builds (limit to most recent 500 to avoid huge payloads)
         result = await db.execute(
-            select(Build).order_by(Build.created_at.desc()).limit(500)
+            select(Build, Pipeline.project_id.label("project_id"))
+            .join(Pipeline, Build.pipeline_id == Pipeline.id)
+            .order_by(Build.created_at.desc())
+            .limit(500)
         )
-        builds = [_build_doc(b) for b in result.scalars().all()]
+        builds = [_build_doc(row[0], project_id=row.project_id) for row in result.all()]
         if builds:
             idx = client.index(INDEX_BUILDS)
             await idx.add_documents(builds)
@@ -303,6 +319,17 @@ async def sync_all(db: AsyncSession) -> None:
         logger.info("Synced %d artifacts to Meilisearch", len(artifact_docs))
 
 
+# ── Project-filter builder ─────────────────────────────────────────────
+
+def build_project_filter(accessible) -> str | None:
+    """Meilisearch filter restricting to accessible projects.
+    None  -> unrestricted (ALL_PROJECTS). Empty set -> match nothing."""
+    if accessible is ALL_PROJECTS:
+        return None
+    ids = ", ".join(f'"{pid}"' for pid in accessible)
+    return f"project_id IN [{ids}]"
+
+
 # ── Multi-index search ──────────────────────────────────────────────────
 
 async def multi_search(
@@ -310,12 +337,18 @@ async def multi_search(
     *,
     limit: int = 5,
     indexes: list[str] | None = None,
+    filters: dict[str, str | None] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Search across all (or selected) indexes and return grouped results."""
     target_indexes = indexes or [INDEX_PROJECTS, INDEX_PIPELINES, INDEX_BUILDS]
 
     queries = [
-        SearchParams(index_uid=uid, query=query, limit=limit)
+        SearchParams(
+            index_uid=uid,
+            query=query,
+            limit=limit,
+            filter=filters.get(uid) if filters else None,
+        )
         for uid in target_indexes
     ]
 
