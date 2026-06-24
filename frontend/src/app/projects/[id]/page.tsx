@@ -22,6 +22,7 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { usePermission } from "@/hooks/use-permission";
 import { ProjectIntegrations } from "@/components/project-integrations";
+import { ProjectMembersPanel } from "@/components/ProjectMembersPanel";
 import {
   projectsApi,
   pipelinesApi,
@@ -47,7 +48,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 
-type Tab = "pipelines" | "integrations" | "settings";
+type Tab = "pipelines" | "integrations" | "members" | "settings";
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -57,6 +58,7 @@ export default function ProjectDetailPage() {
   const canManageProjects = usePermission("projects.manage");
   const canManageSecrets = usePermission("secrets.manage");
   const canManagePipelines = usePermission("pipelines.manage");
+  const canManageUsers = usePermission("users.manage");
 
   const [project, setProject] = React.useState<Project | null>(null);
   const [pipelines, setPipelines] = React.useState<Pipeline[]>([]);
@@ -388,6 +390,7 @@ export default function ProjectDetailPage() {
   const tabs: { key: Tab; label: string }[] = [
     { key: "pipelines", label: "Pipelines" },
     { key: "integrations", label: "Integrations" },
+    ...(canManageUsers ? [{ key: "members" as Tab, label: "Members" }] : []),
     { key: "settings", label: "Settings" },
   ];
 
@@ -581,6 +584,10 @@ export default function ProjectDetailPage() {
         )}
 
         {activeTab === "integrations" && <ProjectIntegrations projectId={id} />}
+
+        {activeTab === "members" && canManageUsers && (
+          <ProjectMembersPanel projectId={id} />
+        )}
 
         {activeTab === "settings" && (
           <div className="space-y-6">

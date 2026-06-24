@@ -366,7 +366,7 @@ export const projectsApi = {
     ),
 
   members: (projectId: string) =>
-    fetchApi<{ user_id: string; email: string; name: string; role_name: string }[]>(
+    fetchApi<{ user_role_id: string; user_id: string; email: string; name: string; role_name: string }[]>(
       `/api/v1/projects/${projectId}/members`,
     ),
 };
