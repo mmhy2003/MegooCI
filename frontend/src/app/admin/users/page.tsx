@@ -919,7 +919,8 @@ export default function AdminUsersPage() {
                   disabled={
                     !createEmail ||
                     !createName ||
-                    (createUserType === "member" && !createRoleId && !roles.find((r) => r.name !== "admin")) ||
+                    roles.length === 0 ||
+                    (createUserType === "member" && !createRoleId) ||
                     creating
                   }
                   className="gap-2"
