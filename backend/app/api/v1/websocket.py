@@ -1,9 +1,11 @@
+import json
 import uuid
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
 from app.config import get_settings
+from app.core.access import ALL_PROJECTS, accessible_project_ids, project_id_for_build
 from app.core.security import decode_token
 from app.database import async_session
 from app.models.user import User
@@ -13,28 +15,30 @@ from sqlalchemy.orm import selectinload
 
 router = APIRouter()
 
+# WebSocket close codes (outside the standard 1xxx range so the browser can
+# distinguish auth failures from normal closes).
+_WS_UNAUTHORIZED = 4401
+_WS_FORBIDDEN = 4403
+_WS_NOT_FOUND = 4404
 
-async def _authenticate_ws(token: str | None) -> bool:
-    """Validate a JWT token for WebSocket connections.
 
-    Returns True if the token belongs to an active user with the
-    ``builds.read`` permission (or admin status).
-    """
+async def _load_ws_user(token: str | None) -> User | None:
+    """Validate a JWT and return the fully-loaded User (with user_roles), or None."""
     if not token:
-        return False
+        return None
     try:
         payload = decode_token(token)
     except ValueError:
-        return False
+        return None
     if payload.get("type") != "access":
-        return False
+        return None
     user_id_str = payload.get("sub")
     if not user_id_str:
-        return False
+        return None
     try:
         user_id = uuid.UUID(user_id_str)
     except ValueError:
-        return False
+        return None
 
     async with async_session() as db:
         result = await db.execute(
@@ -45,13 +49,8 @@ async def _authenticate_ws(token: str | None) -> bool:
         user = result.scalar_one_or_none()
 
     if user is None or not user.is_active:
-        return False
-    if user.is_admin:
-        return True
-    for ur in user.user_roles:
-        if ur.role and ur.role.permissions and "builds.read" in ur.role.permissions:
-            return True
-    return False
+        return None
+    return user
 
 
 async def _authenticate_ws_user(token: str | None) -> uuid.UUID | None:
@@ -83,14 +82,39 @@ async def _authenticate_ws_user(token: str | None) -> uuid.UUID | None:
     return row.id
 
 
+def _can_read_builds_globally(user: User) -> bool:
+    """True if the user has builds.read globally (admin or global role)."""
+    if user.is_admin:
+        return True
+    for ur in user.user_roles:
+        if ur.scope_type == "global" and ur.role and ur.role.permissions:
+            if "builds.read" in ur.role.permissions:
+                return True
+    return False
+
+
 @router.websocket("/ws/builds/{build_id}/logs")
 async def build_logs_ws(
     websocket: WebSocket,
     build_id: uuid.UUID,
     token: str | None = Query(None),
 ) -> None:
-    if not await _authenticate_ws(token):
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    user = await _load_ws_user(token)
+    if user is None:
+        await websocket.close(code=_WS_UNAUTHORIZED)
+        return
+
+    # Resolve the build's project and check scoped access.
+    async with async_session() as db:
+        pid = await project_id_for_build(db, build_id)
+
+    if pid is None:
+        await websocket.close(code=_WS_NOT_FOUND)
+        return
+
+    acc = accessible_project_ids(user, "builds.read")
+    if acc is not ALL_PROJECTS and pid not in acc:
+        await websocket.close(code=_WS_FORBIDDEN)
         return
 
     await websocket.accept()
@@ -159,18 +183,25 @@ async def build_updates_ws(
     websocket: WebSocket,
     token: str | None = Query(None),
 ) -> None:
-    """Global build-status update stream.
+    """Global build-status update stream, filtered to projects the user can see.
 
-    Any authenticated user can subscribe to this channel to receive
-    real-time ``build_update`` events whenever a build is created,
-    transitions to running, or finishes (success / failed / cancelled).
-    The payload mirrors the REST BuildResponse fields needed by the
-    dashboard and builds-list pages so they can patch their local state
-    without a full page reload.
+    Subscribes to the ``builds:updates`` Redis channel. Before forwarding each
+    event the handler checks whether the user has ``builds.read`` access to the
+    event's project (carried in the payload as ``project_id``).
+
+    - Admins and users with a global ``builds.read`` grant receive all events.
+    - Project-scoped users only receive events for their accessible projects.
+    - Events whose payload lacks a ``project_id`` (older callers not yet
+      updated) are dropped for scoped users to avoid inadvertent leaks.
     """
-    if not await _authenticate_ws(token):
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    user = await _load_ws_user(token)
+    if user is None:
+        await websocket.close(code=_WS_UNAUTHORIZED)
         return
+
+    # Snapshot access set ONCE at connect time — avoids per-event DB hits.
+    acc = accessible_project_ids(user, "builds.read")
+    is_global = acc is ALL_PROJECTS
 
     await websocket.accept()
     settings = get_settings()
@@ -185,8 +216,34 @@ async def build_updates_ws(
 
     try:
         async for message in pubsub.listen():
-            if message["type"] == "message":
+            if message["type"] != "message":
+                continue
+
+            if is_global:
+                # Admin / global permission: forward everything.
                 await websocket.send_text(message["data"])
+                continue
+
+            # Project-scoped user: filter on the project_id in the payload.
+            try:
+                payload = json.loads(message["data"])
+                raw_pid = payload.get("project_id")
+            except (json.JSONDecodeError, AttributeError):
+                # Malformed payload — drop.
+                continue
+
+            if raw_pid is None:
+                # No project_id in payload (old caller) — drop for safety.
+                continue
+
+            try:
+                event_pid = uuid.UUID(raw_pid)
+            except (ValueError, AttributeError):
+                continue
+
+            if event_pid in acc:
+                await websocket.send_text(message["data"])
+
     except WebSocketDisconnect:
         pass
     finally:

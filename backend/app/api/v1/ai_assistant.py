@@ -23,7 +23,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import require_permission
+from app.core.access import has_global_permission, project_id_for_pipeline
+from app.core.deps import (
+    check_scoped_permission,
+    effective_scoped_permissions,
+    get_current_active_user,
+)
 from app.database import get_db
 from app.models.git_integration import ProjectRepository
 from app.models.pipeline import Pipeline
@@ -607,7 +612,6 @@ async def _prepare_messages(
 
     Returns ``(messages, model_id, ai_cfg)``.
     """
-    from app.core.deps import _collect_permissions
     from app.api.v1.system import get_ai_overrides, resolve_ai_config
 
     overrides = await get_ai_overrides(db)
@@ -637,12 +641,21 @@ async def _prepare_messages(
             detail="AI API key is not configured",
         )
 
-    user_perms = _collect_permissions(current_user)
-    can_read_secrets = "admin" in user_perms or "secrets.read" in user_perms
-
     system_content = SYSTEM_PROMPT
 
     if body.project_id:
+        # Resolve project_id for scoped secrets.read check.
+        try:
+            _pid_for_secrets = uuid.UUID(body.project_id)
+        except ValueError:
+            _pid_for_secrets = None
+        can_read_secrets = (
+            _pid_for_secrets is not None
+            and (
+                current_user.is_admin
+                or "secrets.read" in effective_scoped_permissions(current_user, "project", _pid_for_secrets)
+            )
+        )
         project_ctx = await _build_project_context(
             db, body.project_id, include_values=can_read_secrets,
         )
@@ -713,12 +726,53 @@ async def _prepare_messages(
     return messages, model_id, ai_cfg
 
 
+async def _check_ai_access(
+    body: AssistantRequest,
+    db: AsyncSession,
+    current_user: User,
+) -> None:
+    """Enforce project-scoped or global pipelines.manage permission.
+
+    - If the request carries a ``project_id``: require scoped ``pipelines.manage``
+      for that project.
+    - If the request carries a ``pipeline_id`` (but no ``project_id``): resolve
+      the pipeline's project and check scoped access.
+    - If neither is present: require global ``pipelines.manage``.
+    """
+    # Try to resolve a project_id from the request.
+    resolved_pid: uuid.UUID | None = None
+
+    if body.project_id:
+        try:
+            resolved_pid = uuid.UUID(body.project_id)
+        except ValueError:
+            pass
+
+    if resolved_pid is None and body.pipeline_id:
+        try:
+            pl_id = uuid.UUID(body.pipeline_id)
+            resolved_pid = await project_id_for_pipeline(db, pl_id)
+        except ValueError:
+            pass
+
+    if resolved_pid is not None:
+        check_scoped_permission(current_user, "pipelines.manage", "project", resolved_pid)
+    else:
+        # No project context — require a global grant.
+        if not has_global_permission(current_user, "pipelines.manage"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission 'pipelines.manage' required",
+            )
+
+
 @router.post("/assistant", response_model=AssistantResponse)
 async def pipeline_assistant(
     body: AssistantRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("pipelines.manage")),
+    current_user: User = Depends(get_current_active_user),
 ) -> AssistantResponse:
+    await _check_ai_access(body, db, current_user)
     messages, model_id, ai_cfg = await _prepare_messages(body, db, current_user)
 
     try:
@@ -810,8 +864,9 @@ async def _stream_generator(messages, model_id, ai_cfg):
 async def pipeline_assistant_stream(
     body: AssistantRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("pipelines.manage")),
+    current_user: User = Depends(get_current_active_user),
 ):
+    await _check_ai_access(body, db, current_user)
     messages, model_id, ai_cfg = await _prepare_messages(body, db, current_user)
     return StreamingResponse(
         _stream_generator(messages, model_id, ai_cfg),

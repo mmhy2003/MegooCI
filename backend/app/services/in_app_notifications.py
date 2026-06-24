@@ -111,12 +111,19 @@ async def get_admin_user_ids(db: AsyncSession) -> list[uuid.UUID]:
 async def publish_build_update(
     redis_client: aioredis.Redis,
     build,  # app.models.build.Build instance
+    *,
+    project_id: uuid.UUID | None = None,
 ) -> None:
     """Publish a ``build_update`` event to the global ``builds:updates`` channel.
 
     Called whenever a build is created, transitions to a new status, or
     finishes so that the dashboard and builds-list pages can patch their
     local state in real time without polling.
+
+    Pass ``project_id`` explicitly so the WebSocket firehose can filter events
+    by project without a DB round-trip per event. If omitted, the payload will
+    carry ``null`` for ``project_id`` (events from callers that have not been
+    updated yet will be filtered out by scoped clients, not leaked).
     """
     def _iso(val) -> str | None:
         return val.isoformat() if val else None
@@ -125,6 +132,7 @@ async def publish_build_update(
         "event": "build_update",
         "id": str(build.id),
         "pipeline_id": str(build.pipeline_id),
+        "project_id": str(project_id) if project_id else None,
         "number": build.number,
         "branch": build.branch,
         "commit_sha": build.commit_sha,

@@ -20,9 +20,10 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.deps import require_permission
+from app.core.access import project_id_for_build
+from app.core.deps import check_scoped_permission, get_current_active_user
 from app.database import get_db
-from app.models.build import Step
+from app.models.build import Stage, Step
 from app.models.user import User
 
 router = APIRouter()
@@ -111,7 +112,7 @@ async def resolve_input_gate(
     step_id: uuid.UUID,
     body: InputGatePayload,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("builds.manage")),
+    current_user: User = Depends(get_current_active_user),
 ) -> dict:
     """Called by the UI when a user approves or rejects a ``wait_input`` step."""
     step = await db.get(Step, step_id)
@@ -121,6 +122,15 @@ async def resolve_input_gate(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Step is not a wait_input gate")
     if step.status != "running":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Step is not currently waiting")
+
+    # Resolve step → stage → build → pipeline → project for scoped permission check.
+    stage = await db.get(Stage, step.stage_id)
+    if stage is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stage not found")
+    project_id = await project_id_for_build(db, stage.build_id)
+    if project_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build not found")
+    check_scoped_permission(current_user, "builds.manage", "project", project_id)
 
     settings = get_settings()
     redis_client = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)

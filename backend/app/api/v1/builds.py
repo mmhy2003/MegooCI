@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.access import ALL_PROJECTS, accessible_project_ids, project_id_for_build, project_id_for_pipeline
-from app.core.deps import check_scoped_permission, get_current_active_user, require_permission
+from app.core.deps import check_scoped_permission, get_current_active_user
 from app.database import get_db
 from app.models.build import Build, Stage
 from app.models.pipeline import Pipeline
@@ -140,7 +140,7 @@ async def trigger_build(
     settings = get_settings()
     _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
     try:
-        await publish_build_update(_redis, build)
+        await publish_build_update(_redis, build, project_id=project_id)
     except Exception:
         pass
     finally:
@@ -221,7 +221,7 @@ async def cancel_build(
         await signal_build_cancel(db, build_id, _redis)
         # Best-effort: publish cancellation to the global builds:updates channel.
         try:
-            await publish_build_update(_redis, build)
+            await publish_build_update(_redis, build, project_id=project_id)
         except Exception:
             pass
     finally:
@@ -304,7 +304,7 @@ async def retry_build(
     settings = get_settings()
     _redis = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
     try:
-        await publish_build_update(_redis, build)
+        await publish_build_update(_redis, build, project_id=project_id)
     except Exception:
         pass
     finally:

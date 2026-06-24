@@ -24,6 +24,7 @@ from sqlalchemy.orm import selectinload
 from app.config import get_settings
 from app.models.agent import Agent
 from app.models.build import Build, LogChunk, Stage, Step
+from app.models.pipeline import Pipeline
 from app.services.in_app_notifications import notify_user, get_admin_user_ids, publish_build_update
 from app.services.agent_dispatcher import (
     claim_agent,
@@ -215,6 +216,17 @@ async def _run_build_stages(
         if build is None:
             return
 
+        # Resolve project_id once so publish_build_update can include it in
+        # the payload for client-side project-scoped filtering.
+        # Best-effort: if the query fails (e.g. in lightweight test fixtures
+        # that don't create the pipelines table) we just omit the project_id.
+        try:
+            build_project_id: uuid.UUID | None = await db.scalar(
+                select(Pipeline.project_id).where(Pipeline.id == build.pipeline_id)
+            )
+        except Exception:
+            build_project_id = None
+
         # Serialize: only start if no sibling of this pipeline is already
         # running. The partial unique index makes this atomic across workers;
         # on conflict the build stays pending and is re-dispatched when the
@@ -229,7 +241,7 @@ async def _run_build_stages(
         # Best-effort: publish to the global builds:updates fan-out channel.
         # Wrapped in try/except so a Redis hiccup can never crash the executor.
         try:
-            await publish_build_update(redis_client, build)
+            await publish_build_update(redis_client, build, project_id=build_project_id)
         except Exception:
             pass
 
@@ -365,7 +377,7 @@ async def _run_build_stages(
         })
         # Best-effort: publish to the global builds:updates fan-out channel.
         try:
-            await publish_build_update(redis_client, build)
+            await publish_build_update(redis_client, build, project_id=build_project_id)
         except Exception:
             pass
 

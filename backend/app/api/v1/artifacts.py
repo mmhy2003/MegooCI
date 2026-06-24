@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.access import ALL_PROJECTS, accessible_project_ids, project_id_for_build
-from app.core.deps import check_scoped_permission, get_current_active_user, require_permission
+from app.core.deps import check_scoped_permission, get_current_active_user
 from app.database import get_db
 from app.models.artifact import Artifact
 from app.models.build import Build
