@@ -16,6 +16,7 @@ node_modules/
 .next/
 out/
 .vercel/
+*.tsbuildinfo
 
 # IDE
 .vscode/
