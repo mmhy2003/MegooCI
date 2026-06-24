@@ -14,6 +14,7 @@ from app.services.search import (
     INDEX_PROJECTS,
     INDEX_PIPELINES,
     INDEX_BUILDS,
+    INDEX_ARTIFACTS,
 )
 
 router = APIRouter()
@@ -125,6 +126,7 @@ async def search(
         INDEX_PROJECTS: build_project_filter(accessible_project_ids(current_user, "projects.read")),
         INDEX_PIPELINES: build_project_filter(accessible_project_ids(current_user, "pipelines.read")),
         INDEX_BUILDS: build_project_filter(accessible_project_ids(current_user, "builds.read")),
+        INDEX_ARTIFACTS: build_project_filter(accessible_project_ids(current_user, "artifacts.read")),
     }
 
     grouped = await multi_search(q, limit=limit, indexes=allowed_indexes, filters=filters)
