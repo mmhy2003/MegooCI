@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class ProjectMemberResponse(BaseModel):
+    user_role_id: uuid.UUID
     user_id: uuid.UUID
     email: str
     name: str
