@@ -103,7 +103,7 @@ export default function ProjectDetailPage() {
       try {
         const [p, pipes, secs, vars] = await Promise.all([
           projectsApi.get(id),
-          pipelinesApi.list({ project_id: id }),
+          pipelinesApi.listAll({ project_id: id }),
           secretsApi.list("project", id).catch(() => [] as Secret[]),
           envVarsApi.list("project", id).catch(() => [] as EnvVar[]),
         ]);

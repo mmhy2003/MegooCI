@@ -84,7 +84,7 @@ export default function RegistryPage() {
       const [ov, rp, pr, dt, ev, si] = await Promise.all([
         registryApi.overview(),
         registryApi.listRepositories({ limit: 100 }),
-        projectsApi.list(),
+        projectsApi.listAll(),
         canManage ? registryApi.listDeployTokens() : Promise.resolve([]),
         registryApi.listEvents({ limit: 20 }),
         systemApi.info(),

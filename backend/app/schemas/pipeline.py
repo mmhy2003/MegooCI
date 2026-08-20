@@ -46,6 +46,12 @@ class PipelineResponse(BaseModel):
     updated_at: datetime | None
 
 
+class PipelineListResponse(BaseModel):
+    items: list[PipelineResponse]
+    # Count of ALL pipelines matching the filters, not just this page.
+    total: int
+
+
 class PipelineValidateRequest(BaseModel):
     yaml_content: str = ""
 

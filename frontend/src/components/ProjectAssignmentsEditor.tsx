@@ -30,7 +30,7 @@ export function ProjectAssignmentsEditor({
 
   useEffect(() => {
     projectsApi
-      .list()
+      .listAll()
       .then(setProjects)
       .catch(() => {});
     rolesApi

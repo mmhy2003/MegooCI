@@ -34,3 +34,9 @@ class ProjectResponse(BaseModel):
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime | None
+
+
+class ProjectListResponse(BaseModel):
+    items: list[ProjectResponse]
+    # Count of ALL projects the caller can access, not just this page.
+    total: int

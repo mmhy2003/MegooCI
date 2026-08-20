@@ -98,7 +98,7 @@ export default function SecretsPage() {
 
   async function loadData() {
     try {
-      const allProjects = await projectsApi.list();
+      const allProjects = await projectsApi.listAll();
       setProjects(allProjects);
 
       // Fetch global + per-project secrets and env vars in parallel.

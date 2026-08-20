@@ -24,8 +24,9 @@ async def test_list_pipelines_filtered(sf):
         await db.commit()
     user = make_user(project_roles=[(a, make_role("viewer", VIEW))])
     async with sf() as db:
-        rows = await list_pipelines(project_id=None, skip=0, limit=20, db=db, _current_user=user)
-    assert {p.id for p in rows} == {pa}
+        res = await list_pipelines(project_id=None, skip=0, limit=20, db=db, _current_user=user)
+    assert {p.id for p in res.items} == {pa}
+    assert res.total == 1
 
 
 async def test_list_pipelines_project_filter_inaccessible_empty(sf):
@@ -35,8 +36,38 @@ async def test_list_pipelines_project_filter_inaccessible_empty(sf):
         await seed_pipeline(db, b); await db.commit()
     user = make_user(project_roles=[(a, make_role("viewer", VIEW))])
     async with sf() as db:
-        rows = await list_pipelines(project_id=b, skip=0, limit=20, db=db, _current_user=user)
-    assert rows == []
+        res = await list_pipelines(project_id=b, skip=0, limit=20, db=db, _current_user=user)
+    assert res.items == [] and res.total == 0
+
+
+async def test_list_pipelines_total_counts_beyond_page(sf):
+    """`total` reflects all matching pipelines, not just the returned page."""
+    from app.api.v1.pipelines import list_pipelines
+    async with sf() as db:
+        a = await seed_project(db, "A")
+        for _ in range(3):
+            await seed_pipeline(db, a)
+        await db.commit()
+    admin = make_user(is_admin=True)
+    async with sf() as db:
+        res = await list_pipelines(project_id=None, skip=0, limit=2, db=db, _current_user=admin)
+    assert len(res.items) == 2
+    assert res.total == 3
+
+
+async def test_list_pipelines_total_respects_project_filter(sf):
+    """With a project_id filter, total counts only that project's pipelines."""
+    from app.api.v1.pipelines import list_pipelines
+    async with sf() as db:
+        a = await seed_project(db, "A"); b = await seed_project(db, "B")
+        pa = await seed_pipeline(db, a)
+        await seed_pipeline(db, b); await seed_pipeline(db, b)
+        await db.commit()
+    admin = make_user(is_admin=True)
+    async with sf() as db:
+        res = await list_pipelines(project_id=a, skip=0, limit=20, db=db, _current_user=admin)
+    assert {p.id for p in res.items} == {pa}
+    assert res.total == 1
 
 
 async def test_get_pipeline_scoped_403(sf):

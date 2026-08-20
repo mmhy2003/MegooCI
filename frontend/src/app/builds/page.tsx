@@ -51,8 +51,8 @@ export default function BuildsPage() {
       try {
         const [builds, pipelines, projects] = await Promise.all([
           buildsApi.list({ limit: 100 }),
-          pipelinesApi.list({ limit: 100 }),
-          projectsApi.list({ limit: 100 }),
+          pipelinesApi.listAll(),
+          projectsApi.listAll(),
         ]);
         setAllBuilds(builds);
         const pMap: Record<string, Pipeline> = {};

@@ -66,7 +66,7 @@ export default function NewPipelinePage() {
 
   React.useEffect(() => {
     projectsApi
-      .list()
+      .listAll()
       .then((data) => {
         setProjects(data);
         if (data.length > 0) setProjectId(data[0].id);

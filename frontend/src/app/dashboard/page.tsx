@@ -80,23 +80,23 @@ export default function DashboardPage() {
   React.useEffect(() => {
     async function fetchData() {
       try {
-        const [pipelines, builds, agents, projects] = await Promise.all([
-          pipelinesApi.list(),
+        const [pipelinesRes, builds, agents, projects] = await Promise.all([
+          pipelinesApi.list({ limit: 100 }),
           buildsApi.list({ limit: 10 }),
           agentsApi.list().catch(() => []),
-          projectsApi.list({ limit: 100 }),
+          projectsApi.listAll(),
         ]);
         const activeAgents = agents.filter(
           (a) => a.status === "online" || a.status === "busy",
         ).length;
         agentCountRef.current = activeAgents;
-        pipelineCountRef.current = pipelines.length;
+        pipelineCountRef.current = pipelinesRes.total;
 
-        setStats(calcStats(builds, activeAgents, pipelines.length));
+        setStats(calcStats(builds, activeAgents, pipelinesRes.total));
         setRecentBuilds(builds);
 
         const pMap: Record<string, Pipeline> = {};
-        for (const p of pipelines) pMap[p.id] = p;
+        for (const p of pipelinesRes.items) pMap[p.id] = p;
         setPipelineMap(pMap);
 
         const prjMap: Record<string, Project> = {};

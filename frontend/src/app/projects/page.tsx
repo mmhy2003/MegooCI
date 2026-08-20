@@ -27,14 +27,19 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { usePermission } from "@/hooks/use-permission";
 import { useAuthStore } from "@/lib/auth";
+
+const PAGE_SIZE = 20;
 
 export default function ProjectsPage() {
   const confirm = useConfirm();
   const canManage = usePermission("projects.manage");
   const { user } = useAuthStore();
   const [projects, setProjects] = React.useState<Project[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [page, setPage] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
@@ -43,13 +48,33 @@ export default function ProjectsPage() {
   const [newName, setNewName] = React.useState("");
   const [newDesc, setNewDesc] = React.useState("");
 
-  React.useEffect(() => {
-    projectsApi
-      .list()
-      .then(setProjects)
-      .catch(() => toast.error("Failed to load projects"))
-      .finally(() => setLoading(false));
+  const loadPage = React.useCallback(async (p: number) => {
+    setLoading(true);
+    try {
+      const res = await projectsApi.list({
+        skip: p * PAGE_SIZE,
+        limit: PAGE_SIZE,
+      });
+      setProjects(res.items);
+      setTotal(res.total);
+    } catch {
+      toast.error("Failed to load projects");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  React.useEffect(() => {
+    loadPage(page);
+  }, [page, loadPage]);
+
+  // After a delete, the current page may fall past the end of the shrunken
+  // list — clamp back to the last valid page (setPage triggers the refetch).
+  function refetchAfterDelete() {
+    const lastPage = Math.max(0, Math.ceil((total - 1) / PAGE_SIZE) - 1);
+    if (page > lastPage) setPage(lastPage);
+    else loadPage(page);
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -59,15 +84,17 @@ export default function ProjectsPage() {
     }
     setCreating(true);
     try {
-      const project = await projectsApi.create({
+      await projectsApi.create({
         name: newName,
         description: newDesc || undefined,
       });
-      setProjects((prev) => [project, ...prev]);
       setDialogOpen(false);
       setNewName("");
       setNewDesc("");
       toast.success("Project created!");
+      // Newest-first ordering puts the new project on the first page.
+      if (page === 0) loadPage(0);
+      else setPage(0);
     } catch {
       toast.error("Failed to create project");
     } finally {
@@ -98,8 +125,8 @@ export default function ProjectsPage() {
     setDeletingId(project.id);
     try {
       await projectsApi.delete(project.id);
-      setProjects((prev) => prev.filter((p) => p.id !== project.id));
       toast.success("Project deleted");
+      refetchAfterDelete();
       return;
     } catch (err: unknown) {
       const body = (err as { body?: { detail?: string } } | undefined)?.body;
@@ -140,8 +167,8 @@ export default function ProjectsPage() {
 
       try {
         await projectsApi.delete(project.id, { force: true });
-        setProjects((prev) => prev.filter((p) => p.id !== project.id));
         toast.success("Project and its contents deleted");
+        refetchAfterDelete();
       } catch (err2: unknown) {
         const body2 = (err2 as { body?: { detail?: string } } | undefined)
           ?.body;
@@ -164,7 +191,7 @@ export default function ProjectsPage() {
               Projects
             </h1>
             <p className="text-sm text-muted-foreground sm:text-base">
-              {projects.length} project{projects.length !== 1 ? "s" : ""}
+              {total} project{total !== 1 ? "s" : ""}
             </p>
           </div>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -234,7 +261,7 @@ export default function ProjectsPage() {
               </Card>
             ))}
           </div>
-        ) : projects.length === 0 ? (
+        ) : total === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
               <div className="mb-4 rounded-full bg-muted p-4">
@@ -255,6 +282,7 @@ export default function ProjectsPage() {
             </CardContent>
           </Card>
         ) : (
+          <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((project) => {
               const isDeleting = deletingId === project.id;
@@ -307,6 +335,14 @@ export default function ProjectsPage() {
               );
             })}
           </div>
+          <PaginationControls
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            onPageChange={setPage}
+            disabled={loading}
+          />
+          </>
         )}
       </div>
     </AppLayout>

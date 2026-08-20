@@ -73,7 +73,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await searchApi.search(query.trim(), 8);
+        // 20 is the backend's per-category maximum (see api/v1/search.py).
+        const res = await searchApi.search(query.trim(), 20);
         setResults(res.results);
         setActiveIndex(0);
       } catch {

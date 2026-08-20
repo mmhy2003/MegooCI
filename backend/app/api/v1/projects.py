@@ -13,7 +13,13 @@ from app.models.pipeline import Pipeline
 from app.models.project import Project
 from app.models.secret import EnvVar, Secret
 from app.models.user import User
-from app.schemas.project import ProjectCreate, ProjectMemberResponse, ProjectResponse, ProjectUpdate
+from app.schemas.project import (
+    ProjectCreate,
+    ProjectListResponse,
+    ProjectMemberResponse,
+    ProjectResponse,
+    ProjectUpdate,
+)
 
 router = APIRouter()
 
@@ -25,21 +31,25 @@ def _slugify(name: str) -> str:
     return re.sub(r"-+", "-", slug).strip("-")
 
 
-@router.get("", response_model=list[ProjectResponse])
+@router.get("", response_model=ProjectListResponse)
 async def list_projects(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_active_user),
-) -> list[Project]:
+) -> ProjectListResponse:
     pids = accessible_project_ids(_current_user, "projects.read")
     if pids is not ALL_PROJECTS and not pids:
-        return []
+        return ProjectListResponse(items=[], total=0)
     query = select(Project).order_by(Project.created_at.desc())
+    count_query = select(func.count()).select_from(Project)
     if pids is not ALL_PROJECTS:
         query = query.where(Project.id.in_(pids))
+        count_query = count_query.where(Project.id.in_(pids))
+    total = await db.scalar(count_query) or 0
     result = await db.execute(query.offset(skip).limit(limit))
-    return list(result.scalars().all())
+    items = [ProjectResponse.model_validate(p) for p in result.scalars().all()]
+    return ProjectListResponse(items=items, total=total)
 
 
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)

@@ -316,6 +316,30 @@ export const authApi = {
 };
 
 // ------------------------------------------------------------------
+// Pagination
+// ------------------------------------------------------------------
+/** Paginated list envelope: one page of items + total matching count. */
+export interface Paginated<T> {
+  items: T[];
+  total: number;
+}
+
+/** Fetch every page of a paginated endpoint (100 items per request). */
+async function fetchAllPages<T>(
+  fetchPage: (skip: number, limit: number) => Promise<Paginated<T>>,
+): Promise<T[]> {
+  const pageSize = 100;
+  const first = await fetchPage(0, pageSize);
+  const all = [...first.items];
+  while (all.length < first.total) {
+    const page = await fetchPage(all.length, pageSize);
+    if (page.items.length === 0) break; // result set shrank mid-iteration
+    all.push(...page.items);
+  }
+  return all;
+}
+
+// ------------------------------------------------------------------
 // Projects
 // ------------------------------------------------------------------
 export interface Project {
@@ -342,8 +366,14 @@ export const projectsApi = {
     if (params?.skip) qs.set("skip", String(params.skip));
     if (params?.limit) qs.set("limit", String(params.limit));
     const query = qs.toString();
-    return fetchApi<Project[]>(`/api/v1/projects${query ? `?${query}` : ""}`);
+    return fetchApi<Paginated<Project>>(
+      `/api/v1/projects${query ? `?${query}` : ""}`,
+    );
   },
+
+  /** Every project the caller can access (pages through the API). */
+  listAll: () =>
+    fetchAllPages<Project>((skip, limit) => projectsApi.list({ skip, limit })),
 
   create: (data: CreateProjectRequest) =>
     fetchApi<Project>("/api/v1/projects", {
@@ -419,10 +449,16 @@ export const pipelinesApi = {
     if (params?.skip) qs.set("skip", String(params.skip));
     if (params?.limit) qs.set("limit", String(params.limit));
     const query = qs.toString();
-    return fetchApi<Pipeline[]>(
+    return fetchApi<Paginated<Pipeline>>(
       `/api/v1/pipelines${query ? `?${query}` : ""}`,
     );
   },
+
+  /** Every matching pipeline (pages through the API). */
+  listAll: (params?: { project_id?: string }) =>
+    fetchAllPages<Pipeline>((skip, limit) =>
+      pipelinesApi.list({ ...params, skip, limit }),
+    ),
 
   create: (data: CreatePipelineRequest) =>
     fetchApi<Pipeline>("/api/v1/pipelines", {

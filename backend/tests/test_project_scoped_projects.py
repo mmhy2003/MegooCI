@@ -36,9 +36,10 @@ async def test_list_projects_filtered_to_assigned(sf):
         await db.commit()
     user = make_user(project_roles=[(a, make_role("developer", DEV))])
     async with sf() as db:
-        rows = await list_projects(skip=0, limit=20, db=db, _current_user=user)
-    ids = {p.id for p in rows}
+        res = await list_projects(skip=0, limit=20, db=db, _current_user=user)
+    ids = {p.id for p in res.items}
     assert ids == {a} and b not in ids
+    assert res.total == 1
 
 
 async def test_list_projects_admin_sees_all(sf):
@@ -48,8 +49,9 @@ async def test_list_projects_admin_sees_all(sf):
         await db.commit()
     admin = make_user(is_admin=True)
     async with sf() as db:
-        rows = await list_projects(skip=0, limit=20, db=db, _current_user=admin)
-    assert {p.id for p in rows} == {a, b}
+        res = await list_projects(skip=0, limit=20, db=db, _current_user=admin)
+    assert {p.id for p in res.items} == {a, b}
+    assert res.total == 2
 
 
 async def test_list_projects_zero_assignments_empty(sf):
@@ -58,8 +60,38 @@ async def test_list_projects_zero_assignments_empty(sf):
         await seed_project(db, "A"); await db.commit()
     user = make_user()
     async with sf() as db:
-        rows = await list_projects(skip=0, limit=20, db=db, _current_user=user)
-    assert rows == []
+        res = await list_projects(skip=0, limit=20, db=db, _current_user=user)
+    assert res.items == [] and res.total == 0
+
+
+async def test_list_projects_total_counts_beyond_page(sf):
+    """`total` reflects all accessible projects, not just the returned page."""
+    from app.api.v1.projects import list_projects
+    async with sf() as db:
+        for i in range(3):
+            await seed_project(db, f"P{i}")
+        await db.commit()
+    admin = make_user(is_admin=True)
+    async with sf() as db:
+        res = await list_projects(skip=0, limit=2, db=db, _current_user=admin)
+    assert len(res.items) == 2
+    assert res.total == 3
+
+
+async def test_list_projects_skip_pages_through(sf):
+    """skip/limit paginate without overlap and total stays constant."""
+    from app.api.v1.projects import list_projects
+    async with sf() as db:
+        ids = {await seed_project(db, f"P{i}") for i in range(3)}
+        await db.commit()
+    admin = make_user(is_admin=True)
+    async with sf() as db:
+        page1 = await list_projects(skip=0, limit=2, db=db, _current_user=admin)
+        page2 = await list_projects(skip=2, limit=2, db=db, _current_user=admin)
+    got = {p.id for p in page1.items} | {p.id for p in page2.items}
+    assert got == ids
+    assert len(page2.items) == 1
+    assert page1.total == page2.total == 3
 
 
 async def test_get_project_inaccessible_403(sf):

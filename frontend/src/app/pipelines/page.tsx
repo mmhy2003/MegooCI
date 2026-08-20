@@ -19,35 +19,55 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { Skeleton } from "@/components/ui/skeleton";
+
+const PAGE_SIZE = 20;
 
 export default function PipelinesPage() {
   const router = useRouter();
   const canManage = usePermission("pipelines.manage");
   const { user } = useAuthStore();
   const [pipelines, setPipelines] = React.useState<Pipeline[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [page, setPage] = React.useState(0);
   const [projectMap, setProjectMap] = React.useState<Record<string, Project>>({});
   const [loading, setLoading] = React.useState(true);
 
+  // The project-name map is page-independent — load it once.
   React.useEffect(() => {
-    async function load() {
-      try {
-        const [pips, projects] = await Promise.all([
-          pipelinesApi.list(),
-          projectsApi.list({ limit: 100 }),
-        ]);
-        setPipelines(pips);
+    projectsApi
+      .listAll()
+      .then((projects) => {
         const pMap: Record<string, Project> = {};
         for (const p of projects) pMap[p.id] = p;
         setProjectMap(pMap);
-      } catch {
-        toast.error("Failed to load pipelines");
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
+      })
+      .catch(() => {
+        // Names are decorative here; the pipeline list is still usable.
+      });
   }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    pipelinesApi
+      .list({ skip: page * PAGE_SIZE, limit: PAGE_SIZE })
+      .then((res) => {
+        if (cancelled) return;
+        setPipelines(res.items);
+        setTotal(res.total);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load pipelines");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [page]);
 
   return (
     <AppLayout>
@@ -59,8 +79,7 @@ export default function PipelinesPage() {
               Pipelines
             </h1>
             <p className="text-sm text-muted-foreground sm:text-base">
-              {pipelines.length} pipeline{pipelines.length !== 1 ? "s" : ""}{" "}
-              configured
+              {total} pipeline{total !== 1 ? "s" : ""} configured
             </p>
           </div>
           {canManage && (
@@ -90,7 +109,7 @@ export default function PipelinesPage() {
               </Card>
             ))}
           </div>
-        ) : pipelines.length === 0 ? (
+        ) : total === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
               <div className="mb-4 rounded-full bg-muted p-4">
@@ -111,6 +130,7 @@ export default function PipelinesPage() {
             </CardContent>
           </Card>
         ) : (
+          <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {pipelines.map((pipeline) => (
               <Link key={pipeline.id} href={`/pipelines/${pipeline.id}`}>
@@ -158,6 +178,14 @@ export default function PipelinesPage() {
               </Link>
             ))}
           </div>
+          <PaginationControls
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            onPageChange={setPage}
+            disabled={loading}
+          />
+          </>
         )}
       </div>
     </AppLayout>

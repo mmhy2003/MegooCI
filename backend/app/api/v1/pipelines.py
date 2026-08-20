@@ -13,6 +13,7 @@ from app.models.user import User
 from app.schemas.pipeline import (
     PipelineCreate,
     PipelineErrorItem,
+    PipelineListResponse,
     PipelineResponse,
     PipelineUpdate,
     PipelineValidateRequest,
@@ -25,26 +26,31 @@ router = APIRouter()
 _MAX_VALIDATE_BYTES = 256 * 1024
 
 
-@router.get("", response_model=list[PipelineResponse])
+@router.get("", response_model=PipelineListResponse)
 async def list_pipelines(
     project_id: uuid.UUID | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_active_user),
-) -> list[Pipeline]:
+) -> PipelineListResponse:
     pids = accessible_project_ids(_current_user, "pipelines.read")
     if pids is not ALL_PROJECTS and not pids:
-        return []
+        return PipelineListResponse(items=[], total=0)
     if project_id is not None and pids is not ALL_PROJECTS and project_id not in pids:
-        return []
+        return PipelineListResponse(items=[], total=0)
     query = select(Pipeline).order_by(Pipeline.created_at.desc())
+    count_query = select(func.count()).select_from(Pipeline)
     if project_id is not None:
         query = query.where(Pipeline.project_id == project_id)
+        count_query = count_query.where(Pipeline.project_id == project_id)
     elif pids is not ALL_PROJECTS:
         query = query.where(Pipeline.project_id.in_(pids))
+        count_query = count_query.where(Pipeline.project_id.in_(pids))
+    total = await db.scalar(count_query) or 0
     result = await db.execute(query.offset(skip).limit(limit))
-    return list(result.scalars().all())
+    items = [PipelineResponse.model_validate(p) for p in result.scalars().all()]
+    return PipelineListResponse(items=items, total=total)
 
 
 @router.post("", response_model=PipelineResponse, status_code=status.HTTP_201_CREATED)
