@@ -50,6 +50,12 @@ services:
       - .env
     volumes:
       - megooci_storage:/var/lib/megooci
+    # Every open WebSocket holds a client socket plus a Redis pub/sub socket;
+    # don't let a low host default (often 1024) cap concurrent connections.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     depends_on:
       db:
         condition: service_healthy

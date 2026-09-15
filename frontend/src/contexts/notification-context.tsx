@@ -114,7 +114,12 @@ export function NotificationProvider({
 
     return () => {
       clearTimeout(reconnectTimerRef.current);
-      wsRef.current?.close();
+      if (wsRef.current) {
+        // Detach onclose first, otherwise closing here schedules a reconnect
+        // with the stale token that is never cleaned up.
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+      }
       wsRef.current = null;
     };
   }, [accessToken, fetchInitial, connectWs]);

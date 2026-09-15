@@ -88,7 +88,12 @@ export function useBuildUpdates(onUpdate: (build: BuildUpdatePayload) => void) {
 
     return () => {
       clearTimeout(reconnectTimerRef.current);
-      wsRef.current?.close();
+      if (wsRef.current) {
+        // Detach onclose first, otherwise closing here schedules a reconnect
+        // that outlives the component and leaks a server-side subscription.
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+      }
       wsRef.current = null;
     };
   }, [accessToken, connect]);
