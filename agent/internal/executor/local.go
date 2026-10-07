@@ -96,6 +96,9 @@ func (l *Local) Run(ctx context.Context, step Step, logs chan<- LogLine) Result 
 	if step.StepType == "kube_apply" {
 		return l.runKubeApply(ctx, step, workdir, logs)
 	}
+	if step.StepType == "http_request" {
+		return l.runHTTPRequest(ctx, step, logs)
+	}
 
 	// Resolve the command to execute based on step type.
 	command := resolveCommand(step)
