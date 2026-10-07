@@ -42,6 +42,7 @@ def test_scope_catalog_lists_full_access_first():
         "artifacts.download",
         "automate.workflows",
         "read.only",
+        "coding.agent",
     ]
     assert catalog[0]["label"] == "Full access"
 
@@ -68,3 +69,22 @@ def test_is_valid_scope_key():
     assert is_valid_scope_key(FULL_ACCESS_KEY)
     assert is_valid_scope_key("read.only")
     assert not is_valid_scope_key("bogus")
+
+
+def test_coding_agent_scope_is_exactly_seven_permissions():
+    assert expand_scopes(["coding.agent"]) == {
+        "projects.read",
+        "projects.manage",
+        "pipelines.read",
+        "pipelines.manage",
+        "builds.read",
+        "builds.manage",
+        "artifacts.read",
+    }
+
+
+def test_coding_agent_scope_label():
+    assert resolve_scope(["coding.agent"]) == {
+        "key": "coding.agent",
+        "label": "Coding agent",
+    }

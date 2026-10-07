@@ -48,6 +48,22 @@ TOKEN_SCOPES: dict[str, ScopeEntry] = {
         "description": "View-only access across everything your role can see.",
         "permissions": _READ_ONLY_PERMISSIONS,
     },
+    "coding.agent": {
+        "label": "Coding agent",
+        "description": (
+            "Lets a coding agent work with projects, pipelines, builds, and "
+            "artifacts through MCP or the API."
+        ),
+        "permissions": frozenset({
+            "projects.read",
+            "projects.manage",
+            "pipelines.read",
+            "pipelines.manage",
+            "builds.read",
+            "builds.manage",
+            "artifacts.read",
+        }),
+    },
 }
 
 
