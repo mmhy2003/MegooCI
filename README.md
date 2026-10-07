@@ -25,7 +25,7 @@ Most teams use ~20 % of Jenkins' surface area. MegooCI re-implements that 20 % w
 ### Core
 
 - **Declarative YAML pipelines** — schema-validated `megooci.yaml` with stages, steps, conditional `when`, and matrix builds. Edited in-browser with a **CodeMirror 6** syntax-highlighted editor.
-- **11 built-in step action types** — `run` (shell), `docker_build`, `docker_login`, `docker_push`, `git_clone`, `git_pull`, `git_push`, `ssh_exec`, `kube_apply`, `wait_webhook`, and `wait_input`. Template interpolation resolves `${{ secrets.NAME }}` and `${{ env.NAME }}` at runtime.
+- **12 built-in step action types** — `run` (shell), `docker_build`, `docker_login`, `docker_push`, `git_clone`, `git_pull`, `git_push`, `ssh_exec`, `kube_apply`, `http_request`, `wait_webhook`, and `wait_input`. Template interpolation resolves `${{ secrets.NAME }}` and `${{ env.NAME }}` at runtime.
 - **AI pipeline assistant** — chat-based interface that generates and refines YAML from natural-language prompts, with project-context awareness (available secrets / env vars) and one-click apply.
 - **Remote build agents** — self-hosted `megooci-agent` Go binary (~15 MB static binary) connects to the controller over an authenticated WebSocket and runs steps on remote hosts. Falls back to local execution when no agent is online.
 - **Embedded OCI / Docker registry** — OCI Distribution Spec v1.1 compliant. `docker login`, `push`, and `pull` work out of the box. Deploy tokens, anonymous pull, immutable tags, per-project quotas, and automatic garbage collection included.
@@ -171,6 +171,24 @@ To deploy to Kubernetes instead, store a kubeconfig as a secret and use `kube_ap
           context: prod-cluster    # optional kubeconfig context
           timeout: 300             # optional rollout wait in seconds (default 300)
 ```
+
+To call an external system — a chat webhook, a deployment or ticketing system, or your own service — use `http_request`. The payload has no fixed shape: write whatever the receiver expects under `json`, or use `body` for any other format.
+
+```yaml
+  - name: announce
+    steps:
+      - http_request:
+          url: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+          headers:
+            Authorization: Bearer ${{ secrets.DEPLOY_API_TOKEN }}
+          json:
+            text: "Build #${{ build.number }} of ${{ pipeline.name }} deployed"
+            branch: ${{ build.branch }}
+          retries: 2                 # optional; network errors, 5xx and 429 only
+          expect_status: [200, 202]  # optional (default: any 2xx)
+```
+
+The request is sent from the build agent, so it can reach systems on the agent's network, and the step fails the build when the status is not the expected one. The URL path, headers and body are never written to the build log. It needs an agent built from this release or later.
 
 Link the pipeline to a project whose repository points at your GitHub / GitLab repo — a push triggers the webhook and the pipeline runs on the next available agent.
 

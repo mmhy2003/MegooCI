@@ -20,6 +20,7 @@ import {
   Play,
   Package,
   Server,
+  Send,
   FileEdit,
   CopyPlus,
   Trash2,
@@ -325,6 +326,34 @@ stages:
     namespace: production   # optional
     context: prod-cluster   # optional kubeconfig context
     timeout: 300            # optional rollout wait in seconds (default 300)`,
+  },
+  {
+    id: "http_request",
+    title: "HTTP Request",
+    icon: <Send className="h-4 w-4" />,
+    description:
+      "Send an HTTP request to an external system: a chat webhook, a deployment or ticketing system, or your own service. Write the payload the receiver expects under json (sent as JSON), or use body for any other format and set Content-Type yourself. Placeholders always produce strings; literal numbers and booleans keep their type. The step fails the build when the status is not the expected one, retries only network errors, 5xx and 429, and does not follow redirects. The request is sent from the build agent, and the URL path, headers and body are never written to the build log. Most webhook URLs contain a token, so store the URL as a secret. Requires an agent built from this release or later.",
+    yaml: `- http_request:
+    url: \${{ secrets.DEPLOY_WEBHOOK_URL }}
+    method: POST                 # optional: GET, POST, PUT, PATCH, DELETE (default POST)
+    headers:                     # optional
+      Authorization: Bearer \${{ secrets.DEPLOY_API_TOKEN }}
+    json:                        # any mapping or list
+      text: "Build #\${{ build.number }} of \${{ pipeline.name }} deployed"
+      branch: \${{ build.branch }}
+      tags: [ci, production]
+    timeout: 30                  # optional seconds per attempt (default 30, max 300)
+    retries: 2                   # optional extra attempts (default 0, max 5)
+    expect_status: [200, 202]    # optional (default: any 2xx)
+    verify_tls: true             # optional; false accepts a self-signed certificate
+
+# Not JSON? Use body instead of json:
+- http_request:
+    url: https://legacy.example.com/hook
+    headers:
+      Content-Type: application/xml
+    body: |
+      <deploy><build>\${{ build.number }}</build></deploy>`,
   },
   {
     id: "wait_webhook",
