@@ -107,3 +107,47 @@ async def test_get_artifact_download_url_passes_ttl():
         "url": "http://x", "expires_in": 60,
     }
     assert api.calls == [("GET", f"/artifacts/{AID}/signed-url", {"params": {"ttl": 60}})]
+
+
+# ── polling guidance ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("status", ["pending", "queued", "running"])
+async def test_get_build_tells_the_agent_when_to_poll_again(status):
+    api = FakeApi({("GET", f"/builds/{BID}"): {**BUILD, "status": status, "stages": []}})
+    result = await run_tool("get_build", api, build_id=BID)
+    assert result["poll_after_seconds"] == 60
+
+
+@pytest.mark.parametrize("status", ["success", "failed", "cancelled"])
+async def test_finished_build_has_no_poll_hint(status):
+    api = FakeApi({("GET", f"/builds/{BID}"): {**BUILD, "status": status, "stages": []}})
+    result = await run_tool("get_build", api, build_id=BID)
+    assert "poll_after_seconds" not in result
+
+
+async def test_trigger_build_tells_the_agent_when_to_poll():
+    api = FakeApi({("POST", f"/builds/{LID}/trigger"): {**BUILD, "status": "pending"}})
+    result = await run_tool("trigger_build", api, pipeline_id=LID)
+    assert result == {**BUILD_ROW, "status": "pending", "poll_after_seconds": 60}
+
+
+async def test_retry_build_tells_the_agent_when_to_poll():
+    api = FakeApi({("POST", f"/builds/{BID}/retry"): {**BUILD, "status": "queued"}})
+    result = await run_tool("retry_build", api, build_id=BID)
+    assert result["poll_after_seconds"] == 60
+
+
+async def test_list_builds_rows_stay_compact():
+    api = FakeApi({("GET", "/builds"): [{**BUILD, "status": "running"}]})
+    result = await run_tool("list_builds", api)
+    assert "poll_after_seconds" not in result["items"][0]
+
+
+def test_descriptions_and_instructions_state_the_polling_interval():
+    from app.mcp.server import INSTRUCTIONS
+    from app.mcp.tools import ALL_TOOLS
+
+    by_name = {t.name: t for t in ALL_TOOLS}
+    for name in ("get_build", "trigger_build", "retry_build"):
+        assert "60 seconds" in by_name[name].description, name
+    assert "60 seconds" in INSTRUCTIONS

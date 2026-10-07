@@ -29,6 +29,24 @@ _STEP_KEYS = ("id", "name", "step_type", "status", "exit_code", "started_at", "f
 _READ = frozenset({"builds.read"})
 _MANAGE = frozenset({"builds.manage"})
 
+# How long an agent should wait between status checks of an unfinished build.
+# Guidance only: the server cannot make an agent wait.
+POLL_INTERVAL_SECONDS = 60
+_UNFINISHED = frozenset({"pending", "queued", "running"})
+_POLL_GUIDANCE = (
+    "While the build is pending, queued or running the result includes "
+    f"`poll_after_seconds`: wait {POLL_INTERVAL_SECONDS} seconds (for example "
+    f"`sleep {POLL_INTERVAL_SECONDS}`) before calling get_build again, and "
+    "stop once `status` is success, failed or cancelled."
+)
+
+
+def _with_poll_hint(build: dict[str, Any]) -> dict[str, Any]:
+    """Tell the agent when to check again, for as long as the build is unfinished."""
+    if build.get("status") in _UNFINISHED:
+        build["poll_after_seconds"] = POLL_INTERVAL_SECONDS
+    return build
+
 
 class ListBuildsInput(PageInput):
     pipeline_id: uuid.UUID | None = Field(
@@ -86,7 +104,7 @@ async def _get_build(api: ApiClient, args: BuildIdInput) -> dict[str, Any]:
         }
         for stage in build.get("stages", [])
     ]
-    return result
+    return _with_poll_hint(result)
 
 
 async def _get_build_logs(api: ApiClient, args: BuildLogsInput) -> str:
@@ -104,7 +122,7 @@ async def _trigger_build(api: ApiClient, args: TriggerBuildInput) -> dict[str, A
             "params": args.params,
         },
     )
-    return pick(build, _ROW_KEYS)
+    return _with_poll_hint(pick(build, _ROW_KEYS))
 
 
 async def _cancel_build(api: ApiClient, args: BuildIdInput) -> dict[str, Any]:
@@ -112,7 +130,7 @@ async def _cancel_build(api: ApiClient, args: BuildIdInput) -> dict[str, Any]:
 
 
 async def _retry_build(api: ApiClient, args: BuildIdInput) -> dict[str, Any]:
-    return pick(await api.post(f"/builds/{args.build_id}/retry"), _ROW_KEYS)
+    return _with_poll_hint(pick(await api.post(f"/builds/{args.build_id}/retry"), _ROW_KEYS))
 
 
 TOOLS: tuple[ToolSpec, ...] = (
@@ -127,8 +145,8 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name="get_build",
         description=(
-            "Get one build with the status of each stage and step. Poll this "
-            "after trigger_build until `status` is success, failed or cancelled."
+            "Get one build with the status of each stage and step. Use it to "
+            "follow a build after trigger_build or retry_build. " + _POLL_GUIDANCE
         ),
         input_model=BuildIdInput,
         handler=_get_build,
@@ -151,7 +169,9 @@ TOOLS: tuple[ToolSpec, ...] = (
         name="trigger_build",
         description=(
             "Start a build of a pipeline. Returns the new build; if a run is "
-            "already queued for the pipeline, returns that one instead."
+            "already queued for the pipeline, returns that one instead. Follow "
+            f"it with get_build, checking no more than once every {POLL_INTERVAL_SECONDS} "
+            "seconds until it finishes."
         ),
         input_model=TriggerBuildInput,
         handler=_trigger_build,
@@ -167,7 +187,11 @@ TOOLS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         name="retry_build",
-        description="Re-run a finished build with the same branch, commit and parameters.",
+        description=(
+            "Re-run a finished build with the same branch, commit and "
+            "parameters. Follow the new build with get_build, checking no more "
+            f"than once every {POLL_INTERVAL_SECONDS} seconds until it finishes."
+        ),
         input_model=BuildIdInput,
         handler=_retry_build,
         required_permissions=_MANAGE,

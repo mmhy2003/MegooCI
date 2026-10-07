@@ -202,6 +202,10 @@ Twenty-two tools. All IDs are UUID strings.
 - **`get_pipeline`** returns the full pipeline including `yaml_content`.
 - **`get_build`** returns the build with its stages and steps (name, type, status, exit
   code, timings). Step `config_json` is omitted.
+- **Polling guidance.** While a build is pending, queued or running, `get_build`,
+  `trigger_build` and `retry_build` add `poll_after_seconds: 60` to their result, and the
+  tool descriptions and server instructions tell the agent to wait that long between
+  `get_build` calls. This is guidance only: the server cannot make an agent wait.
 - **`update_pipeline`** accepts the `PipelineUpdate` fields, including `enabled`, so it also
   serves as enable/disable.
 - **Null means "leave unchanged".** On create and update tools, an optional argument passed
