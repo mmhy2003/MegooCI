@@ -74,9 +74,10 @@ routes themselves are the only safe unit to reuse.
 
 ### Wiring into the app
 
-- `backend/app/main.py` builds the MCP app through a factory, `create_mcp_app(app)`, passing
-  the FastAPI app in. This avoids a circular import: the MCP package needs the app object for
-  in-process calls, and `main.py` needs the MCP app to mount it.
+- `backend/app/main.py` calls `mount_mcp(app)`, which builds the MCP app through the factory
+  `create_mcp_app(app)` and adds it to the FastAPI app as a plain route at `/mcp`. Passing the
+  app in avoids a circular import: the MCP package needs the app object for in-process calls,
+  and `main.py` needs the MCP app to mount it.
 - The SDK's session manager must be running for mounted requests to work, and a mounted
   sub-app's own lifespan never runs. The existing `lifespan` in `main.py` therefore enters
   the session manager for the life of the process.
@@ -93,16 +94,22 @@ The SDK transport rejects requests whose `Host` header is not on its allow-list 
 allow-list is the host of `MEGOOCI_PUBLIC_API_URL`, plus `localhost` and `127.0.0.1`, plus
 any entries in `MEGOOCI_MCP_ALLOWED_HOSTS` for deployments where a proxy rewrites `Host`.
 
+The transport also rejects a request that carries an `Origin` header not on its origin
+allow-list (403). Agents do not send `Origin`; browser-based MCP tools do. The allowed
+origins are those of `MEGOOCI_PUBLIC_URL` and `MEGOOCI_PUBLIC_API_URL`, plus localhost.
+
 ### Package layout (`backend/app/mcp/`)
 
 | File | Responsibility |
 |---|---|
-| `__init__.py` | Exports `create_mcp_app`. |
+| `__init__.py` | Exports `create_mcp_app` and `mount_mcp`. |
 | `server.py` | Builds the low-level MCP server, its `tools/list` and `tools/call` handlers, and the ASGI app wrapped in the auth guard. |
 | `auth.py` | ASGI guard: extracts the Bearer token, authenticates the PAT, attaches the caller to the request, or answers 401. |
-| `registry.py` | `ToolSpec` (name, description, input schema, required permissions, annotations, handler) and `visible_tools(permissions)`. |
+| `registry.py` | `ToolSpec` (name, description, input schema, required permissions, annotations, handler) and `visible_tools(tools, permissions)`. |
 | `client.py` | `ApiClient`: an in-process HTTP client bound to one caller's token, and the REST-error-to-tool-error mapping. |
 | `log_view.py` | Pure function that trims build log chunks for agent consumption. |
+| `tools/__init__.py` | `ALL_TOOLS`, the assembled catalog. |
+| `tools/_common.py` | Helpers shared by the tool modules. |
 | `tools/identity.py` | `whoami`, `search`. |
 | `tools/projects.py` | Project tools. |
 | `tools/pipelines.py` | Pipeline tools. |
@@ -195,6 +202,10 @@ Twenty-two tools. All IDs are UUID strings.
   code, timings). Step `config_json` is omitted.
 - **`update_pipeline`** accepts the `PipelineUpdate` fields, including `enabled`, so it also
   serves as enable/disable.
+- **Null means "leave unchanged".** On create and update tools, an optional argument passed
+  as `null` is not sent to the API, because agents routinely pass null for arguments they do
+  not care about. A field therefore cannot be cleared through MCP. An update with no fields
+  to change is a tool error.
 - **`trigger_build`** accepts `pipeline_id`, optional `branch`, `commit_sha`, and `params`.
   When the pipeline YAML is invalid the tool error carries the line-level errors from REST.
 - **Deletes never cascade.** `delete_project` and `delete_pipeline` do not expose `force`
@@ -203,8 +214,8 @@ Twenty-two tools. All IDs are UUID strings.
   the UI.
 - **`get_artifact_download_url`** returns a signed, time-limited URL (`ttl` passes through,
   REST bounds apply). The agent downloads the file itself; binaries never pass through MCP.
-- **`whoami`** returns the owner's id, email, name, primary role, and the effective
-  permission list, which already reflects the token scope.
+- **`whoami`** returns the owner's id, email, name, primary role, admin flag, and the
+  effective permission list, which already reflects the token scope.
 
 ### Build logs
 
@@ -216,6 +227,8 @@ reduces that for an agent:
   steps' logs; otherwise all steps.
 - Output: text grouped under `stage / step` headings, the last `tail_lines` lines of the
   selection, and a note stating how many lines were omitted.
+- ANSI escape sequences are removed, and the returned log text is capped at 60,000
+  characters (keeping the end), so one very long line cannot flood the agent.
 
 The REST route still loads every chunk into memory, so trimming reduces what the agent
 receives, not server cost. Pushing the limit down into the query is a possible later
@@ -267,7 +280,7 @@ The only frontend change is a setup block on **Settings → API Tokens**.
 |---|---|
 | Missing, malformed, unknown, revoked, or expired token; inactive owner | HTTP 401 from the guard, before any MCP handling. |
 | Unknown or hidden tool name | Tool error "Unknown tool". |
-| Arguments fail the tool's input schema | Tool error from the SDK's schema validation. |
+| Arguments fail the tool's input schema | Tool error listing the invalid arguments. The server validates with the tool's own input model; the SDK transport does not. Unknown arguments are rejected. |
 | REST 400 / 403 / 404 / 409 / 413 / 422 | Tool error (`isError`) whose text is the REST `detail`. A structured `detail` (pipeline validation errors) is rendered as a message plus one line per error with line and column. |
 | REST 503 (maintenance mode) | Tool error with the REST `detail`. |
 | REST 5xx or an unexpected exception | Tool error "MegooCI internal error"; the exception is logged server-side with its traceback. Internal details are not returned to the agent. |
@@ -289,7 +302,11 @@ arguments are not logged, since they can contain pipeline YAML and build paramet
 
 ## Testing
 
-Backend tests follow the in-memory SQLite pattern in `backend/tests/_rbac.py`.
+Backend tests follow the in-memory SQLite pattern in `backend/tests/_rbac.py`. That helper is
+extended so PostgreSQL `ARRAY` columns (role permissions, token scopes) round-trip on SQLite,
+which the MCP tests need because they authenticate through the real database path. The
+integration tests build a FastAPI app from the individual routers the tools call, because
+the local test environment cannot import the full application (it lacks `litellm`).
 
 **Unit**
 - `visible_tools`: read-only permissions hide every write tool; the `admin` sentinel shows
@@ -329,7 +346,9 @@ Backend tests follow the in-memory SQLite pattern in `backend/tests/_rbac.py`.
 - `backend/app/core/token_scopes.py` — add the `coding.agent` scope.
 - `backend/app/api/v1/system.py` — `mcp` in `SystemInfo`.
 - `backend/app/mcp/` — **new** package (see "Package layout").
-- `backend/tests/` — new MCP unit and integration tests.
+- `backend/tests/` — new MCP unit and integration tests; `_rbac.py` gains ARRAY-on-SQLite
+  support.
+- `.env.example`, `README.md` — document the settings and how to connect an agent.
 - `frontend/src/lib/api.ts` — `mcp` on `SystemInfo`.
 - `frontend/src/app/settings/page.tsx` — MCP setup block in the API Tokens section.
 
