@@ -1,3 +1,4 @@
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
@@ -35,7 +36,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("Meilisearch init failed — search will be unavailable", exc_info=True)
 
-    yield
+    # The MCP transport's session manager must run for the life of the app:
+    # a route added with a sub-application never runs its own lifespan.
+    async with contextlib.AsyncExitStack() as stack:
+        if mcp_app is not None:
+            await stack.enter_async_context(mcp_app.run())
+        yield
 
 
 settings = get_settings()
@@ -82,3 +88,9 @@ from app.api.v1.registry_oci import router as registry_oci_router
 # empty-path routes (@router.get("")) used by our list/create endpoints.
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(registry_oci_router, tags=["registry-oci"])
+
+from app.mcp import mount_mcp
+
+# MCP endpoint for coding agents at /mcp. None when MEGOOCI_MCP_ENABLED is
+# false. Its session manager is started in lifespan() above.
+mcp_app = mount_mcp(app)

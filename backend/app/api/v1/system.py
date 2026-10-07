@@ -119,6 +119,13 @@ class GitIntegrationInfo(BaseModel):
     webhook_rate_limit_per_minute: int
 
 
+class McpInfo(BaseModel):
+    """Where coding agents connect (the MCP endpoint)."""
+
+    enabled: bool
+    url: str
+
+
 class MaintenanceInfo(BaseModel):
     enabled: bool
     message: str | None = None
@@ -135,6 +142,7 @@ class SystemInfo(BaseModel):
     auth: AuthInfo
     registry: RegistryInfo
     git: GitIntegrationInfo
+    mcp: McpInfo
 
 
 class AiSettingsUpdate(BaseModel):
@@ -201,6 +209,13 @@ def _build_ai_info(overrides: dict[str, str] | None = None) -> AiInfo:
     )
 
 
+def _build_mcp_info(settings) -> McpInfo:
+    return McpInfo(
+        enabled=settings.MEGOOCI_MCP_ENABLED,
+        url=f"{settings.MEGOOCI_PUBLIC_API_URL.rstrip('/')}/mcp",
+    )
+
+
 @router.get("/info", response_model=SystemInfo)
 async def get_system_info(
     _current_user: User = Depends(get_current_active_user),
@@ -251,6 +266,7 @@ async def get_system_info(
             webhook_delivery_retention=settings.MEGOOCI_WEBHOOK_DELIVERY_RETENTION,
             webhook_rate_limit_per_minute=settings.MEGOOCI_WEBHOOK_RATE_LIMIT_PER_MINUTE,
         ),
+        mcp=_build_mcp_info(settings),
     )
 
 

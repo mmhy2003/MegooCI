@@ -64,14 +64,14 @@ def build_app(session_factory, **settings_overrides):
 
 
 @contextlib.asynccontextmanager
-async def mcp_client(app, token):
+async def mcp_client(app, token, url=MCP_URL):
     """An MCP client talking to *app* in-process as *token*."""
     http = httpx2.AsyncClient(
         transport=httpx2.ASGITransport(app=app),
         headers={"Authorization": f"Bearer {token}"},
     )
     async with http:
-        async with Client(streamable_http_client(MCP_URL, http_client=http)) as client:
+        async with Client(streamable_http_client(url, http_client=http)) as client:
             yield client
 
 

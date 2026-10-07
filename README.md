@@ -228,6 +228,22 @@ See [`agent/README.md`](agent/README.md) for the full operator guide.
 
 Delivery history is visible per repository with signature validation status and error details.
 
+## Connecting a Coding Agent (MCP)
+
+MegooCI serves a [Model Context Protocol](https://modelcontextprotocol.io) endpoint so coding agents can list projects, edit and validate pipelines, trigger builds, and read build logs on your behalf.
+
+1. In **Settings → API Tokens**, create a token with the **Coding agent** scope.
+2. Point your agent at `{MEGOOCI_PUBLIC_API_URL}/mcp` with the token as a Bearer header. For Claude Code:
+
+   ```bash
+   claude mcp add --transport http megooci http://localhost:8000/mcp \
+     --header "Authorization: Bearer <your-token>"
+   ```
+
+The agent acts as you: it can never do more than your roles and the token's scope allow. Tools take IDs, so an agent first lists or searches, then acts. Cascade deletes are not available to agents; deleting a pipeline together with its build history must be done in the web UI.
+
+If requests to `/mcp` are answered with `421`, a proxy is rewriting the `Host` header: add that host to `MEGOOCI_MCP_ALLOWED_HOSTS`.
+
 ## Architecture
 
 ```
@@ -277,6 +293,8 @@ MegooCI reads all configuration from environment variables. See [`.env.example`]
 | `MEGOOCI_STORAGE_ROOT` | `/var/lib/megooci` | Root folder for artifacts, logs, and registry blobs. |
 | `MEGOOCI_PUBLIC_URL` | `http://localhost:3000` | Public URL of the frontend app (used in invite & password-reset email links). |
 | `MEGOOCI_PUBLIC_API_URL` | `http://localhost:8000` | Externally-reachable backend API URL (webhooks, registry, artifact links, agent controller URL). |
+| `MEGOOCI_MCP_ENABLED` | `true` | Serve the MCP endpoint for coding agents at `{MEGOOCI_PUBLIC_API_URL}/mcp`. |
+| `MEGOOCI_MCP_ALLOWED_HOSTS` | — | Extra `Host` values the MCP endpoint accepts (comma-separated), for reverse proxies that rewrite `Host`. |
 | `MEGOOCI_AI_ENABLED` | `true` | Enable/disable the AI pipeline assistant. |
 | `MEGOOCI_AI_PROVIDER` | `openai` | `openai`, `anthropic`, `ollama`, `azure_openai`, `custom`, or `disabled`. |
 | `MEGOOCI_AI_API_KEY` | — | Provider API key (not needed for `ollama`). |
