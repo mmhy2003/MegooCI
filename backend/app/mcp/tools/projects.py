@@ -35,8 +35,9 @@ class CreateProjectInput(ToolInput):
 
 class UpdateProjectInput(ToolInput):
     project_id: uuid.UUID = Field(description="Project ID (UUID).")
-    name: str | None = Field(None, description="New name.")
-    description: str | None = Field(None, description="New description.")
+    # min_length: an empty string must not blank a column (see body_of).
+    name: str | None = Field(None, min_length=1, description="New name.")
+    description: str | None = Field(None, min_length=1, description="New description.")
 
 
 async def _list_projects(api: ApiClient, args: PageInput) -> dict[str, Any]:

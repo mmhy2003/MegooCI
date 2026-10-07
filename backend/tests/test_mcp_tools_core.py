@@ -163,3 +163,57 @@ async def test_uuid_objects_and_strings_are_both_accepted():
     api = FakeApi({("GET", f"/projects/{PID}"): {"id": PID}})
     await run_tool("get_project", api, project_id=uuid.UUID(PID))
     assert api.calls[0][1] == f"/projects/{PID}"
+
+
+# ── review fixes ────────────────────────────────────────────────────────
+
+# The exact 409 texts the REST handlers produce (projects.py / pipelines.py).
+REST_PROJECT_409 = (
+    "Cannot delete project: it still has 2 pipeline(s), 1 secret(s). Remove them "
+    "first, or retry with ?force=true to cascade-delete everything in this project."
+)
+REST_PIPELINE_409 = (
+    "Cannot delete pipeline: it still has 3 build(s). "
+    "Retry with ?force=true to cascade-delete them."
+)
+
+
+async def test_blocked_project_delete_does_not_advertise_force():
+    api = FakeApi(error=ApiError(409, REST_PROJECT_409))
+    with pytest.raises(ApiError) as exc:
+        await run_tool("delete_project", api, project_id=PID)
+    detail = exc.value.detail
+    assert "force" not in detail
+    assert "2 pipeline(s), 1 secret(s)" in detail
+    assert "web UI" in detail
+
+
+async def test_blocked_pipeline_delete_does_not_advertise_force():
+    api = FakeApi(error=ApiError(409, REST_PIPELINE_409))
+    with pytest.raises(ApiError) as exc:
+        await run_tool("delete_pipeline", api, pipeline_id=LID)
+    detail = exc.value.detail
+    assert "force" not in detail
+    assert "3 build(s)" in detail
+    assert "web UI" in detail
+
+
+@pytest.mark.parametrize(
+    "tool, id_field, id_value, field",
+    [
+        ("update_project", "project_id", PID, "name"),
+        ("update_project", "project_id", PID, "description"),
+        ("update_pipeline", "pipeline_id", LID, "name"),
+        ("update_pipeline", "pipeline_id", LID, "yaml_content"),
+        ("update_pipeline", "pipeline_id", LID, "default_branch"),
+        ("update_pipeline", "pipeline_id", LID, "source_repo_url"),
+    ],
+)
+async def test_update_tools_reject_empty_strings(tool, id_field, id_value, field):
+    """An empty string must not blank a column: fields cannot be cleared through MCP."""
+    from pydantic import ValidationError
+
+    api = FakeApi()
+    with pytest.raises(ValidationError):
+        await run_tool(tool, api, **{id_field: id_value, field: ""})
+    assert api.calls == []

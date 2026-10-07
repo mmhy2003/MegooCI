@@ -68,6 +68,8 @@ routes themselves are the only safe unit to reuse.
   so the agent-facing URL is `{MEGOOCI_PUBLIC_API_URL}/mcp`.
 - Transport: Streamable HTTP, **stateless**, with plain JSON responses (no SSE streams, no
   server-side sessions). Any uvicorn worker can serve any request.
+- Only `POST` is served. Other methods get 405: the transport would otherwise answer `GET`
+  with an event stream that stays open and so outlives a revoked token.
 - Dependency: the official `mcp` Python SDK, pinned `>=2,<3`.
 - The SDK's **low-level server API** is used with our own tool registry, because the tool
   list must vary per caller (see "Tool list filtering").
@@ -204,14 +206,14 @@ Twenty-two tools. All IDs are UUID strings.
   serves as enable/disable.
 - **Null means "leave unchanged".** On create and update tools, an optional argument passed
   as `null` is not sent to the API, because agents routinely pass null for arguments they do
-  not care about. A field therefore cannot be cleared through MCP. An update with no fields
-  to change is a tool error.
+  not care about. A field therefore cannot be cleared through MCP: update tools also reject
+  an empty string. An update with no fields to change is a tool error.
 - **`trigger_build`** accepts `pipeline_id`, optional `branch`, `commit_sha`, and `params`.
   When the pipeline YAML is invalid the tool error carries the line-level errors from REST.
 - **Deletes never cascade.** `delete_project` and `delete_pipeline` do not expose `force`
   and never send `force=true`. When REST answers 409 because dependents exist, the tool
-  error carries the REST detail and states that a cascade delete must be done by a person in
-  the UI.
+  error lists what is in the way and states that a cascade delete must be done by a person in
+  the UI. The REST hint to retry with `?force=true` is removed from the message.
 - **`get_artifact_download_url`** returns a signed, time-limited URL (`ttl` passes through,
   REST bounds apply). The agent downloads the file itself; binaries never pass through MCP.
 - **`whoami`** returns the owner's id, email, name, primary role, admin flag, and the

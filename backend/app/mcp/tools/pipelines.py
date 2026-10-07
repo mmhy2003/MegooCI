@@ -53,14 +53,17 @@ class CreatePipelineInput(ToolInput):
 
 class UpdatePipelineInput(ToolInput):
     pipeline_id: uuid.UUID = Field(description="Pipeline ID (UUID).")
-    name: str | None = Field(None, description="New name.")
-    yaml_content: str | None = Field(None, description="New pipeline definition (YAML).")
-    default_branch: str | None = Field(None, description="New default branch.")
+    # min_length: an empty string must not blank a column (see body_of).
+    name: str | None = Field(None, min_length=1, description="New name.")
+    yaml_content: str | None = Field(
+        None, min_length=1, description="New pipeline definition (YAML)."
+    )
+    default_branch: str | None = Field(None, min_length=1, description="New default branch.")
     enabled: bool | None = Field(None, description="False disables the pipeline.")
     project_repository_id: uuid.UUID | None = Field(
         None, description="Linked repository ID."
     )
-    source_repo_url: str | None = Field(None, description="Repository URL.")
+    source_repo_url: str | None = Field(None, min_length=1, description="Repository URL.")
 
 
 async def _list_pipelines(api: ApiClient, args: ListPipelinesInput) -> dict[str, Any]:

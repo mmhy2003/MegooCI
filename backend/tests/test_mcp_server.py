@@ -230,6 +230,7 @@ async def test_delete_pipeline_with_builds_is_refused(sf):
     message = text_of(result)
     assert "1 build(s)" in message
     assert "web UI" in message
+    assert "force" not in message
     async with sf() as db:
         assert await db.get(Pipeline, pipeline) is not None
 
@@ -338,3 +339,18 @@ async def test_tool_call_is_logged_without_its_arguments(sf, caplog):
         for line in lines
     )
     assert not any("TOP-SECRET-YAML" in line for line in lines)
+
+
+async def test_only_post_is_served(sf):
+    """GET would open an event stream that outlives token revocation."""
+    async with sf() as db:
+        uid = await seed_member(db, DEV)
+        token = await seed_token(db, uid)
+        await db.commit()
+    app, mcp_app = build_app(sf)
+    headers = {"Authorization": f"Bearer {token}", "Accept": "text/event-stream"}
+    async with mcp_app.run(), raw_http(app) as http:
+        got = await http.get("/mcp", headers=headers)
+        deleted = await http.delete("/mcp", headers=headers)
+    assert got.status_code == 405
+    assert deleted.status_code == 405

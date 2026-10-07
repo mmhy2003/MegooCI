@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -11,9 +12,12 @@ from app.mcp.client import ApiError
 from app.mcp.registry import ToolInput
 
 CASCADE_NOTE = (
-    " A cascade delete is not available through MCP; a person must do it in "
-    "the MegooCI web UI."
+    " Remove those first. A cascade delete is not available through MCP; a "
+    "person must do it in the MegooCI web UI."
 )
+# The REST 409 text ends with a sentence telling the caller to retry with
+# ?force=true. That hint is for people using the UI or API, not for agents.
+_FORCE_HINT = re.compile(r"[^.]*\?force=true[^.]*\.?", re.IGNORECASE)
 
 
 class PageInput(ToolInput):
@@ -45,4 +49,5 @@ def explain_blocked_delete(error: ApiError) -> ApiError:
     if error.status_code != 409:
         return error
     detail = error.detail if isinstance(error.detail, str) else str(error.detail)
+    detail = _FORCE_HINT.sub("", detail).strip()
     return ApiError(409, detail + CASCADE_NOTE)

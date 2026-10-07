@@ -36,5 +36,7 @@ def mount_mcp(
 
     mcp_app = create_mcp_app(app, settings, session_factory)
     # A Route (not a Mount) so the path is exactly /mcp with no redirect.
-    app.router.routes.append(Route(MCP_PATH, endpoint=mcp_app.asgi))
+    # POST only: the transport would answer GET with an event stream that
+    # stays open and so outlives a revoked token. Other methods get 405.
+    app.router.routes.append(Route(MCP_PATH, endpoint=mcp_app.asgi, methods=["POST"]))
     return mcp_app
