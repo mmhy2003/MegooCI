@@ -236,9 +236,13 @@ MegooCI serves a [Model Context Protocol](https://modelcontextprotocol.io) endpo
 2. Point your agent at `{MEGOOCI_PUBLIC_API_URL}/mcp` with the token as a Bearer header. For Claude Code:
 
    ```bash
-   claude mcp add --transport http megooci http://localhost:8000/mcp \
+   claude mcp add --transport http --scope user megooci http://localhost:8000/mcp \
      --header "Authorization: Bearer <your-token>"
    ```
+
+   `--scope user` makes MegooCI available in all your projects, not only the one where you run the command.
+
+Setup for Cursor, VS Code, Codex CLI, Gemini CLI and other clients, the full tool list, and troubleshooting are in [docs/mcp-agents.md](docs/mcp-agents.md).
 
 The agent acts as you: it can never do more than your roles and the token's scope allow. Tools take IDs, so an agent first lists or searches, then acts. Cascade deletes are not available to agents; deleting a pipeline together with its build history must be done in the web UI.
 

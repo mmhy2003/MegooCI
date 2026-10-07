@@ -274,7 +274,7 @@ The only frontend change is a setup block on **Settings → API Tokens**.
   ready-to-paste snippet with a `<your-token>` placeholder:
 
   ```
-  claude mcp add --transport http megooci <url> --header "Authorization: Bearer <your-token>"
+  claude mcp add --transport http --scope user megooci <url> --header "Authorization: Bearer <your-token>"
   ```
 
 - Copy next to it recommends creating a token with the **Coding agent** scope.

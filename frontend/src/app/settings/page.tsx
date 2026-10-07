@@ -545,7 +545,9 @@ function AiConfigCard({
 }
 
 function mcpAddCommand(url: string): string {
-  return `claude mcp add --transport http megooci ${url} --header "Authorization: Bearer <your-token>"`;
+  // --scope user: available in all of the user's projects, not only the
+  // directory where the command is run.
+  return `claude mcp add --transport http --scope user megooci ${url} --header "Authorization: Bearer <your-token>"`;
 }
 
 export default function SettingsPage() {
