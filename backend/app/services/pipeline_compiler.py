@@ -13,6 +13,7 @@ Supports:
 - git_clone / git_pull / git_push
 - ssh_exec (remote commands)
 - kube_apply (apply Kubernetes manifests and wait for rollout)
+- http_request (send an HTTP request to an external system)
 - wait_webhook / wait_input (pipeline gates)
 - trigger_pipeline (trigger another pipeline)
 - parallel step groups
@@ -39,6 +40,7 @@ STEP_TYPE_KEYS = {
     "git_push",
     "ssh_exec",
     "kube_apply",
+    "http_request",
     "wait_webhook",
     "wait_input",
     "copy_files",
@@ -526,6 +528,120 @@ def _validate_runs_on(value: Any) -> list[str]:
     return errors
 
 
+HTTP_REQUEST_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
+HTTP_REQUEST_FIELDS = (
+    "url",
+    "method",
+    "headers",
+    "json",
+    "body",
+    "timeout",
+    "retries",
+    "expect_status",
+    "verify_tls",
+)
+HTTP_REQUEST_MAX_TIMEOUT = 300
+HTTP_REQUEST_MAX_RETRIES = 5
+
+
+def _is_number(value: Any) -> bool:
+    """A real number. YAML booleans are ints in Python and must not count."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_status_code(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599
+
+
+def _validate_http_request(value: Any, prefix: str) -> list[str]:
+    """Validate an ``http_request`` step. The agent sends the request; it
+    re-checks the URL once placeholders have been replaced."""
+    if not isinstance(value, dict):
+        return [f"{prefix}: 'http_request' must be a mapping"]
+
+    errors: list[str] = []
+
+    # A mistyped field (``json_body``, ``header``) would otherwise be dropped
+    # silently and the request sent without it.
+    unknown = sorted(str(k) for k in value if k not in HTTP_REQUEST_FIELDS)
+    if unknown:
+        errors.append(
+            f"{prefix}: 'http_request' has unknown field(s): {', '.join(unknown)} "
+            f"(allowed: {', '.join(HTTP_REQUEST_FIELDS)})"
+        )
+
+    url = value.get("url")
+    if not isinstance(url, str) or not url.strip():
+        errors.append(f"{prefix}: 'http_request' requires 'url'")
+    elif "${{" not in url and not url.strip().lower().startswith(("http://", "https://")):
+        errors.append(f"{prefix}: 'http_request' url must start with http:// or https://")
+
+    method = value.get("method")
+    if method is not None and (
+        not isinstance(method, str) or method.strip().upper() not in HTTP_REQUEST_METHODS
+    ):
+        errors.append(
+            f"{prefix}: 'http_request' method must be one of: {', '.join(HTTP_REQUEST_METHODS)}"
+        )
+
+    headers = value.get("headers")
+    if headers is not None:
+        if not isinstance(headers, dict):
+            errors.append(f"{prefix}: 'http_request' headers must be a mapping")
+        elif not all(
+            isinstance(k, str) and isinstance(v, (str, int, float, bool))
+            for k, v in headers.items()
+        ):
+            errors.append(
+                f"{prefix}: 'http_request' header names must be strings and values "
+                f"must be strings, numbers or booleans"
+            )
+
+    has_json = "json" in value
+    has_body = "body" in value
+    if has_json and has_body:
+        errors.append(f"{prefix}: 'http_request' accepts either 'json' or 'body', not both")
+    if has_json and not isinstance(value["json"], (dict, list)):
+        errors.append(f"{prefix}: 'http_request' json must be a mapping or a list")
+    if has_body and not isinstance(value["body"], str):
+        errors.append(f"{prefix}: 'http_request' body must be a string")
+
+    timeout = value.get("timeout")
+    if timeout is not None and (
+        not _is_number(timeout) or timeout <= 0 or timeout > HTTP_REQUEST_MAX_TIMEOUT
+    ):
+        errors.append(
+            f"{prefix}: 'http_request' timeout must be a number greater than 0 "
+            f"and at most {HTTP_REQUEST_MAX_TIMEOUT}"
+        )
+
+    retries = value.get("retries")
+    if retries is not None and (
+        not isinstance(retries, int)
+        or isinstance(retries, bool)
+        or not 0 <= retries <= HTTP_REQUEST_MAX_RETRIES
+    ):
+        errors.append(
+            f"{prefix}: 'http_request' retries must be a whole number from 0 "
+            f"to {HTTP_REQUEST_MAX_RETRIES}"
+        )
+
+    expect = value.get("expect_status")
+    if expect is not None:
+        codes = expect if isinstance(expect, list) else [expect]
+        if not codes or not all(_is_status_code(c) for c in codes):
+            errors.append(
+                f"{prefix}: 'http_request' expect_status must be a status code "
+                f"(100-599) or a non-empty list of them"
+            )
+
+    verify_tls = value.get("verify_tls")
+    if verify_tls is not None and not isinstance(verify_tls, bool):
+        errors.append(f"{prefix}: 'http_request' verify_tls must be true or false")
+
+    return errors
+
+
 def _validate_step(step: dict[str, Any], stage_name: str, step_index: int) -> list[str]:
     """Validate a single step definition. Returns a list of errors."""
     errors: list[str] = []
@@ -651,6 +767,9 @@ def _validate_step(step: dict[str, Any], stage_name: str, step_index: int) -> li
                 or timeout <= 0
             ):
                 errors.append(f"{prefix}: 'kube_apply' timeout must be a positive number")
+
+    elif step_type == "http_request":
+        errors.extend(_validate_http_request(value, prefix))
 
     elif step_type == "wait_webhook":
         if value is not None and not isinstance(value, dict):
