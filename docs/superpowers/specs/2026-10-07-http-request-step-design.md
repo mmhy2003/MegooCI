@@ -102,7 +102,10 @@ The **build agent** sends the request.
 | `expect_status` | no | any 2xx | An integer from 100 to 599, or a non-empty list of them. |
 | `verify_tls` | no | `true` | A boolean. `false` accepts any server certificate. |
 
+- These nine fields are the only ones. Any other field is a validation error, so a
+  misspelling such as `json_body` is reported instead of being dropped silently.
 - `json` and `body` cannot both be present. Neither is required: a request may have no body.
+- `json` is encoded with `<`, `>` and `&` sent as written, not as `<`-style escapes.
 - With `json`, the agent sets `Content-Type: application/json` unless `headers` already sets
   a `Content-Type` (matched case-insensitively).
 - With `body`, no `Content-Type` is added. The author sets it in `headers`.
@@ -130,7 +133,7 @@ body: '{"build": ${{ build.number }}, "ok": true}'
 - Add `http_request` to `STEP_TYPE_KEYS`.
 - In `_validate_step`, enforce every rule in the Fields table that can be checked without
   resolving placeholders:
-  - `http_request` must be a mapping.
+  - `http_request` must be a mapping, and may contain only the nine fields.
   - `url` is required and must be a non-empty string. When it contains no `${{`, it must
     start with `http://` or `https://`.
   - `method`, when present, must be one of the five allowed values.
@@ -183,8 +186,13 @@ standard library.
 
 - Success: exit code 0.
 - Failure: exit code 1, with one stderr line stating why, for example
-  `unexpected status 500 (expected 2xx)`, `unexpected status 302 (redirects are not
-  followed)`, or `request failed: context deadline exceeded`.
+  `unexpected status 500 (expected 2xx)`, `unexpected status 302 (expected 2xx; redirects
+  are not followed)`, or `request failed: timed out after 30s`.
+- Error messages follow the logging rules below. Go's HTTP client quotes the full URL in its
+  errors, so only the underlying cause is reported. A certificate error adds a hint about
+  `verify_tls: false`.
+- A missing or empty `url` (typically a secret that does not exist) fails the step before
+  anything is sent, with a message that points at the secret.
 - Cancellation: status `cancelled`, like other agent steps.
 
 ## Logging
@@ -195,9 +203,11 @@ what could be secret.
 ```
 POST https://hooks.example.com/… (attempt 1 of 3)
 200 OK in 182 ms
-Response (first 2000 characters):
+Response:
 {"ok": true}
 ```
+
+The heading reads `Response (first 2000 characters):` when the body was cut.
 
 - The URL is shown as scheme and host only, followed by `/…`. Path, query and any user-info
   are never printed, because webhook URLs often carry the secret in the path.
@@ -205,7 +215,9 @@ Response (first 2000 characters):
 - The response body is printed up to its first 2000 characters. Before printing, every
   occurrence of a request header value or of the full request URL is replaced with `***`, in
   case the receiver echoes them. Header values shorter than 4 characters are not masked, to
-  avoid mangling the output.
+  avoid mangling the output. For a header value with spaces, such as `Bearer <token>`, each
+  space-separated part of 8 characters or more is masked on its own as well.
+- Invalid UTF-8 in the response is replaced, so the log stays valid text.
 - At most 64 KiB of the response body is read; the rest is discarded.
 - A response with no body prints no response section.
 - When `verify_tls` is `false`, one warning line says certificate verification is disabled.
@@ -230,13 +242,20 @@ later. Nothing is added to route the step only to capable agents.
   - always take URLs that contain tokens, and all credentials, from `${{ secrets.X }}`;
   - placeholders are strings; use `body` when a number or boolean must come from a
     placeholder.
+
+  The prompt's Placeholders list gains the build-context placeholders
+  (`${{ build.number }}`, `${{ build.branch }}`, `${{ build.commit }}`,
+  `${{ pipeline.name }}`, `${{ project.name }}`), and rule 7, which forbade webhook URLs in
+  YAML outright, now says to take an `http_request` URL from a secret.
 - `README.md`: add `http_request` to the list of built-in step types, with a short example.
 - The module docstring of `pipeline_compiler.py` lists the new step.
 
 ## Testing
 
-**Backend (pytest, `backend/tests/test_pipeline_validation.py` and
-`test_pipeline_compiler.py`)**
+**Backend (pytest, `backend/tests/test_http_request_step.py` and
+`test_http_request_docs.py`)**
+- Every YAML example in the AI prompt's `http_request` section passes the validator, and the
+  section names all nine fields.
 - A valid step with `json`, and one with `body`, pass validation and compile to
   `step_type == "http_request"` with the mapping as config.
 - Each rule fails with a message naming the stage and step: not a mapping; missing `url`;
@@ -272,8 +291,8 @@ later. Nothing is added to route the step only to capable agents.
 ## Files touched
 
 - `backend/app/services/pipeline_compiler.py` — step type, validation, docstring.
-- `backend/tests/test_pipeline_validation.py`, `backend/tests/test_pipeline_compiler.py` —
-  new tests.
+- `backend/tests/test_http_request_step.py`, `backend/tests/test_http_request_docs.py` —
+  **new**.
 - `agent/internal/executor/http_request.go` — **new**.
 - `agent/internal/executor/http_request_test.go` — **new**.
 - `agent/internal/executor/local.go` — one dispatch branch.
