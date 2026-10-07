@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # registry token realm, artifact download links, and the controller URL
     # advertised to external agents.
     MEGOOCI_PUBLIC_API_URL: str = "http://localhost:8000"
+    # MCP endpoint for coding agents, served at {MEGOOCI_PUBLIC_API_URL}/mcp.
+    MEGOOCI_MCP_ENABLED: bool = True
+    # Extra Host header values the MCP endpoint accepts, comma-separated. The
+    # host of MEGOOCI_PUBLIC_API_URL and localhost are always accepted; add
+    # entries here when a reverse proxy rewrites Host (e.g. "backend:8000").
+    MEGOOCI_MCP_ALLOWED_HOSTS: str = ""
     MEGOOCI_REGISTRY_ENABLED: bool = True
     MEGOOCI_REGISTRY_HOST: str = "localhost"
     MEGOOCI_REGISTRY_PORT: int = 0

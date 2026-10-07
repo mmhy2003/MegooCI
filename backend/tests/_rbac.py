@@ -1,7 +1,7 @@
 """Shared RBAC test scaffolding: in-memory DB + seeding helpers."""
 import uuid
 
-from sqlalchemy import event
+from sqlalchemy import JSON, event
 from sqlalchemy.dialects.postgresql import ARRAY, JSON as PG_JSON, JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
@@ -24,9 +24,31 @@ def _array_sqlite(element, compiler, **kw):  # pragma: no cover
     return "JSON"
 
 
+_arrays_patched = False
+
+
+def _arrays_as_json_on_sqlite(metadata) -> None:
+    """Store PostgreSQL ARRAY columns as JSON when the dialect is SQLite.
+
+    Without this, binding a Python list fails on insert, and a JSON string
+    written by raw SQL reads back as a list of single characters. The variant
+    only applies to SQLite, so PostgreSQL behavior is untouched.
+    """
+    global _arrays_patched
+    if _arrays_patched:
+        return
+    for table in metadata.tables.values():
+        for column in table.columns:
+            if isinstance(column.type, ARRAY):
+                column.type = column.type.with_variant(JSON(), "sqlite")
+    _arrays_patched = True
+
+
 async def build_inmemory_factory():
     import app.models  # noqa: F401 — registers all tables on Base.metadata
     from app.models.base import Base
+
+    _arrays_as_json_on_sqlite(Base.metadata)
 
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
