@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +54,21 @@ type httpRequestSpec struct {
 	Retries   int
 	Expect    []int // empty means "any 2xx"
 	VerifyTLS bool
+	// secrets are the strings to hide in anything written to the build log,
+	// longest first. Built once by buildHTTPMaskList.
+	secrets []string
+}
+
+// Header values that are never credentials. Masking them would only mangle
+// ordinary response text such as "application/json".
+var httpNonSecretHeaders = map[string]bool{
+	"accept":           true,
+	"accept-encoding":  true,
+	"accept-language":  true,
+	"content-encoding": true,
+	"content-length":   true,
+	"content-type":     true,
+	"user-agent":       true,
 }
 
 // configNumber reads a numeric config value. JSON numbers arrive as float64
@@ -116,6 +134,15 @@ func parseHTTPRequestConfig(cfg map[string]interface{}) (*httpRequestSpec, error
 			return nil, errors.New("http_request: 'headers' must be a mapping")
 		}
 		spec.Headers = configStrMap(cfg, "headers")
+		for name, value := range spec.Headers {
+			// A secret pasted with a trailing newline is common; HTTP does
+			// not allow surrounding whitespace in a header value anyway.
+			value = strings.TrimSpace(value)
+			if strings.ContainsAny(value, "\r\n") {
+				return nil, fmt.Errorf("http_request: header '%s' contains a line break", name)
+			}
+			spec.Headers[name] = value
+		}
 	}
 
 	jsonValue, hasJSON := cfg["json"]
@@ -197,7 +224,77 @@ func parseHTTPRequestConfig(cfg map[string]interface{}) (*httpRequestSpec, error
 		spec.VerifyTLS = verify
 	}
 
+	spec.secrets = buildHTTPMaskList(spec)
 	return spec, nil
+}
+
+// isPlainScalar reports whether a header value is a boolean or a number,
+// which cannot be a credential.
+func isPlainScalar(value string) bool {
+	if value == "true" || value == "false" {
+		return true
+	}
+	_, err := strconv.ParseFloat(value, 64)
+	return err == nil
+}
+
+// buildHTTPMaskList collects every string that must not reach the build
+// log if the receiver, a proxy or an error message echoes it back: the URL
+// in each form a server might print it, its path segments and query values,
+// its credentials, and the header values.
+func buildHTTPMaskList(spec *httpRequestSpec) []string {
+	seen := map[string]bool{}
+	var list []string
+	add := func(value string, minLen int) {
+		if len(value) >= minLen && !seen[value] {
+			seen[value] = true
+			list = append(list, value)
+		}
+	}
+
+	u := spec.URL
+	// Whole-URL forms and anything that contains a path separator.
+	for _, form := range []string{spec.RawURL, u.String(), u.RequestURI(), u.Path, u.EscapedPath(), u.RawQuery} {
+		add(form, httpMaskMinLen)
+	}
+	for _, path := range []string{u.Path, u.EscapedPath()} {
+		for _, segment := range strings.Split(path, "/") {
+			add(segment, httpMaskMinPartLen)
+		}
+	}
+	for _, values := range u.Query() {
+		for _, value := range values {
+			if !isPlainScalar(value) {
+				add(value, httpMaskMinLen)
+			}
+		}
+	}
+	if u.User != nil {
+		if password, ok := u.User.Password(); ok {
+			add(password, httpMaskMinLen)
+			credentials := u.User.Username() + ":" + password
+			add(credentials, httpMaskMinLen)
+			// The client turns URL credentials into a Basic header.
+			add(base64.StdEncoding.EncodeToString([]byte(credentials)), httpMaskMinLen)
+		}
+	}
+
+	for name, value := range spec.Headers {
+		if httpNonSecretHeaders[strings.ToLower(name)] || isPlainScalar(value) {
+			continue
+		}
+		add(value, httpMaskMinLen)
+		if strings.Contains(value, " ") {
+			for _, part := range strings.Fields(value) {
+				add(part, httpMaskMinPartLen)
+			}
+		}
+	}
+
+	// Longest first: when one value contains another, replacing the short
+	// one first would leave the rest of the long one in the log.
+	sort.SliceStable(list, func(i, j int) bool { return len(list[i]) > len(list[j]) })
+	return list
 }
 
 func hasHeader(headers map[string]string, name string) bool {
@@ -241,23 +338,24 @@ func (s *httpRequestSpec) expectedText() string {
 // mask replaces the request's URL and header values wherever they appear in
 // text, in case the receiver (or an error message) echoes them back.
 func (s *httpRequestSpec) mask(text string) string {
-	secrets := []string{s.RawURL}
-	for _, value := range s.Headers {
-		secrets = append(secrets, value)
-		if strings.Contains(value, " ") {
-			for _, part := range strings.Fields(value) {
-				if len(part) >= httpMaskMinPartLen {
-					secrets = append(secrets, part)
-				}
-			}
-		}
-	}
-	for _, secret := range secrets {
-		if len(secret) >= httpMaskMinLen {
-			text = strings.ReplaceAll(text, secret, "***")
-		}
+	for _, secret := range s.secrets {
+		text = strings.ReplaceAll(text, secret, "***")
 	}
 	return text
+}
+
+// sanitizeLogText replaces control characters other than newline and tab.
+// A response may be binary, and the controller's database cannot store NUL.
+func sanitizeLogText(text string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return '�'
+		}
+		return r
+	}, text)
 }
 
 func newHTTPRequestClient(spec *httpRequestSpec) (*http.Client, *http.Transport) {
@@ -322,7 +420,7 @@ func describeHTTPError(err error, spec *httpRequestSpec) string {
 	if errors.As(err, &urlErr) && urlErr.Err != nil {
 		err = urlErr.Err
 	}
-	message := spec.mask(err.Error())
+	message := sanitizeLogText(spec.mask(err.Error()))
 	if errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Sprintf("timed out after %s", spec.Timeout)
 	}
@@ -414,7 +512,10 @@ func logHTTPResponseBody(body []byte, spec *httpRequestSpec, emit func(stream, t
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	text = spec.mask(text)
+	// Carriage returns (CRLF line ends, progress output) become line breaks
+	// before control characters are replaced.
+	text = strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(spec.mask(text))
+	text = sanitizeLogText(text)
 	runes := []rune(text)
 	if len(runes) > httpResponseLogChars {
 		text = string(runes[:httpResponseLogChars])

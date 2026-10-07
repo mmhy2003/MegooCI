@@ -497,6 +497,8 @@ async def _execute_step(
             if agent_id is not None and build_agent_ids is not None:
                 build_agent_ids.add(agent_id)
             await db.refresh(step)
+            if step.status == "failed":
+                await _hint_if_agent_gave_no_output(step, db, redis_client, channel)
             return StepResult(
                 exit_code=step.exit_code or 0,
                 status=step.status,
@@ -779,6 +781,40 @@ async def _emit_system_log(
         "seq": seq,
         "content": content,
     })
+
+
+# Step types added after agents were first released. An agent built before a
+# type existed fails the step without writing any output, which would leave
+# the user looking at an empty log.
+_NEWER_AGENT_STEP_TYPES = {"http_request"}
+
+
+async def _hint_if_agent_gave_no_output(
+    step: Step,
+    db: AsyncSession,
+    redis_client: aioredis.Redis,
+    channel: str,
+) -> None:
+    """Explain a failed step for which the agent wrote nothing at all."""
+    if step.step_type not in _NEWER_AGENT_STEP_TYPES:
+        return
+
+    from sqlalchemy import func as sa_func
+
+    agent_lines = await db.scalar(
+        select(sa_func.count())
+        .select_from(LogChunk)
+        .where(LogChunk.step_id == step.id, LogChunk.stream != "system")
+    )
+    if agent_lines:
+        return
+
+    await _emit_system_log(
+        step, db, redis_client, channel,
+        f"⚠️ The agent failed this '{step.step_type}' step without any output. "
+        f"An agent built before the {step.step_type} step was added cannot run it: "
+        "update the agent and run the build again.",
+    )
 
 
 async def _try_dispatch_to_agent(

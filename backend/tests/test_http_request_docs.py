@@ -84,3 +84,9 @@ def test_placeholders_section_lists_build_context():
     section = prompt[prompt.index("## Placeholders"):prompt.index("## Rules")]
     for placeholder in ("${{ build.number }}", "${{ build.branch }}", "${{ pipeline.name }}"):
         assert placeholder in section, placeholder
+
+
+def test_prompt_says_the_response_is_written_to_the_build_log():
+    """A receiver that returns a token would otherwise put it in the log by surprise."""
+    section = _http_request_section()
+    assert "first 2000 characters of the response are written to the build log" in section

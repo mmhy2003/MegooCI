@@ -1,9 +1,12 @@
 package executor
 
 import (
+	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -695,5 +698,189 @@ func TestLocalRunDispatchesHTTPRequest(t *testing.T) {
 	}
 	if len(seen()) != 1 {
 		t.Errorf("server saw %d requests, want 1", len(seen()))
+	}
+}
+
+// ── review fixes ────────────────────────────────────────────────────────
+
+func TestHTTPRequestEchoedPathAndQueryAreMasked(t *testing.T) {
+	// Many servers put the request path in their error pages (Spring Boot's
+	// default error JSON, Express's "Cannot POST /path", redirect pages).
+	srv, _ := recordingServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"status":404,"error":"Not Found","path":"` + r.URL.RequestURI() + `"}` + "\n" +
+			"Cannot POST " + r.URL.Path + "\n" +
+			"sig was " + r.URL.Query().Get("sig") + "\n" +
+			`<a href="https://other.example` + r.URL.Path + `/">moved</a>`))
+	})
+
+	_, out := runHTTP(t, context.Background(), map[string]interface{}{
+		"url": srv.URL + "/services/T000/B000/path-secret-xyz?sig=query-secret-abc&v=2",
+	})
+
+	for _, secret := range []string{"path-secret-xyz", "query-secret-abc", "/services/T000"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("logs contain %q echoed by the receiver:\n%s", secret, out)
+		}
+	}
+	if !strings.Contains(out, "unexpected status 404") || !strings.Contains(out, "Not Found") {
+		t.Errorf("the rest of the response should still be readable, got:\n%s", out)
+	}
+}
+
+func TestHTTPRequestEchoedURLCredentialsAreMasked(t *testing.T) {
+	srv, _ := recordingServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		user, pass, _ := r.BasicAuth()
+		_, _ = w.Write([]byte("header=" + r.Header.Get("Authorization") + " user=" + user + " pass=" + pass))
+	})
+	withUser := strings.Replace(srv.URL, "http://", "http://deploy-user:userinfo-secret-99@", 1)
+
+	res, out := runHTTP(t, context.Background(), map[string]interface{}{"url": withUser})
+
+	if res.Status != "success" {
+		t.Fatalf("status = %q", res.Status)
+	}
+	basic := base64.StdEncoding.EncodeToString([]byte("deploy-user:userinfo-secret-99"))
+	for _, secret := range []string{"userinfo-secret-99", basic} {
+		if strings.Contains(out, secret) {
+			t.Errorf("logs contain %q:\n%s", secret, out)
+		}
+	}
+}
+
+func TestHTTPRequestMaskReplacesLongestValueFirst(t *testing.T) {
+	// One header value is a prefix of another. Masking the short one first
+	// would leave the tail of the long one in the log.
+	spec, err := parseHTTPRequestConfig(map[string]interface{}{
+		"url": "https://example.com/x",
+		"headers": map[string]interface{}{
+			"X-User":        "deploy",
+			"Authorization": "Bearer deploy-token-xyz987",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 200; i++ { // map iteration order is random
+		if got := spec.mask("auth=Bearer deploy-token-xyz987 user=deploy"); strings.Contains(got, "token-xyz987") {
+			t.Fatalf("run %d: part of the token survived masking: %q", i, got)
+		}
+	}
+}
+
+func TestHTTPRequestOrdinaryHeaderValuesAreNotMasked(t *testing.T) {
+	srv, _ := recordingServer(t, func(w http.ResponseWriter, _ *http.Request, _ int) {
+		_, _ = w.Write([]byte(`{"ok": true, "accepted": "application/json", "attempt": 2024}`))
+	})
+
+	_, out := runHTTP(t, context.Background(), map[string]interface{}{
+		"url": srv.URL,
+		"headers": map[string]interface{}{
+			"X-Dry":     true,
+			"X-Attempt": float64(2024),
+			"Accept":    "application/json",
+		},
+		"json": map[string]interface{}{"a": "b"},
+	})
+
+	if !strings.Contains(out, `{"ok": true, "accepted": "application/json", "attempt": 2024}`) {
+		t.Errorf("booleans, numbers and content types are not secrets and must stay readable, got:\n%s", out)
+	}
+}
+
+func TestHTTPRequestTransportErrorEchoingThePathIsMasked(t *testing.T) {
+	// A peer that is not an HTTP server and echoes the request line back
+	// makes Go report a malformed response that quotes what it received.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				line, _ := bufio.NewReader(c).ReadString('\n')
+				_, _ = c.Write([]byte(line))
+			}(conn)
+		}
+	}()
+
+	res, out := runHTTP(t, context.Background(), map[string]interface{}{
+		"url": "http://" + ln.Addr().String() + "/malformed-secret-path",
+	})
+
+	if res.Status != "failed" {
+		t.Fatalf("status = %q, want failed", res.Status)
+	}
+	if strings.Contains(out, "malformed-secret-path") {
+		t.Errorf("a transport error revealed the URL path:\n%s", out)
+	}
+}
+
+func TestHTTPRequestControlCharactersAreNotLogged(t *testing.T) {
+	// A NUL byte in a log line cannot be stored by the server's database.
+	srv, _ := recordingServer(t, func(w http.ResponseWriter, _ *http.Request, _ int) {
+		_, _ = w.Write([]byte("PK\x00\x01\x1b[31mred\x00\tcol\nline2\x7f"))
+	})
+
+	res, out := runHTTP(t, context.Background(), map[string]interface{}{"url": srv.URL})
+
+	if res.Status != "success" {
+		t.Fatalf("status = %q", res.Status)
+	}
+	for _, r := range out {
+		if r != '\n' && r != '\t' && (r < 0x20 || r == 0x7f) {
+			t.Fatalf("logs contain control character %U:\n%q", r, out)
+		}
+	}
+	if !strings.Contains(out, "\tcol") || !strings.Contains(out, "line2") {
+		t.Errorf("tabs, newlines and text should survive, got:\n%q", out)
+	}
+}
+
+func TestHTTPRequestHeaderValueWhitespaceIsTrimmed(t *testing.T) {
+	// A token pasted into a secret with a trailing newline is very common.
+	srv, seen := recordingServer(t, okHandler)
+
+	res, out := runHTTP(t, context.Background(), map[string]interface{}{
+		"url":     srv.URL,
+		"headers": map[string]interface{}{"Authorization": "  Bearer tok-with-newline-1234\r\n"},
+		"retries": float64(2),
+	})
+
+	if res.Status != "success" {
+		t.Fatalf("status = %q, logs:\n%s", res.Status, out)
+	}
+	if got := seen()[0].Header.Get("Authorization"); got != "Bearer tok-with-newline-1234" {
+		t.Errorf("Authorization = %q", got)
+	}
+}
+
+func TestHTTPRequestHeaderWithLineBreakFailsWithoutRetrying(t *testing.T) {
+	fastBackoff(t, time.Millisecond)
+	srv, seen := recordingServer(t, okHandler)
+
+	res, out := runHTTP(t, context.Background(), map[string]interface{}{
+		"url":     srv.URL,
+		"headers": map[string]interface{}{"X-Token": "first-line-secret\nsecond-line-secret"},
+		"retries": float64(3),
+	})
+
+	if res.Status != "failed" {
+		t.Fatalf("status = %q, want failed", res.Status)
+	}
+	if !strings.Contains(out, "header 'X-Token' contains a line break") {
+		t.Errorf("logs should name the header, got:\n%s", out)
+	}
+	if strings.Contains(out, "first-line-secret") || strings.Contains(out, "attempt") {
+		t.Errorf("the value must not be logged and nothing should be attempted:\n%s", out)
+	}
+	if len(seen()) != 0 {
+		t.Errorf("server saw %d requests, want 0", len(seen()))
 	}
 }

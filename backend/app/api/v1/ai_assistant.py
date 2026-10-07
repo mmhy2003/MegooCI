@@ -335,7 +335,9 @@ or boolean must come from a placeholder, use `body` with hand-written JSON and a
 The step fails the build when the response status is not the expected one. \
 Retries apply to network errors, 5xx and 429 only. Redirects are not followed, \
 and the response cannot be used by later steps. The request is sent from the \
-build agent. Most webhook URLs contain a token, so take the URL from \
+build agent. The first 2000 characters of the response are written to the build log, \
+so do not use this step to call an endpoint that returns a secret. \
+Most webhook URLs contain a token, so take the URL from \
 `${{ secrets.X }}`, and take every credential from a secret too. To send through \
 a channel configured in Notification Channels, use `notify` instead.
 

@@ -149,8 +149,8 @@ body: '{"build": ${{ build.number }}, "ok": true}'
 
 No server-side handler is registered. Like `kube_apply`, the step compiles to
 `{"step_type": "http_request", "config": {...}}` and is dispatched to the agent through the
-existing path. No change to `build_executor.py` is needed: every step type outside the
-server-only set already goes to the agent.
+existing path: every step type outside the server-only set already goes to the agent. The
+only change to `build_executor.py` is the hint described under "Agent compatibility".
 
 ## Execution (agent)
 
@@ -162,7 +162,9 @@ standard library.
    must be absolute `http`/`https` with a host. A bad config fails the step before anything
    is sent.
 2. Build the request: method, URL, headers, and the body from `json` (encoded as JSON) or
-   `body` (sent as is).
+   `body` (sent as is). Whitespace around a header value is trimmed, because a token pasted
+   into a secret with a trailing newline is common; a value with a line break inside it
+   fails the step without sending.
 3. Send it with a client that:
    - applies `timeout` to each attempt,
    - does **not** follow redirects (a 3xx is returned as the response),
@@ -212,12 +214,25 @@ The heading reads `Response (first 2000 characters):` when the body was cut.
 - The URL is shown as scheme and host only, followed by `/…`. Path, query and any user-info
   are never printed, because webhook URLs often carry the secret in the path.
 - Request headers and the request body are never printed.
-- The response body is printed up to its first 2000 characters. Before printing, every
-  occurrence of a request header value or of the full request URL is replaced with `***`, in
-  case the receiver echoes them. Header values shorter than 4 characters are not masked, to
-  avoid mangling the output. For a header value with spaces, such as `Bearer <token>`, each
-  space-separated part of 8 characters or more is masked on its own as well.
-- Invalid UTF-8 in the response is replaced, so the log stays valid text.
+- The response body is printed up to its first 2000 characters. Receivers, proxies and error
+  messages often echo parts of the request (an error page naming the request path is common),
+  so before anything derived from the response or an error is printed, these are replaced
+  with `***`, longest first:
+  - the URL in every form a server might print it: as written, normalized, the path with
+    query, the path alone (raw and escaped), and the query string;
+  - each path segment of 8 characters or more, and each query value of 4 or more that is not
+    a boolean or a number;
+  - URL credentials: the password, `user:password`, and its Basic-auth encoding;
+  - each header value of 4 characters or more, and for a value with spaces such as
+    `Bearer <token>`, each part of 8 or more.
+
+  Header values that cannot be credentials are left alone so ordinary output is not mangled:
+  booleans, numbers, and the `Content-Type`, `Accept`, `Accept-Encoding`, `Accept-Language`,
+  `Content-Encoding`, `Content-Length` and `User-Agent` headers.
+- Invalid UTF-8 and control characters other than newline and tab are replaced, so a binary
+  response cannot put bytes in the log that the server's database rejects.
+- The docs state that the start of the response is written to the build log, so the step
+  should not be pointed at an endpoint that returns a secret.
 - At most 64 KiB of the response body is read; the rest is discarded.
 - A response with no body prints no response section.
 - When `verify_tls` is `false`, one warning line says certificate verification is disabled.
@@ -225,10 +240,15 @@ The heading reads `Response (first 2000 characters):` when the body was cut.
 
 ## Agent compatibility
 
-An agent built before this change does not know `http_request` and fails the step with
-`empty command for step type "http_request"`. That message cannot be changed on agents
-already deployed. The docs state that the step needs an agent built from this release or
-later. Nothing is added to route the step only to capable agents.
+An agent built before this change does not know `http_request`. It fails the step and
+writes nothing to the build log: its `empty command for step type "http_request"` error goes
+only to the agent's own process log, and that cannot be changed on agents already deployed.
+
+So that the user is not left with an empty log, the server adds one system log line when an
+`http_request` step comes back failed with no output from the agent, saying the agent was
+probably built before the step existed and must be updated. This is a small addition to
+`build_executor.py`; it explains the failure and does not route steps. The docs also state
+that the step needs an agent built from this release or later.
 
 ## Documentation
 

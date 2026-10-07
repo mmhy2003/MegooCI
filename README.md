@@ -188,7 +188,7 @@ To call an external system — a chat webhook, a deployment or ticketing system,
           expect_status: [200, 202]  # optional (default: any 2xx)
 ```
 
-The request is sent from the build agent, so it can reach systems on the agent's network, and the step fails the build when the status is not the expected one. The URL path, headers and body are never written to the build log. It needs an agent built from this release or later.
+The request is sent from the build agent, so it can reach systems on the agent's network, and the step fails the build when the status is not the expected one. The URL path, headers and body are never written to the build log; the first 2,000 characters of the response are, so avoid endpoints that return a secret. It needs an agent built from this release or later.
 
 Link the pipeline to a project whose repository points at your GitHub / GitLab repo — a push triggers the webhook and the pipeline runs on the next available agent.
 
