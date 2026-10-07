@@ -544,6 +544,10 @@ function AiConfigCard({
   );
 }
 
+function mcpAddCommand(url: string): string {
+  return `claude mcp add --transport http megooci ${url} --header "Authorization: Bearer <your-token>"`;
+}
+
 export default function SettingsPage() {
   const { user } = useAuthStore();
   const { theme, resolvedTheme } = useTheme();
@@ -944,6 +948,55 @@ export default function SettingsPage() {
                     </Button>
                   </div>
                 ))}
+              </div>
+            )}
+            {info?.mcp?.enabled && (
+              <div className="mt-4 space-y-2 rounded-lg border bg-muted/30 p-3">
+                <p className="text-sm font-medium">Connect a coding agent (MCP)</p>
+                <p className="text-xs text-muted-foreground">
+                  Coding agents such as Claude Code can work with your projects,
+                  pipelines and builds through MCP, using one of your API
+                  tokens. Create a token with the{" "}
+                  <strong>Coding agent</strong> scope and put it in place of{" "}
+                  <code>&lt;your-token&gt;</code>.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    readOnly
+                    value={info.mcp.url}
+                    aria-label="MCP server URL"
+                    className="font-mono text-xs"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    aria-label="Copy MCP server URL"
+                    onClick={() => {
+                      navigator.clipboard.writeText(info.mcp.url);
+                      toast.success("Copied to clipboard");
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex items-start gap-2">
+                  <code className="block flex-1 break-all rounded bg-muted px-2 py-1 text-xs">
+                    {mcpAddCommand(info.mcp.url)}
+                  </code>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    aria-label="Copy setup command"
+                    onClick={() => {
+                      navigator.clipboard.writeText(mcpAddCommand(info.mcp.url));
+                      toast.success("Copied to clipboard");
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>

@@ -884,6 +884,11 @@ export interface MaintenanceInfo {
   message: string | null;
 }
 
+export interface McpInfo {
+  enabled: boolean;
+  url: string; // {MEGOOCI_PUBLIC_API_URL}/mcp
+}
+
 export interface SystemInfo {
   version: string;
   public_url: string; // frontend/app URL (MEGOOCI_PUBLIC_URL)
@@ -895,6 +900,7 @@ export interface SystemInfo {
   auth: AuthInfo;
   registry: RegistryInfo;
   git: GitIntegrationInfo;
+  mcp: McpInfo;
 }
 
 export interface AiSettingsUpdate {
