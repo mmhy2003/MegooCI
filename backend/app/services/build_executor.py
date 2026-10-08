@@ -392,6 +392,10 @@ async def _run_build_stages(
         await _send_build_finished_notification(
             db, redis_client, build, final_status
         )
+        if final_status == "failed":
+            await _notify_build_failure(
+                db, redis_client, channel, build, secrets, env_vars, builtins
+            )
 
 
 async def _cancel_remaining(db: AsyncSession, build: Build) -> None:
@@ -924,6 +928,52 @@ async def _enrich_config_for_agent(
         token = await _resolve_git_token(repo, config, mini_ctx, db)
         if token:
             config["token"] = token
+
+
+async def _notify_build_failure(
+    db: AsyncSession,
+    redis_client: aioredis.Redis,
+    channel: str,
+    build: Build,
+    secrets: dict[str, str],
+    env_vars: dict[str, str],
+    builtins: dict[str, dict[str, str]],
+) -> None:
+    """Send the pipeline's ``notifications.on_failure`` messages.
+
+    Best-effort: whatever goes wrong here must never change the build's
+    result or stop the executor from finishing up.
+    """
+    from app.services.build_notifications import failed_step_of, send_failure_notifications
+
+    try:
+        _, _, failed_step = failed_step_of(build)
+
+        async def report(text: str) -> None:
+            # Shown under the failed step, where the author is already looking.
+            if failed_step is not None:
+                await _emit_system_log(
+                    failed_step, db, redis_client, channel, f"⚠️ {text}"
+                )
+
+        await send_failure_notifications(
+            db,
+            build,
+            secrets=secrets,
+            env_vars=env_vars,
+            builtins=builtins,
+            report=report,
+        )
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "Failure notifications for build %s could not be sent", build.id
+        )
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
 
 async def _send_build_finished_notification(
