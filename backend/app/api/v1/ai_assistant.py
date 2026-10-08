@@ -43,7 +43,7 @@ from app.models.pipeline import Pipeline
 from app.models.secret import EnvVar, Secret
 from app.models.user import User
 from app.services.assistant.diff import build_proposal
-from app.services.assistant.document import DocumentError, WorkingDocument
+from app.services.assistant.document import MAX_DOCUMENT_BYTES, DocumentError, WorkingDocument
 from app.services.assistant.loop import LoopResult, ModelTurn, OnStep, Step, ToolCall, run_loop
 from app.services.assistant.reference import build_tool_prompt, split_topics
 from app.services.assistant.tools import TOOL_DEFINITIONS, ToolContext
@@ -901,6 +901,12 @@ async def _prepare_job(
             detail="AI API key is not configured",
         )
 
+    if body.current_yaml and len(body.current_yaml.encode("utf-8")) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"The pipeline YAML is larger than {MAX_DOCUMENT_BYTES // 1024} KiB.",
+        )
+
     # Appended to the system prompt in both modes.
     context = ""
 
@@ -1016,15 +1022,29 @@ def _count_tokens(response: Any, usage: dict[str, int]) -> None:
         usage["tokens"] += total
 
 
+def _tool_model_id(job: _Job) -> str:
+    """The model id for a call that carries tools.
+
+    LiteLLM's ``ollama/`` provider cannot pass tools on: it switches the model
+    to JSON-only output instead, for that call and for the process. Its
+    ``ollama_chat/`` provider passes them, and Ollama rejects a model without
+    tool support, which sends the request down the path without tools.
+    """
+    if job.model_id.startswith("ollama/"):
+        return "ollama_chat/" + job.model_id.removeprefix("ollama/")
+    return job.model_id
+
+
 def _tool_completer(job: _Job, usage: dict[str, int]) -> Callable[[list[Any]], Awaitable[ModelTurn]]:
     """One model call with the tools attached, as the loop wants it."""
+    options = {**_model_options(job), "model": _tool_model_id(job)}
 
     async def complete(messages: list[Any]) -> ModelTurn:
         response = await litellm.acompletion(
             messages=messages,
             tools=TOOL_DEFINITIONS,
             tool_choice="auto",
-            **_model_options(job),
+            **options,
         )
         _count_tokens(response, usage)
         message = response.choices[0].message
@@ -1055,13 +1075,35 @@ def _is_whole_pipeline(text: str) -> bool:
     return re.search(r"(?m)^stages\s*:", text) is not None
 
 
+def _pipeline_name(text: str) -> str | None:
+    for line in text.splitlines():
+        key, colon, value = line.partition(":")
+        if colon and key.rstrip() == "name":
+            return value.strip().strip("\"'") or None
+    return None
+
+
+def _same_pipeline(current: str, candidate: str) -> bool:
+    """True when *candidate* reads as a new version of the editor's pipeline
+    rather than an example of some other one: the editor has no named
+    pipeline yet, or both carry the same name."""
+    name = _pipeline_name(current)
+    return name is None or name == _pipeline_name(candidate)
+
+
 def _without_yaml_block(reply: str, yaml_text: str) -> str:
     """The reply with its YAML removed, once that YAML is shown as a diff."""
     rest = _YAML_BLOCK.sub("", reply, count=1).strip()
     return "" if rest == yaml_text else rest
 
 
-def _default_reply(changed: bool, limit_reached: bool) -> str:
+def _default_reply(changed: bool, limit_reached: bool, failed: bool) -> str:
+    if failed:
+        # Only reached with changes made; without any, the request is retried.
+        return (
+            "The AI provider stopped responding before I finished. The changes I "
+            "made so far are below — check them before applying."
+        )
     if limit_reached and changed:
         return (
             "I ran out of steps before finishing. The changes I made so far are "
@@ -1085,38 +1127,58 @@ async def _answer(job: _Job, on_step: OnStep | None = None) -> AssistantResponse
     usage = {"tokens": 0}
     mode = "tools"
     result = LoopResult()
+    reply = ""
+    failure: Exception | None = None
 
     try:
         result = await run_loop(job.tool_messages, _tool_completer(job, usage), ctx, on_step=on_step)
         reply = result.reply
-    except (
-        litellm.exceptions.AuthenticationError,
-        litellm.exceptions.APIConnectionError,
-        litellm.exceptions.Timeout,
-        litellm.exceptions.RateLimitError,
-    ):
-        # A call without tools would fail the same way.
-        raise
     except Exception as exc:
+        failure = exc
+    else:
+        # A later model call failed. Changes already made are kept and
+        # proposed; with none, nothing is lost by handling it like a failure
+        # of the first call.
+        if result.error is not None and not document.changed:
+            failure = result.error
+
+    if failure is not None:
+        if isinstance(failure, (
+            litellm.exceptions.AuthenticationError,
+            litellm.exceptions.APIConnectionError,
+            litellm.exceptions.Timeout,
+            litellm.exceptions.RateLimitError,
+        )):
+            # A call without tools would fail the same way.
+            raise failure
         # Most often a model or endpoint that does not accept tools.
         logger.warning(
             "AI call with tools failed (%s: %s) — retrying without tools",
-            type(exc).__name__, exc,
+            type(failure).__name__, failure,
         )
         mode = "legacy"
         reply = await _legacy_reply(job, usage)
 
+    stopped_early = mode == "tools" and result.limit_reached
+    provider_failed = mode == "tools" and result.error is not None
+
     if not document.changed:
         # Without tools — or with a model that ignored them — the whole
-        # pipeline is in the reply. Turn it into the same proposal.
+        # pipeline is in the reply. Turn it into the same proposal. A model
+        # that has tools may also be answering a question with an example of
+        # some other pipeline: that is not a change to this one, and its
+        # reply is never cut.
         candidate = _extract_yaml(reply)
-        if candidate and _is_whole_pipeline(candidate):
+        if candidate and _is_whole_pipeline(candidate) and (
+            mode == "legacy" or _same_pipeline(document.text, candidate)
+        ):
             try:
                 document.write(candidate)
             except DocumentError as exc:
                 logger.warning("AI reply YAML not usable as a proposal — %s", exc)
             else:
-                reply = _without_yaml_block(reply, candidate)
+                if mode == "legacy":
+                    reply = _without_yaml_block(reply, candidate)
 
     proposal = None
     if document.changed:
@@ -1132,14 +1194,14 @@ async def _answer(job: _Job, on_step: OnStep | None = None) -> AssistantResponse
         "AI assistant response — mode=%s model_calls=%d tool_calls=%d tokens=%d "
         "limit_reached=%s proposal=%s",
         mode, result.model_calls, len(result.steps), usage["tokens"],
-        result.limit_reached, proposal is not None,
+        stopped_early, proposal is not None,
     )
 
     return AssistantResponse(
-        reply=reply or _default_reply(proposal is not None, result.limit_reached),
+        reply=reply or _default_reply(proposal is not None, stopped_early, provider_failed),
         yaml=proposal.yaml if proposal else None,
         mode=mode,
-        limit_reached=result.limit_reached,
+        limit_reached=stopped_early,
         steps=[AssistantStep(tool=s.tool, label=s.label, ok=s.ok) for s in result.steps],
         proposal=proposal,
     )
@@ -1171,6 +1233,9 @@ async def pipeline_assistant(
 ) -> AssistantResponse:
     await _check_ai_access(body, db, current_user)
     job = await _prepare_job(body, db, current_user)
+    # The model can take minutes. Nothing below needs the database, so its
+    # connection goes back to the pool now.
+    await db.close()
 
     try:
         return await _answer(job)
@@ -1233,6 +1298,8 @@ async def pipeline_assistant_stream(
 ):
     await _check_ai_access(body, db, current_user)
     job = await _prepare_job(body, db, current_user)
+    # As above: the connection is not held while the reply is streamed.
+    await db.close()
     return StreamingResponse(
         _stream_events(job),
         media_type="text/event-stream",

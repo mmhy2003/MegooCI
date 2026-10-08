@@ -221,7 +221,7 @@ async def test_a_model_that_ignores_the_tools_and_writes_the_pipeline_still_gets
 
     assert response.mode == "tools"
     assert response.proposal.yaml == NEW_YAML
-    assert response.reply == "Switched to make all."
+    assert response.reply == f"```yaml\n{NEW_YAML}```\nSwitched to make all.", "the reply is left whole"
 
 
 async def test_yaml_in_the_reply_is_ignored_once_the_tools_made_the_change(sf, provider):
@@ -378,6 +378,7 @@ async def test_a_failure_after_the_first_call_keeps_the_work_done(sf, provider):
     response = await ask(sf)
 
     assert response.limit_reached is True and response.proposal.yaml == NEW_YAML
+    assert response.reply.startswith("The AI provider stopped responding before I finished")
 
 
 async def test_a_disabled_assistant_is_still_a_503(sf, provider, monkeypatch):
@@ -572,3 +573,136 @@ async def test_closing_the_stream_cancels_the_model_call(sf, provider):
     with pytest.raises(asyncio.CancelledError):
         await pending
     await asyncio.wait_for(cancelled.wait(), 2)
+
+
+# ── review fixes ────────────────────────────────────────────────────────
+
+EXAMPLE = (
+    "version: 1\n"
+    "name: build-app\n"
+    "runs_on: linux\n"
+    "stages:\n"
+    "  - name: build\n"
+    "    steps:\n"
+    "      - run: make\n"
+)
+
+
+async def test_a_question_answered_with_a_full_example_is_not_a_proposal(sf, provider):
+    """The example is another pipeline; proposing it would offer to replace the user's."""
+    answer = f"Put it at the top, like this:\n```yaml\n{EXAMPLE}```\nIt cannot go inside a stage."
+    provider.will(tool_response(("c1", "reference", {"topic": "runs_on"})), text_response(answer))
+
+    response = await ask(sf, "how do I use runs_on? show an example")
+
+    assert response.proposal is None and response.yaml is None
+    assert response.reply == answer, "the example stays in the answer"
+
+
+async def test_a_full_pipeline_in_a_reply_is_proposed_when_the_editor_is_empty(sf, provider):
+    provider.will(text_response(f"```yaml\n{EXAMPLE}```"))
+
+    response = await ask(sf, "create a pipeline", current_yaml=None)
+
+    assert response.proposal.yaml == EXAMPLE and response.proposal.added == 7
+
+
+async def test_a_later_failure_with_nothing_changed_falls_back_like_a_first_one(sf, provider):
+    """For example an endpoint that accepts tools but rejects tool results."""
+    provider.will(
+        tool_response(("c1", "read_lines", {})),
+        BadRequestError("messages with role 'tool' are not supported"),
+        text_response(f"```yaml\n{NEW_YAML}```\nSwitched to make all."),
+    )
+
+    response = await ask(sf)
+
+    assert response.mode == "legacy" and response.limit_reached is False
+    assert response.proposal.yaml == NEW_YAML and response.reply == "Switched to make all."
+    assert [s.label for s in response.steps] == ["Read lines 1–6"]
+    assert len(provider.calls) == 3 and "tools" not in provider.calls[2]
+    assert provider.calls[2]["messages"][0]["content"].startswith(ai.SYSTEM_PROMPT)
+
+
+@pytest.mark.parametrize("error, detail", [
+    (AuthenticationError("key revoked"), "AI provider authentication failed: key revoked"),
+    (RateLimitError("slow down"), "AI provider error: slow down"),
+])
+async def test_a_later_failure_a_retry_cannot_fix_is_reported_when_nothing_changed(sf, provider, error, detail):
+    provider.will(tool_response(("c1", "read_lines", {})), error)
+
+    with pytest.raises(HTTPException) as exc:
+        await ask(sf)
+
+    assert exc.value.status_code == 502 and exc.value.detail == detail
+    assert len(provider.calls) == 2
+
+
+async def test_ollama_models_get_the_tools_through_the_chat_api(sf, provider, monkeypatch):
+    """LiteLLM's "ollama/" provider cannot pass tools on: it switches the model
+    to JSON-only output instead. "ollama_chat/" passes them, and a model
+    without tool support is rejected, which falls back."""
+    monkeypatch.setattr(system_api, "resolve_ai_config", lambda overrides=None: {
+        "enabled": True, "provider": "ollama", "model": "llama3.1",
+        "reasoning_model": None, "api_key": "", "base_url": "http://ollama.test:11434",
+    })
+    provider.will(
+        BadRequestError("registry.ollama.ai/library/llama3.1 does not support tools"),
+        text_response("Just an answer."),
+    )
+
+    response = await ask(sf)
+
+    assert provider.calls[0]["model"] == "ollama_chat/llama3.1" and "tools" in provider.calls[0]
+    assert provider.calls[1]["model"] == "ollama/llama3.1" and "tools" not in provider.calls[1]
+    assert response.mode == "legacy" and response.reply == "Just an answer."
+
+
+async def test_other_providers_keep_their_model_id_for_tool_calls(sf, provider):
+    provider.will(text_response("ok"))
+    await ask(sf)
+    assert provider.calls[0]["model"] == "openai/local-model"
+
+
+async def test_editor_content_over_the_size_limit_is_refused_before_any_model_call(sf, provider):
+    too_big = "a: b\n" * (256 * 1024 // 5 + 1)
+
+    with pytest.raises(HTTPException) as exc:
+        await ask(sf, current_yaml=too_big)
+
+    assert exc.value.status_code == 413 and "256 KiB" in exc.value.detail
+    assert provider.calls == []
+
+
+async def test_editor_content_at_the_size_limit_is_accepted(sf, provider):
+    provider.will(text_response("ok"))
+    response = await ask(sf, current_yaml="a" * (256 * 1024 - 1) + "\n")
+    assert response.reply == "ok"
+
+
+async def test_the_database_connection_is_given_back_before_the_model_is_called(sf, provider):
+    """A request waits on the model for minutes; holding a pooled connection
+    all that time would starve the rest of the application."""
+    from tests._rbac import seed_project
+
+    async with sf() as db:
+        project_id = await seed_project(db, "P")
+        await db.commit()
+    in_transaction = []
+    body = ai.AssistantRequest(prompt="change it", current_yaml=YAML, project_id=str(project_id))
+
+    async with sf() as db:
+        async def model_call():
+            in_transaction.append(db.in_transaction())
+            return text_response("ok")
+
+        provider.will(model_call)
+        await ai.pipeline_assistant(body, db, admin())
+
+    async with sf() as db:
+        provider.will(model_call)
+        response = await ai.pipeline_assistant_stream(body, db, admin())
+        in_transaction.append(db.in_transaction())
+        assert [chunk async for chunk in response.body_iterator]
+
+    assert in_transaction == [False, False, False]

@@ -162,8 +162,10 @@ export function PipelineEditor({
         return;
       }
 
-      // Escape → Cancel Edit
+      // Escape → Cancel Edit. Not while a drawer or dialog is open: there
+      // Escape closes that, and cancelling too would discard the edits.
       if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
         callbacks.current.onCancelEdit?.();
         return;
       }

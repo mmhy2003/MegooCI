@@ -74,6 +74,29 @@ const QUICK_PROMPTS = [
   "Clone repo, install, test, and push",
 ];
 
+/**
+ * A past message as the model should see it. The reply of a proposal does not
+ * contain its YAML, and the editor only has it once applied, so the outcome
+ * is spelled out, with the YAML of the proposal that is still open.
+ */
+function historyContent(msg: Message, isOpenProposal: boolean): string {
+  if (!msg.proposal) return msg.content;
+  if (msg.decision === "applied") {
+    return `${msg.content}\n\n[The user applied this proposed change to the editor.]`;
+  }
+  if (msg.decision === "discarded") {
+    return `${msg.content}\n\n[The user discarded this proposed change.]`;
+  }
+  if (!isOpenProposal) {
+    return `${msg.content}\n\n[This change was proposed but not applied.]`;
+  }
+  return (
+    `${msg.content}\n\n[This change was proposed but not applied yet: the editor ` +
+    `still holds the earlier YAML. The proposed YAML was:]\n` +
+    `\`\`\`yaml\n${msg.proposal.yaml}\`\`\``
+  );
+}
+
 function StepRows({ steps }: { steps: AiAssistantStep[] }) {
   return (
     <ul className="space-y-0.5 text-xs text-muted-foreground">
@@ -202,9 +225,12 @@ export function AiAssistantPanel({
     }, REQUEST_TIMEOUT_MS);
 
     try {
+      const openProposal = [...messages]
+        .reverse()
+        .find((m) => m.proposal && !m.decision);
       const history: AiChatMessage[] = messages.map((m) => ({
         role: m.role,
-        content: m.content,
+        content: historyContent(m, m === openProposal),
       }));
 
       const resp = await aiAssistantApi.stream(

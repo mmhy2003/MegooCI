@@ -94,3 +94,11 @@ def test_the_helpers_work_on_any_prompt_with_the_same_headings():
     built = build_tool_prompt(prompt, topics)
     assert built.startswith("Intro line.")
     assert "placeholder docs" in built and "Old rule" not in built and "run docs" not in built
+
+
+def test_tool_prompt_covers_line_numbers_and_proposals_that_were_not_applied():
+    assert "Line numbers move" in TOOL_SYSTEM_PROMPT
+    # The chat tells the model when an earlier proposal is still open; the
+    # prompt says what that means for the working copy.
+    assert "proposed but not applied" in TOOL_SYSTEM_PROMPT
+    assert "`write_document`" in TOOL_SYSTEM_PROMPT.split("proposed but not applied")[1]

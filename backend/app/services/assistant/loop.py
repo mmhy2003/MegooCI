@@ -48,6 +48,8 @@ class LoopResult:
     steps: list[Step] = field(default_factory=list)
     limit_reached: bool = False
     model_calls: int = 0
+    # What a model call after the first raised, when that ended the loop.
+    error: Exception | None = None
 
 
 Complete = Callable[[list[Any]], Awaitable[ModelTurn]]
@@ -71,7 +73,7 @@ async def run_loop(
 
     An exception from the first model call is raised, so the caller can fall
     back to a call without tools. A later one ends the loop with what has been
-    done so far.
+    done so far, and is kept in the result's ``error``.
     """
     result = LoopResult()
     deadline = clock() + max_seconds
@@ -87,10 +89,11 @@ async def run_loop(
         except asyncio.TimeoutError:
             result.limit_reached = True
             break
-        except Exception:
+        except Exception as exc:
             if result.model_calls == 0:
                 raise
             logger.exception("assistant model call failed mid-loop")
+            result.error = exc
             result.limit_reached = True
             break
         result.model_calls += 1
@@ -100,6 +103,7 @@ async def run_loop(
             break
 
         messages.append(turn.message)
+        ctx.begin_turn()
         for call in turn.tool_calls:
             if tool_calls_used >= max_tool_calls:
                 # Every tool call must still be answered, or the next model

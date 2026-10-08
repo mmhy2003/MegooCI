@@ -7,8 +7,6 @@ a message the model can act on.
 
 from __future__ import annotations
 
-import re
-
 MAX_DOCUMENT_BYTES = 256 * 1024  # the validator's limit
 MAX_READ_LINES = 400
 MAX_SEARCH_MATCHES = 50
@@ -72,19 +70,17 @@ class WorkingDocument:
             )
         return self.numbered(start, end) + note
 
-    def search(self, pattern: str, regex: bool = False) -> tuple[str, int]:
-        """Matching lines with one line of context. Returns (text, match count)."""
+    def search(self, pattern: str) -> tuple[str, int]:
+        """Lines containing *pattern*, ignoring case, with one line of context.
+        Returns (text, match count).
+
+        The pattern is plain text on purpose: a regular expression can take
+        hours on a single line, and nothing can interrupt it.
+        """
         if not pattern:
             raise DocumentError("search needs a non-empty pattern.")
-        if regex:
-            try:
-                compiled = re.compile(pattern)
-            except re.error as exc:
-                raise DocumentError(f"Invalid regular expression: {exc}") from exc
-            matches = [i for i, line in enumerate(self._lines, 1) if compiled.search(line)]
-        else:
-            needle = pattern.lower()
-            matches = [i for i, line in enumerate(self._lines, 1) if needle in line.lower()]
+        needle = pattern.lower()
+        matches = [i for i, line in enumerate(self._lines, 1) if needle in line.lower()]
 
         if not matches:
             return "No matches.", 0

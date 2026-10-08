@@ -29,7 +29,8 @@ otherwise use `read_lines` and `search`.
 2. Make the smallest change that does what was asked. Prefer `replace_text` for \
 small edits and `insert_lines` / `replace_lines` for larger ones. Use \
 `write_document` only for a new pipeline or a full rewrite. Never touch parts of \
-the pipeline the user did not ask about.
+the pipeline the user did not ask about. Line numbers move when an edit adds or \
+removes lines: after such an edit, read again before you use line numbers.
 3. Before writing a step or feature you have not just read about, call \
 `reference` with its topic. Do not guess field names.
 4. When you have changed the YAML, call `validate` and fix every problem it \
@@ -47,6 +48,9 @@ name; ask the user which channel if they have not said.
 agent, or the work is obviously OS-specific. `list_agents` shows what exists.
 10. To be told about failed builds, use the top-level `notifications` block — \
 never a `notify` step at the end, which does not run after a failure.
+11. When the conversation says an earlier change was proposed but not applied, \
+the editor and your working copy do not contain it. To build on it, put its \
+YAML into the working copy with `write_document`, then make the new change.
 """
 
 

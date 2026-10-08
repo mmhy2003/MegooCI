@@ -169,6 +169,7 @@ async def test_an_error_on_a_later_model_call_keeps_what_was_done():
 
     assert result.limit_reached is True
     assert len(result.steps) == 1 and context.document.changed is True
+    assert isinstance(result.error, RuntimeError) and str(result.error) == "provider went away"
 
 
 async def test_a_step_callback_that_fails_does_not_stop_the_loop():
@@ -185,3 +186,31 @@ async def test_empty_final_text_gives_an_empty_reply():
     model = ScriptedModel(final_turn(None))
     result = await run_loop([{"role": "user", "content": "u"}], model, ctx())
     assert result.reply == "" and result.limit_reached is False
+
+
+async def test_no_error_is_recorded_when_the_loop_ends_normally_or_at_a_limit():
+    done = await run_loop([{"role": "user", "content": "u"}], ScriptedModel(final_turn("ok")), ctx())
+    capped = await run_loop(
+        [{"role": "user", "content": "u"}],
+        ScriptedModel(*[tool_turn((f"c{i}", "read_lines", {})) for i in range(5)]),
+        ctx(), max_tool_calls=2,
+    )
+    assert done.error is None and capped.error is None
+
+
+async def test_line_numbers_are_trusted_again_in_the_next_answer():
+    model = ScriptedModel(
+        tool_turn(("c1", "insert_lines", {"after": 1, "text": "env:\n  A: b"}),
+                  ("c2", "replace_lines", {"start": 5, "end": 5, "text": "      - run: x"})),
+        tool_turn(("c3", "replace_lines", {"start": 7, "end": 7, "text": "      - run: x"})),
+        final_turn("done"),
+    )
+    context = ctx()
+
+    result = await run_loop([{"role": "user", "content": "u"}], model, context)
+
+    assert [(s.tool, s.ok) for s in result.steps] == [
+        ("insert_lines", True), ("replace_lines", False), ("replace_lines", True)]
+    lines = context.document.text.splitlines()
+    assert lines[4] == "  - name: build", "line 5 was left alone"
+    assert lines[6] == "      - run: x"

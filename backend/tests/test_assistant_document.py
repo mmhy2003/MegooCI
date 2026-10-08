@@ -94,18 +94,17 @@ def test_search_is_case_insensitive_and_shows_context():
     assert "> 8 |       - run: make deploy" in text
 
 
-def test_search_with_regex():
-    text, count = doc().search(r"^\s+- run: make \w+$", regex=True)
-    assert count == 2 and "> 5 |" in text and "> 8 |" in text
+def test_search_takes_the_pattern_as_plain_text_never_as_a_regular_expression():
+    assert doc().search(r"^\s+- run: make \w+$") == ("No matches.", 0)
+    assert doc().search("make .*") == ("No matches.", 0)
+    text, count = WorkingDocument("a: (x+)+$\nb: 1\n").search("(x+)+$")
+    assert count == 1 and "> 1 | a: (x+)+$" in text
 
 
 def test_search_reports_no_matches_and_rejects_bad_input():
     assert doc().search("nothing-here") == ("No matches.", 0)
     with pytest.raises(DocumentError):
         doc().search("")
-    with pytest.raises(DocumentError) as exc:
-        doc().search("(unclosed", regex=True)
-    assert "Invalid regular expression" in str(exc.value)
 
 
 def test_search_is_capped():

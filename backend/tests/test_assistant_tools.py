@@ -91,6 +91,7 @@ async def test_insert_lines_label():
     c = ctx()
     out = await call(c, "insert_lines", after=5, text="      - run: a\n      - run: b\n")
     assert out.label == "Inserted 2 lines after line 5"
+    c.begin_turn()
     single = await call(c, "insert_lines", after=0, text="version: 1")
     assert single.label == "Inserted 1 line after line 0"
 
@@ -194,3 +195,48 @@ async def test_a_tool_that_blows_up_is_reported_and_does_not_raise(monkeypatch):
 async def test_long_search_patterns_are_shortened_in_the_label():
     out = await call(ctx(), "search", pattern="x" * 200)
     assert len(out.label) < 70
+
+
+async def test_search_has_no_regular_expression_mode():
+    """A regular expression can take hours on one line and cannot be interrupted."""
+    search = next(t for t in TOOL_DEFINITIONS if t["function"]["name"] == "search")
+    assert list(search["function"]["parameters"]["properties"]) == ["pattern"]
+    out = await call(ctx(), "search", pattern="^name", regex=True)
+    assert out.ok and out.text == "No matches."
+
+
+async def test_a_line_numbered_edit_after_one_that_moved_the_lines_is_refused():
+    """Models send several edits in one answer, numbered against the YAML as
+    it was before the first of them."""
+    c = ctx()
+    c.begin_turn()
+    first = await call(c, "insert_lines", after=1, text="env:\n  A: b\n")
+    after_first = c.document.text
+    second = await call(c, "replace_lines", start=5, end=5, text="      - run: other")
+    third = await call(c, "insert_lines", after=5, text="      - run: more")
+
+    assert first.ok
+    assert second.ok is False and third.ok is False
+    assert "line numbers" in second.text and "read" in second.text.lower()
+    assert c.document.text == after_first, "the refused edits changed nothing"
+
+    c.begin_turn()  # the model has seen the results and answers again
+    assert (await call(c, "replace_lines", start=7, end=7, text="      - run: other")).ok
+    assert c.document.text.splitlines()[6] == "      - run: other"
+
+
+async def test_edits_that_keep_the_line_count_do_not_block_later_ones():
+    c = ctx()
+    c.begin_turn()
+    assert (await call(c, "replace_lines", start=5, end=5, text="      - run: a")).ok
+    assert (await call(c, "replace_text", old="name: demo", new="name: renamed")).ok
+    assert (await call(c, "replace_lines", start=3, end=3, text="  - name: compile")).ok
+
+
+async def test_text_edits_and_reads_still_work_after_the_lines_moved():
+    c = ctx()
+    c.begin_turn()
+    await call(c, "replace_lines", start=5, end=5, text="      - run: a\n      - run: b")
+    assert (await call(c, "replace_text", old="run: b", new="run: c")).ok
+    assert (await call(c, "read_lines")).ok
+    assert (await call(c, "validate")).ok

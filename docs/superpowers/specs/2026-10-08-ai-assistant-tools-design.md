@@ -71,7 +71,7 @@ cannot do what was asked returns an error message as its result; it never ends t
 | Tool | Arguments | Behavior |
 |---|---|---|
 | `read_lines` | `start` (default 1), `end` (default last line) | Returns the lines, each prefixed with its number. At most 400 lines per call; a longer range is cut and says so. |
-| `search` | `pattern`, `regex` (default false) | Returns each matching line with its number and one line of context either side. Plain search is case-insensitive. At most 50 matches. An invalid regular expression is an error. |
+| `search` | `pattern` | Returns each line containing the text, ignoring case, with its number and one line of context either side. At most 50 matches. The pattern is plain text, not a regular expression: a regular expression can run for hours on one line and cannot be interrupted. |
 | `replace_text` | `old`, `new` | Replaces one exact piece of text, whitespace included. Fails if `old` is not found, or is found more than once (the error lists the line numbers), or is empty. |
 | `replace_lines` | `start`, `end`, `text` | Replaces the line range with `text`. Empty `text` deletes the range. |
 | `insert_lines` | `after`, `text` | Inserts `text` after line `after`. `after: 0` inserts at the top. |
@@ -83,6 +83,10 @@ cannot do what was asked returns an error message as its result; it never ends t
 - An edit that would make the working copy larger than 256 KiB (the validator's limit) is
   refused.
 - A range outside the document is an error that states how many lines the document has.
+- Models often send several edits in one answer, all numbered against the YAML as it was
+  before the first. So once an edit in an answer has added or removed lines, a later
+  `replace_lines` or `insert_lines` in that same answer is refused with a message to read
+  again. `replace_text` is not affected, and the next answer starts fresh.
 
 ### Checking
 
@@ -146,12 +150,24 @@ Two things can go wrong, and both end in the same review card:
 - **The model accepts the tools but ignores them** and writes the pipeline into its reply.
   The server treats that reply like a fallback reply.
 
-In both cases the YAML in the reply becomes the proposal, diffed against the editor's, and
-is removed from the reply text. Only a whole pipeline counts: YAML with a top-level
-`stages:` key. A short snippet in an answer stays in the answer, because proposing it would
-replace the whole editor with a fragment.
+In both cases the YAML in the reply becomes the proposal, diffed against the editor's. Only
+a whole pipeline counts: YAML with a top-level `stages:` key. A short snippet in an answer
+stays in the answer, because proposing it would replace the whole editor with a fragment.
+
+The two cases differ in one way, because a model that has tools may also be answering a
+question with a complete example:
+
+- In fallback mode the YAML is removed from the reply text; the diff shows it.
+- In tool mode the reply is never cut, and the YAML becomes a proposal only when it reads
+  as a new version of the editor's pipeline: the editor has no named pipeline yet, or both
+  have the same top-level `name`. An example of some other pipeline stays an answer.
 
 A model that neither calls tools nor writes a whole pipeline simply answers in text.
+
+**Ollama.** The AI library's `ollama/` provider cannot pass tools on; given tools, it
+switches the model to JSON-only output. So for the Ollama provider the calls that carry
+tools use the library's `ollama_chat/` provider, which passes them. Ollama rejects a model
+without tool support, and the request then falls back to the unchanged call without tools.
 
 ## API
 
@@ -297,13 +313,21 @@ States of the card:
 The history sent with later messages contains the user's messages and the assistant's
 replies as text, as today. Tool calls from earlier turns are not replayed.
 
+A reply no longer contains its YAML, and the editor only has it once applied. So the panel
+adds one line to each past reply that carried a proposal, saying whether the user applied
+or discarded it. For the newest proposal that is still open it also adds the proposed YAML,
+so "now make it Node 22" before pressing Apply builds on the proposal instead of starting
+from the editor's old content.
+
 ## Error handling
 
 | Situation | Result |
 |---|---|
 | The AI provider fails (authentication, bad request, unreachable) | The same 502 errors as today from `/ai/assistant`; an `error` event from the stream. |
 | The first model call fails for another reason (most often: tools are not accepted) | Fall back to the single call for this request. If that fails too, its error is reported. |
-| A model call fails after the first | The loop stops; what was changed so far is proposed and the response says the assistant stopped early. |
+| A model call fails after the first, with changes made | The loop stops; what was changed so far is proposed and the reply says the provider stopped responding. |
+| A model call fails after the first, with nothing changed | Handled like a failure of the first call: reported if a retry cannot fix it, otherwise one call without tools. |
+| The editor's YAML is larger than 256 KiB | The request is refused with 413 before any model call. |
 | A tool raises unexpectedly | The model receives "internal error" as that tool's result and the exception is logged; the loop continues. |
 | The model returns neither text nor tool calls | The loop ends with a generic reply; a proposal is still built if the working copy changed. |
 | The stream is cut off mid-request | The chat shows an error message in place of the reply; the steps received so far stay visible. |
@@ -319,6 +343,11 @@ replies as text, as today. Tool calls from earlier turns are not replayed.
   contains, as today.
 - Each request can make several model calls. The per-request limits bound that, and the
   server logs the number of model calls, tool calls and reported token usage per request.
+- The work a tool does runs to completion and cannot be interrupted, so it is bounded by
+  size: the editor's YAML and the working copy are limited to 256 KiB, search is plain text,
+  and the diff compares line by line only between the first and the last differing line and
+  only when that part is at most 1000 lines; a longer part is shown as removed and added
+  whole.
 
 ## Testing
 
@@ -329,8 +358,10 @@ replies as text, as today. Tool calls from earlier turns are not replayed.
 - Ranges: out of bounds, `start` after `end`, `insert_lines` at 0 and after the last line,
   deleting a range, an empty document, a document with and without a final newline, CRLF
   input.
-- The size limit, the 400-line read cap, the 50-match search cap, an invalid regular
-  expression.
+- The size limit, the 400-line read cap, the 50-match search cap, a pattern full of
+  regular-expression characters matched as plain text.
+- A line-numbered edit after one that moved the lines is refused within the same answer and
+  accepted in the next.
 
 **Diff (pytest)**
 - No change gives no proposal. Additions, removals and replacements give the right counts,

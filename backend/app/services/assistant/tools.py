@@ -45,10 +45,10 @@ TOOL_DEFINITIONS: list[dict] = [
     ),
     _tool(
         "search",
-        "Find lines containing a pattern. Returns matching lines with their numbers "
-        "and one line of context. Plain search ignores case.",
-        {"pattern": {**_TEXT, "description": "Text to find, or a regular expression."},
-         "regex": {"type": "boolean", "description": "Treat pattern as a regular expression."}},
+        "Find lines containing a piece of text, ignoring case. Returns matching lines "
+        "with their numbers and one line of context. The text is matched as written: "
+        "it is not a regular expression.",
+        {"pattern": {**_TEXT, "description": "The text to find."}},
         ["pattern"],
     ),
     _tool(
@@ -62,7 +62,9 @@ TOOL_DEFINITIONS: list[dict] = [
     ),
     _tool(
         "replace_lines",
-        "Replace a range of lines with new text. Empty text deletes the lines.",
+        "Replace a range of lines with new text. Empty text deletes the lines. "
+        "Line numbers move after an edit that adds or removes lines, so only the "
+        "first such edit in one answer may use line numbers.",
         {"start": {**_LINE, "description": "First line to replace, 1-based."},
          "end": {**_LINE, "description": "Last line to replace, inclusive."},
          "text": {**_TEXT, "description": "The new lines. Empty to delete."}},
@@ -70,7 +72,9 @@ TOOL_DEFINITIONS: list[dict] = [
     ),
     _tool(
         "insert_lines",
-        "Insert new lines after a line. Use after=0 to insert at the top.",
+        "Insert new lines after a line. Use after=0 to insert at the top. "
+        "Line numbers move after an edit that adds or removes lines, so only the "
+        "first such edit in one answer may use line numbers.",
         {"after": {**_LINE, "description": "Line to insert after; 0 for the top."},
          "text": {**_TEXT, "description": "The lines to insert, correctly indented."}},
         ["after", "text"],
@@ -126,10 +130,26 @@ class ToolContext:
     topics: dict[str, str]
     # Returns the agent list as text. None when the user may not see agents.
     list_agents: Callable[[], Awaitable[str]] | None = None
+    # An edit in the model's current answer added or removed lines, so line
+    # numbers in the rest of that answer point at the wrong lines.
+    lines_moved: bool = False
+
+    def begin_turn(self) -> None:
+        """Call before running the tool calls of one model answer."""
+        self.lines_moved = False
 
 
 class _BadArguments(Exception):
     pass
+
+
+_EDITS = ("replace_text", "replace_lines", "insert_lines", "write_document")
+_LINE_NUMBERED_EDITS = ("replace_lines", "insert_lines")
+_LINES_MOVED = (
+    "Not done: an earlier edit in this same answer added or removed lines, so the "
+    "line numbers you used are out of date. Read the lines again and repeat this "
+    "edit with the current line numbers."
+)
 
 
 def _integer(args: dict[str, Any], name: str, default: int | None = None) -> int | None:
@@ -197,6 +217,18 @@ async def run_tool(name: str, arguments: str | None, ctx: ToolContext) -> ToolOu
 
 
 async def _dispatch(name: str, args: dict[str, Any], ctx: ToolContext) -> ToolOutcome:
+    if name not in _EDITS:
+        return await _run(name, args, ctx)
+    if name in _LINE_NUMBERED_EDITS and ctx.lines_moved:
+        raise DocumentError(_LINES_MOVED)
+    lines_before = ctx.document.line_count
+    outcome = await _run(name, args, ctx)
+    if ctx.document.line_count != lines_before:
+        ctx.lines_moved = True
+    return outcome
+
+
+async def _run(name: str, args: dict[str, Any], ctx: ToolContext) -> ToolOutcome:
     doc = ctx.document
 
     if name == "read_lines":
@@ -210,7 +242,7 @@ async def _dispatch(name: str, args: dict[str, Any], ctx: ToolContext) -> ToolOu
 
     if name == "search":
         pattern = _string(args, "pattern")
-        text, count = doc.search(pattern, bool(args.get("regex", False)))
+        text, count = doc.search(pattern)
         noun = "match" if count == 1 else "matches"
         return ToolOutcome(text, f"Searched “{_shorten(pattern)}” · {count} {noun}")
 
