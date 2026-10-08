@@ -129,15 +129,12 @@ both modes, as today.
 
 ## Models without tool support
 
-Tool mode is used when all of these hold:
+Tool mode is always on. There is no setting to turn it off. It is used whenever the AI
+library reports that the configured model supports tool calls.
 
-- the setting `MEGOOCI_AI_TOOLS_ENABLED` is true (default true; a switch to turn the feature
-  off);
-- the model is reported by the AI library as supporting tool calls.
-
-Otherwise, and also when the provider rejects a request because it carries tools, the server
-falls back to today's behavior for that request: one call with the full prompt, and the YAML
-is taken from the reply. The fallback still produces a proposal, by diffing that YAML against
+For a model that does not, and also when the provider rejects a request because it carries
+tools, the server falls back to today's behavior for that request: one call with the full
+prompt, and the YAML is taken from the reply. The fallback still produces a proposal, by diffing that YAML against
 the editor's, so the review card works the same way.
 
 ## API
@@ -291,9 +288,8 @@ replies as text, as today. Tool calls from earlier turns are not replayed.
   only tool that reads server data, and it checks the user's permission.
 - No tool returns a secret's value. The existing project context decides what the prompt
   contains, as today.
-- Each request can make several model calls. The server logs the number of model calls,
-  tool calls and reported token usage per request, and `MEGOOCI_AI_TOOLS_ENABLED` turns the
-  loop off.
+- Each request can make several model calls. The per-request limits bound that, and the
+  server logs the number of model calls, tool calls and reported token usage per request.
 
 ## Testing
 
@@ -319,7 +315,7 @@ replies as text, as today. Tool calls from earlier turns are not replayed.
 
 **Endpoints (pytest, AI library stubbed)**
 - Tool mode and fallback mode for both endpoints; the event sequence of the stream.
-- `MEGOOCI_AI_TOOLS_ENABLED=false` uses the fallback.
+- A model reported as not supporting tools uses the fallback.
 - `list_agents` with and without the permission.
 
 **Prompt (pytest)**
@@ -338,15 +334,12 @@ replies as text, as today. Tool calls from earlier turns are not replayed.
   prompt), `tools.py` (tool definitions and dispatch), `loop.py` (the model loop).
 - `backend/app/api/v1/ai_assistant.py` — both endpoints use the loop; response model;
   fallback; tool-mode prompt.
-- `backend/app/config.py` — `MEGOOCI_AI_TOOLS_ENABLED`.
 - `frontend/src/lib/api.ts` — response types and a streaming call.
 - `frontend/src/components/pipeline/ai-assistant-panel.tsx` — steps, streaming, card states.
 - `frontend/src/components/pipeline/ai-proposal-card.tsx` — **new**: the review card.
-- `.env.example`, `README.md` — the new setting.
 - `backend/tests/` — new tests.
 
 ## Rollback
 
-No schema change. Setting `MEGOOCI_AI_TOOLS_ENABLED=false` returns the assistant to one model
-call per request while keeping the review card. Reverting the code restores the previous
-panel and endpoints.
+No schema change and no setting. Reverting the code restores the previous panel and
+endpoints.
