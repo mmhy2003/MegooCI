@@ -457,7 +457,8 @@ or an operator re-enables a disabled agent.
 ## Notifications — Tell people when a build fails
 Add a top-level `notifications` block (not inside a stage) to send a message \
 through a configured channel whenever a build of this pipeline fails. The \
-server sends it, so it also goes out when no agent could run the build.
+server sends it, so it also goes out when the build's agent goes offline or \
+stops responding. A build that is still waiting for an agent stays pending and sends nothing.
 
 ```yaml
 version: 1

@@ -12,6 +12,7 @@ for backward compatibility.
 
 import asyncio
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -35,6 +36,7 @@ from app.services.agent_dispatcher import (
     send_build_finished,
 )
 from app.services.build_concurrency import pipeline_has_running_build, try_start_build
+from app.services.build_notifications import FailedBuild, send_failure_notifications
 from app.services.step_actions import get_handler
 from app.services.step_actions.base import LogLine, StepContext, StepResult
 from app.services.step_actions.interpolation import (
@@ -43,6 +45,8 @@ from app.services.step_actions.interpolation import (
     load_secrets_for_scope,
     mask_secrets_in_log,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def execute_build(
@@ -159,8 +163,9 @@ async def execute_build(
             return
 
     # ── Execute ──────────────────────────────────────────────────────────
+    failed_build: FailedBuild | None = None
     try:
-        await _run_build_stages(
+        failed_build = await _run_build_stages(
             build_id=build_id,
             claimed_agent_id=claimed_agent_id,
             session_factory=session_factory,
@@ -196,6 +201,11 @@ async def execute_build(
         except Exception:
             pass
 
+    # Last, and only after the agent is free and the next build is on its
+    # way: sending can be slow, and must not hold either of them up.
+    if failed_build is not None:
+        await _notify_build_failure(failed_build, session_factory)
+
 
 async def _run_build_stages(
     build_id: uuid.UUID,
@@ -203,8 +213,13 @@ async def _run_build_stages(
     session_factory: async_sessionmaker[AsyncSession],
     redis_client: aioredis.Redis,
     channel: str,
-) -> None:
-    """Inner routine that actually executes all stages/steps for a build."""
+) -> FailedBuild | None:
+    """Inner routine that actually executes all stages/steps for a build.
+
+    Returns a snapshot of the failure when the build ended as failed, so the
+    caller can send the pipeline's failure notifications once the agent has
+    been released; otherwise None.
+    """
 
     async with session_factory() as db:
         result = await db.execute(
@@ -370,6 +385,15 @@ async def _run_build_stages(
         build.finished_at = datetime.now(timezone.utc)
         await db.commit()
 
+        # Snapshot the failure now, as plain values. The notification is sent
+        # later, and the calls below can roll this session back, which expires
+        # every object loaded in it.
+        failed_build = (
+            _capture_failure(build, secrets, env_vars, builtins)
+            if final_status == "failed"
+            else None
+        )
+
         await _publish(redis_client, channel, {
             "event": "build_finished",
             "build_id": str(build_id),
@@ -392,10 +416,7 @@ async def _run_build_stages(
         await _send_build_finished_notification(
             db, redis_client, build, final_status
         )
-        if final_status == "failed":
-            await _notify_build_failure(
-                db, redis_client, channel, build, secrets, env_vars, builtins
-            )
+        return failed_build
 
 
 async def _cancel_remaining(db: AsyncSession, build: Build) -> None:
@@ -930,50 +951,61 @@ async def _enrich_config_for_agent(
             config["token"] = token
 
 
-async def _notify_build_failure(
-    db: AsyncSession,
-    redis_client: aioredis.Redis,
-    channel: str,
+def _capture_failure(
     build: Build,
     secrets: dict[str, str],
     env_vars: dict[str, str],
     builtins: dict[str, dict[str, str]],
+) -> FailedBuild | None:
+    """Snapshot a failed build for its notifications. Never raises: a build's
+    result must not depend on its notifications."""
+    try:
+        return FailedBuild.capture(build, secrets, env_vars, builtins)
+    except Exception:
+        logger.exception("Could not snapshot failed build for its notifications")
+        return None
+
+
+async def _notify_build_failure(
+    failed: FailedBuild,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Send the pipeline's ``notifications.on_failure`` messages.
 
-    Best-effort: whatever goes wrong here must never change the build's
-    result or stop the executor from finishing up.
+    Runs after the build has been committed as failed and its agent released,
+    on its own database session and Redis client, so nothing here can affect
+    the build or the executor. Never raises.
     """
-    from app.services.build_notifications import failed_step_of, send_failure_notifications
-
+    redis_client: aioredis.Redis | None = None
     try:
-        _, _, failed_step = failed_step_of(build)
+        settings = get_settings()
+        redis_client = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
+        channel = f"build:{failed.build_id}:logs"
 
         async def report(text: str) -> None:
             # Shown under the failed step, where the author is already looking.
-            if failed_step is not None:
-                await _emit_system_log(
-                    failed_step, db, redis_client, channel, f"⚠️ {text}"
-                )
+            # A session of its own: the sending session may just have been
+            # rolled back.
+            if failed.failed_step_id is None:
+                logger.warning("build %s: %s", failed.build_id, text)
+                return
+            async with session_factory() as log_db:
+                step = await log_db.get(Step, failed.failed_step_id)
+                if step is None:
+                    logger.warning("build %s: %s", failed.build_id, text)
+                    return
+                await _emit_system_log(step, log_db, redis_client, channel, f"⚠️ {text}")
 
-        await send_failure_notifications(
-            db,
-            build,
-            secrets=secrets,
-            env_vars=env_vars,
-            builtins=builtins,
-            report=report,
-        )
+        async with session_factory() as db:
+            await send_failure_notifications(db, failed, report=report)
     except Exception:
-        import logging
-
-        logging.getLogger(__name__).exception(
-            "Failure notifications for build %s could not be sent", build.id
-        )
-        try:
-            await db.rollback()
-        except Exception:
-            pass
+        logger.exception("Failure notifications for build %s could not be sent", failed.build_id)
+    finally:
+        if redis_client is not None:
+            try:
+                await redis_client.aclose()
+            except Exception:
+                pass
 
 
 async def _send_build_finished_notification(

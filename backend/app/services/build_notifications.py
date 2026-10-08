@@ -11,15 +11,21 @@ builds fails::
           subject: "Deploy failed"
           message: "Build #${{ build.number }} failed: ${{ build.url }}"
 
-The server sends these itself when a build ends as failed, so they also go
-out when no agent could run the build. The YAML rules live in
-``pipeline_compiler``; this module reads the block and sends the messages.
+The server sends these itself, after the build has ended as failed and its
+agent has been released. The YAML rules live in ``pipeline_compiler``; this
+module reads the block and sends the messages.
+
+Everything here works on plain values, never on ORM objects held by the
+build executor: sending can roll a session back, and a rollback expires every
+object loaded in it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -40,6 +46,16 @@ logger = logging.getLogger(__name__)
 Report = Callable[[str], Awaitable[None]]
 Values = dict[str, dict[str, str]]
 
+# How long one entry may take. A stalled provider must not hold a build
+# worker; the entry is abandoned and the next one is tried.
+SEND_TIMEOUT_SECONDS: float = 30
+
+# Channel types whose message format gives <, > and & a meaning: Telegram
+# parses the text as HTML, Slack reads <...> as links and mentions. Values
+# substituted into a message are escaped for these; text the author wrote is
+# left alone. Email is escaped by its sender, for the HTML part only.
+_ESCAPED_CHANNEL_TYPES = {"telegram", "slack"}
+
 
 @dataclass(frozen=True)
 class FailureNotification:
@@ -49,6 +65,44 @@ class FailureNotification:
     message: str | None = None
     subject: str | None = None
     recipient: str | None = None
+
+
+@dataclass(frozen=True)
+class FailedBuild:
+    """Everything needed to notify about a failed build, as plain values."""
+
+    build_id: uuid.UUID
+    pipeline_id: uuid.UUID
+    number: int
+    failed_stage: str
+    failed_step: str
+    failed_step_id: uuid.UUID | None
+    secrets: dict[str, str]
+    env_vars: dict[str, str]
+    builtins: Values
+
+    @classmethod
+    def capture(
+        cls,
+        build: Build,
+        secrets: dict[str, str],
+        env_vars: dict[str, str],
+        builtins: Values,
+    ) -> FailedBuild:
+        """Snapshot *build* while its session is still usable. Expects
+        ``build.stages`` and their steps to be loaded."""
+        stage_name, step_name, step = failed_step_of(build)
+        return cls(
+            build_id=build.id,
+            pipeline_id=build.pipeline_id,
+            number=build.number,
+            failed_stage=stage_name,
+            failed_step=step_name,
+            failed_step_id=step.id if step is not None else None,
+            secrets=dict(secrets),
+            env_vars=dict(env_vars),
+            builtins={namespace: dict(values) for namespace, values in builtins.items()},
+        )
 
 
 def _text(value: Any) -> str | None:
@@ -141,9 +195,7 @@ def default_message(values: Values) -> str:
     return "\n".join(lines)
 
 
-def _html_escaped(values: Values) -> Values:
-    """Telegram messages are sent as HTML: a ``<`` or ``&`` in a stage, branch
-    or pipeline name would make Telegram reject the message."""
+def _escaped(values: Values) -> Values:
     return {
         namespace: {key: html.escape(value, quote=False) for key, value in entries.items()}
         for namespace, entries in values.items()
@@ -152,14 +204,11 @@ def _html_escaped(values: Values) -> Values:
 
 async def send_failure_notifications(
     db: AsyncSession,
-    build: Build,
+    failed: FailedBuild,
     *,
-    secrets: dict[str, str],
-    env_vars: dict[str, str],
-    builtins: Values,
     report: Report | None = None,
 ) -> int:
-    """Send every ``on_failure`` notification of the build's pipeline.
+    """Send every ``on_failure`` notification of the failed build's pipeline.
 
     Reads the block from the pipeline's YAML as stored now. Entries are
     independent: a problem with one is passed to *report* (one short line,
@@ -168,70 +217,97 @@ async def send_failure_notifications(
     """
 
     async def _report(text: str) -> None:
-        if report is not None:
-            await report(text)
-        else:
-            logger.warning("build %s: %s", build.id, text)
+        try:
+            if report is not None:
+                await report(text)
+            else:
+                logger.warning("build %s: %s", failed.build_id, text)
+        except Exception:
+            logger.exception("build %s: could not report: %s", failed.build_id, text)
 
-    pipeline = await db.get(Pipeline, build.pipeline_id)
+    pipeline = (
+        await db.execute(
+            select(Pipeline.name, Pipeline.yaml_content).where(Pipeline.id == failed.pipeline_id)
+        )
+    ).first()
     if pipeline is None:
         return 0
-    entries = failure_notifications(pipeline.yaml_content)
+    pipeline_name, yaml_content = pipeline
+    entries = failure_notifications(yaml_content)
     if not entries:
         return 0
 
-    stage_name, step_name, _ = failed_step_of(build)
-    values: Values = {namespace: dict(entries_) for namespace, entries_ in builtins.items()}
-    values.setdefault("pipeline", {}).setdefault("name", pipeline.name)
+    values: Values = {namespace: dict(entries_) for namespace, entries_ in failed.builtins.items()}
+    values.setdefault("pipeline", {}).setdefault("name", pipeline_name)
     values["build"] = {
         **values.get("build", {}),
-        "number": str(build.number),
+        "number": str(failed.number),
         "status": "failed",
-        "failed_stage": stage_name,
-        "failed_step": step_name,
-        "url": build_url(build.id),
+        "failed_stage": failed.failed_stage,
+        "failed_step": failed.failed_step,
+        "url": build_url(failed.build_id),
     }
+    escaped = _escaped(values)
 
     sent = 0
     for entry in entries:
-        channel = await db.scalar(
-            select(NotificationChannel).where(NotificationChannel.name == entry.channel)
-        )
+        channel = (
+            await db.execute(
+                select(
+                    NotificationChannel.id,
+                    NotificationChannel.enabled,
+                    NotificationChannel.channel_type,
+                ).where(NotificationChannel.name == entry.channel)
+            )
+        ).first()
         if channel is None:
             await _report(
                 f"Failure notification not sent: channel '{entry.channel}' was not found."
             )
             continue
-        if not channel.enabled:
+        channel_id, enabled, channel_type = channel
+        if not enabled:
             await _report(
                 f"Failure notification not sent: channel '{entry.channel}' is disabled."
             )
             continue
 
-        shown = _html_escaped(values) if channel.channel_type == "telegram" else values
+        shown = escaped if channel_type in _ESCAPED_CHANNEL_TYPES else values
         message = (
-            interpolate_value(entry.message, secrets, env_vars, shown)
+            interpolate_value(entry.message, failed.secrets, failed.env_vars, shown)
             if entry.message
             else default_message(shown)
         )
         subject = (
-            interpolate_value(entry.subject, secrets, env_vars, values)
+            interpolate_value(entry.subject, failed.secrets, failed.env_vars, values)
             if entry.subject
             else default_subject(values)
         )
 
         try:
-            delivery = await send_notification(
-                db,
-                channel.id,
-                message,
-                subject=subject,
-                recipient=entry.recipient,
-                build_id=build.id,
+            delivery = await asyncio.wait_for(
+                send_notification(
+                    db,
+                    channel_id,
+                    message,
+                    subject=subject,
+                    recipient=entry.recipient,
+                    build_id=failed.build_id,
+                ),
+                timeout=SEND_TIMEOUT_SECONDS,
             )
+        except asyncio.TimeoutError:
+            await _rollback(db)
+            await _report(
+                f"Failure notification via channel '{entry.channel}' timed out and "
+                "was not sent."
+            )
+            continue
         except Exception:
-            logger.exception("build %s: failure notification via %s", build.id, entry.channel)
-            await db.rollback()
+            logger.exception(
+                "build %s: failure notification via %s", failed.build_id, entry.channel
+            )
+            await _rollback(db)
             delivered = False
         else:
             delivered = delivery.status == "sent"
@@ -248,3 +324,10 @@ async def send_failure_notifications(
                 "delivery history."
             )
     return sent
+
+
+async def _rollback(db: AsyncSession) -> None:
+    try:
+        await db.rollback()
+    except Exception:
+        logger.exception("could not roll back after a failed notification")

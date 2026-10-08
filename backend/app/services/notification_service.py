@@ -6,6 +6,7 @@ audit purposes.
 """
 
 import asyncio
+import html
 import json
 import logging
 import smtplib
@@ -91,6 +92,9 @@ def render_message(
 # Senders
 # --------------------------------------------------------------------------
 
+SMTP_TIMEOUT_SECONDS = 15
+
+
 def _send_email_sync(
     config: dict[str, Any],
     to_email: str,
@@ -110,9 +114,13 @@ def _send_email_sync(
     msg["From"] = f"{from_name} <{from_email}>"
     msg["To"] = to_email
     msg.attach(MIMEText(body, "plain"))
-    msg.attach(MIMEText(f"<html><body><pre>{body}</pre></body></html>", "html"))
+    # The body can carry branch, stage and step names: escape it so none of
+    # them can add markup to the HTML part.
+    msg.attach(MIMEText(f"<html><body><pre>{html.escape(body)}</pre></body></html>", "html"))
 
-    server = smtplib.SMTP(host, port)
+    # Without a timeout a stalled SMTP server would hold the calling worker
+    # thread for as long as the connection stays open.
+    server = smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT_SECONDS)
     try:
         if use_tls:
             server.starttls()

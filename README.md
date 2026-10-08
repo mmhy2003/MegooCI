@@ -190,7 +190,7 @@ To call an external system — a chat webhook, a deployment or ticketing system,
 
 The request is sent from the build agent, so it can reach systems on the agent's network, and the step fails the build when the status is not the expected one. The URL path, headers and body are never written to the build log; the first 2,000 characters of the response are, so avoid endpoints that return a secret. It needs an agent built from this release or later.
 
-To be told when a build fails, add a top-level `notifications` block. The server sends the message through a channel configured under Notification Channels, so it also goes out when no agent could run the build:
+To be told when a build fails, add a top-level `notifications` block. The server sends the message through a channel configured under Notification Channels, so it also goes out when the build's agent goes offline mid-build (a build still waiting for an agent stays pending and sends nothing):
 
 ```yaml
 name: deploy-staging

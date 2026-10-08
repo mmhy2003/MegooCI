@@ -22,8 +22,9 @@ This design lets a pipeline declare who is told when one of its builds fails.
 
 - A pipeline author states, in the pipeline YAML, which notification channels receive a
   message when a build of that pipeline fails.
-- The message is sent by the server, so it also goes out when the failure is that no agent
-  was available or an agent stopped responding.
+- The message is sent by the server, so it also goes out when the build's agent goes offline
+  or stops responding mid-build. A build that never gets an agent does not fail: it stays
+  pending, and so sends nothing.
 - A useful default message, with the option to write a custom one.
 - Reuse the existing notification channels and delivery history.
 - The in-app pipeline docs and the AI assistant know the new YAML.
@@ -52,7 +53,7 @@ Three approaches were considered:
   endpoints, a new UI section and a non-admin way to list channels, and the setting does not
   travel with the pipeline definition.
 - **C. Steps that run on failure.** Most flexible, but the executor would have to keep going
-  after a failure, and it cannot report failures where no agent could run.
+  after a failure, and it cannot report a failure caused by the agent itself going away.
 
 ## YAML
 
@@ -156,8 +157,13 @@ notification, which stays as it is.
   running applies to that build.
 - Entries are independent. A problem with one never stops the others.
 - Sending never changes the build's status or raises into the executor.
-- It covers every way a build can fail during execution: a failing step, no agent available,
-  and an agent that stops responding.
+- It covers every way a build can fail during execution: a failing step, and an agent that
+  goes offline or stops responding once the build has started.
+- It is sent after the agent has been released and the next queued build dispatched, on its
+  own database session, and works from a plain-value snapshot of the failure taken when the
+  build's final status is committed. Sending can be slow and can roll a session back; neither
+  may hold up the agent or disturb the executor.
+- Each entry has a 30-second deadline. An entry that exceeds it is abandoned and reported.
 
 ### When something goes wrong
 
@@ -184,8 +190,10 @@ code as the `notify` step:
 
 - **Email:** `subject` is used. Without `recipient`, the existing sender delivers to the
   channel's own sender address, so email entries should normally set `recipient`. The docs
-  say so.
-- **Slack:** `recipient`, if set, is sent as a channel override.
+  say so. The email sender now escapes the body in its HTML part, so a branch or step name
+  cannot add markup there, and connects with a 15-second timeout.
+- **Slack:** `recipient`, if set, is sent as a channel override. Slack reads `<...>` as links
+  and mentions, so substituted values are escaped the same way as for Telegram.
 - **Telegram:** the message goes to the channel's default chat, or to `recipient`. The
   existing sender tells Telegram to read the message as HTML, and Telegram rejects a stray
   `<` or `&`. So for a Telegram channel the default message is HTML-escaped, and in a custom

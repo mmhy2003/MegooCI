@@ -91,3 +91,10 @@ def test_rules_tell_the_assistant_to_use_the_block_for_failures():
     rules = prompt[prompt.index("## Rules"):]
     assert "12. When the user wants to be told about failed builds" in rules
     assert "`notifications` block with `on_failure`" in rules
+
+
+def test_docs_do_not_promise_a_notice_for_a_build_still_waiting_for_an_agent():
+    """A build that never gets an agent stays pending; it does not fail."""
+    section = _section("## Notifications")
+    assert "no agent could run" not in section
+    assert "stays pending and sends nothing" in section
