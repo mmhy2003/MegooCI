@@ -1490,10 +1490,54 @@ export interface AiAssistantRequest {
   history?: AiChatMessage[];
 }
 
+export interface AiAssistantStep {
+  tool: string;
+  label: string;
+  ok: boolean;
+}
+
+export interface AiDiffLine {
+  kind: "context" | "add" | "remove";
+  /** Line number before the change; null for an added line. */
+  old: number | null;
+  /** Line number after the change; null for a removed line. */
+  new: number | null;
+  text: string;
+}
+
+export interface AiDiffHunk {
+  old_start: number;
+  new_start: number;
+  lines: AiDiffLine[];
+}
+
+export interface AiProposalProblem {
+  message: string;
+  line: number | null;
+}
+
+export interface AiProposal {
+  yaml: string;
+  added: number;
+  removed: number;
+  problems: AiProposalProblem[];
+  hunks: AiDiffHunk[];
+}
+
 export interface AiAssistantResponse {
   reply: string;
+  /** Same as proposal.yaml, or null when nothing is proposed. */
   yaml: string | null;
+  mode: "tools" | "legacy";
+  limit_reached: boolean;
+  steps: AiAssistantStep[];
+  proposal: AiProposal | null;
 }
+
+type AiAssistantStreamEvent =
+  | ({ type: "step" } & AiAssistantStep)
+  | ({ type: "done" } & AiAssistantResponse)
+  | { type: "error"; detail: string };
 
 export const aiAssistantApi = {
   ask: (data: AiAssistantRequest) => {
@@ -1506,6 +1550,83 @@ export const aiAssistantApi = {
       body: JSON.stringify(data),
       signal: controller.signal,
     }).finally(() => clearTimeout(timer));
+  },
+
+  /**
+   * Ask over the streaming endpoint. `onStep` is called after each tool the
+   * assistant uses; the promise resolves with the final response. Abort with
+   * `signal` to stop the request.
+   */
+  stream: async (
+    data: AiAssistantRequest,
+    options: {
+      onStep?: (step: AiAssistantStep) => void;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<AiAssistantResponse> => {
+    const endpoint = "/api/v1/ai/assistant/stream";
+    const init: RequestInit = {
+      method: "POST",
+      body: JSON.stringify(data),
+      signal: options.signal,
+    };
+
+    let res = await performFetch(endpoint, init, getAccessToken());
+    if (res.status === 401) {
+      const newAccess = await refreshAccessTokenOnce();
+      if (newAccess) res = await performFetch(endpoint, init, newAccess);
+    }
+    if (!res.ok) {
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        body = await res.text();
+      }
+      throw new ApiError(res.status, body, extractErrorMessage(res.status, body));
+    }
+    if (!res.body) {
+      throw new ApiError(0, null, "The server sent an empty response.");
+    }
+
+    // Server-sent events: frames separated by a blank line, each a
+    // `data: <json>` line. Lines starting with ":" only keep the connection
+    // open while the model is thinking.
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let end = buffer.indexOf("\n\n");
+      while (end !== -1) {
+        const frame = buffer.slice(0, end);
+        buffer = buffer.slice(end + 2);
+        end = buffer.indexOf("\n\n");
+        for (const line of frame.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          let event: AiAssistantStreamEvent;
+          try {
+            event = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+          if (event.type === "step") {
+            options.onStep?.({ tool: event.tool, label: event.label, ok: event.ok });
+          } else if (event.type === "done") {
+            return event;
+          } else if (event.type === "error") {
+            throw new ApiError(502, event, event.detail);
+          }
+        }
+      }
+    }
+    throw new ApiError(
+      0,
+      null,
+      "The connection closed before the assistant finished. Please try again.",
+    );
   },
 };
 
