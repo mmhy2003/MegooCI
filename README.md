@@ -224,6 +224,16 @@ Without a `message`, a default is sent with what happened, the pipeline, build n
 
 Link the pipeline to a project whose repository points at your GitHub / GitLab repo — a push triggers the webhook and the pipeline runs on the next available agent.
 
+## Backup and Restore
+
+Administrators can back up and restore the server's **configuration** under **Backups** in the sidebar: users, roles, projects, pipelines, secrets, notification channels, git connections, agents, API tokens and system settings. Build history, logs, artifacts and registry images are not part of a backup; back up the `megooci_storage` and `postgres_data` volumes for those.
+
+- **Passphrase.** Set a backup passphrase first. Every backup is encrypted with it, and it is the only way to open one: it cannot be recovered from the server. A backup made on one server can be restored on another, even with a different `MEGOOCI_SECRET_KEY`, given the passphrase.
+- **Where backups live.** Files are written to `<MEGOOCI_STORAGE_ROOT>/backups/` on the storage volume. That disk can be lost with the server, so download the backups you need or turn on the remote copy.
+- **Schedule.** Daily or weekly at a time in UTC, keeping the newest N scheduled backups. Needs the `celery-worker` and `celery-beat` services, which the default Compose file runs.
+- **Remote copy (optional).** Every backup can also be uploaded to S3-compatible storage (AWS S3, MinIO, Backblaze B2, …). Enter the endpoint, bucket and keys, and use **Test connection**.
+- **Restore.** Turn maintenance mode on, wait for running builds to finish, then choose **Restore** and type `restore`. The configuration becomes exactly what the backup holds: anything created since is removed together with its build history, and the build history of everything that still exists is kept. A backup of the current state is taken first, and the administrator doing the restore keeps their password and access. A backup can only be restored by the release that has the same database version as the one that made it.
+
 ## Running a Self-Hosted Build Agent
 
 The `megooci-agent` is a single Go binary that connects to the controller over WebSocket.
