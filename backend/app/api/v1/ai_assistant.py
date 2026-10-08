@@ -34,6 +34,7 @@ from app.models.git_integration import ProjectRepository
 from app.models.pipeline import Pipeline
 from app.models.secret import EnvVar, Secret
 from app.models.user import User
+from app.services.assistant.reference import build_tool_prompt, split_topics
 
 # Let LiteLLM silently drop unsupported params per model (e.g. temperature
 # for reasoning models) instead of raising errors.
@@ -559,6 +560,11 @@ summary is enough since the YAML comments carry the detail.
 `notifications` block with `on_failure` — never a `notify` step at the end of \
 the pipeline, which does not run after a failure.
 """
+
+# With tools, the prompt is re-sent on every model call, so the step and
+# feature sections are served by the `reference` tool instead of being in it.
+REFERENCE_TOPICS = split_topics(SYSTEM_PROMPT)
+TOOL_SYSTEM_PROMPT = build_tool_prompt(SYSTEM_PROMPT, REFERENCE_TOPICS)
 
 
 class ChatMessage(BaseModel):
