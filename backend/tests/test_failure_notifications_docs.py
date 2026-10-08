@@ -89,8 +89,9 @@ def test_notify_example_uses_a_placeholder_that_exists():
 def test_rules_tell_the_assistant_to_use_the_block_for_failures():
     prompt = _prompt()
     rules = prompt[prompt.index("## Rules"):]
-    assert "12. When the user wants to be told about failed builds" in rules
-    assert "`notifications` block with `on_failure`" in rules
+    assert "12. When the user wants to be told about a build starting, finishing, failing" in rules
+    assert "`notifications` block with the matching event" in rules
+    assert "never a `notify` step" in rules
 
 
 def test_docs_do_not_promise_a_notice_for_a_build_still_waiting_for_an_agent():

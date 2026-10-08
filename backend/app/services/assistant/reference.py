@@ -46,8 +46,10 @@ Context when there are any.
 name; ask the user which channel if they have not said.
 9. Only add `runs_on` when the user asks for a specific OS, architecture or \
 agent, or the work is obviously OS-specific. `list_agents` shows what exists.
-10. To be told about failed builds, use the top-level `notifications` block — \
-never a `notify` step at the end, which does not run after a failure.
+10. To be told about a build starting, finishing, failing, being cancelled, \
+recovering or waiting for approval, use the top-level `notifications` block — \
+never a `notify` step at the end, which does not run after a failure. Read the \
+`notifications` topic for its events before you write it.
 11. When the conversation says an earlier change was proposed but not applied, \
 the editor and your working copy do not contain it. To build on it, put its \
 YAML into the working copy with `write_document`, then make the new change.

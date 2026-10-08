@@ -374,6 +374,9 @@ a channel configured in Notification Channels, use `notify` instead.
       - lead
 ```
 
+To tell approvers that a build is waiting for them, list a channel under \
+`on_waiting` in the top-level `notifications` block.
+
 ### notify — Send a notification via a configured channel
 ```yaml
 - notify:
@@ -389,7 +392,7 @@ Supported channel types: email (SMTP), Slack (webhook), Telegram (bot).
 Channels are configured by admins in the Notification Channels UI.
 A `notify` step runs only if the build reaches it. A build stops at the first \
 failed step, so a `notify` step never reports a failure — use the top-level \
-`notifications` block for that.
+`notifications` block for that, and for messages about a build starting or ending.
 
 ### trigger_pipeline — Trigger another pipeline
 ```yaml
@@ -468,16 +471,18 @@ work like `notify`-only pipelines.
 - If no matching agent is online, the build stays pending until one connects \
 or an operator re-enables a disabled agent.
 
-## Notifications — Tell people when a build fails
+## Notifications — Tell people about builds
 Add a top-level `notifications` block (not inside a stage) to send a message \
-through a configured channel whenever a build of this pipeline fails. The \
-server sends it, so it also goes out when the build's agent goes offline or \
-stops responding. A build that is still waiting for an agent stays pending and sends nothing.
+through a configured channel when something happens to a build of this \
+pipeline. The server sends it, so it also goes out when the build's agent goes \
+offline or stops responding.
 
 ```yaml
 version: 1
 name: deploy-staging
 notifications:
+  on_start:
+    - team-chat
   on_failure:
     - deploy-alerts                     # short form: a channel name
     - channel: ops-email                # full form
@@ -487,32 +492,58 @@ notifications:
         Build #${{ build.number }} of ${{ pipeline.name }} failed
         at ${{ build.failed_stage }} / ${{ build.failed_step }}
         ${{ build.url }}
+  on_complete:
+    - team-chat
 stages:
   - name: deploy
     steps:
       - run: "./deploy.sh"
 ```
 
-`on_failure` is the only event, and it must be a non-empty list. Each entry is \
-either a channel name or a mapping whose only fields are `channel` (required), \
-`message`, `subject` and `recipient`. Channels are configured by admins in the \
-Notification Channels UI (email, Slack or Telegram) — never invent a channel \
-name; ask the user which channel to use if they have not said.
+Events — each is optional, and the block needs at least one:
+- `on_start` — the build starts running.
+- `on_waiting` — the build pauses at a `wait_input` step and needs approval.
+- `on_success` — the build ends successfully.
+- `on_fixed` — the build ends successfully and the previous finished build of \
+the same pipeline and branch had failed.
+- `on_failure` — the build ends as failed.
+- `on_cancelled` — a running build is cancelled.
+- `on_complete` — the build ends, whatever the result.
 
-Without `message`, a default is sent: the pipeline name, build number, branch, \
-commit, the stage and step that failed, and a link to the build. A custom \
-`message` or `subject` can use every placeholder, plus three that exist only \
-here: `${{ build.failed_stage }}`, `${{ build.failed_step }}` and \
-`${{ build.url }}`. For an email channel set `recipient`; without it the \
-message goes to the channel's own sender address. A successful or cancelled \
-build sends nothing.
+Each event is a non-empty list. Each entry is either a channel name or a \
+mapping whose only fields are `channel` (required), `message`, `subject` and \
+`recipient`. Channels are configured by admins in the Notification Channels UI \
+(email, Slack or Telegram) — never invent a channel name; ask the user which \
+channel to use if they have not said.
+
+When a build ends, a channel listed under several matching events gets one \
+message, from the most specific event: `on_fixed` before `on_success` before \
+`on_complete`, and `on_failure` or `on_cancelled` before `on_complete`. So with \
+`team-chat` under `on_complete` and also under `on_failure` with its own \
+message, a failed build sends `team-chat` only the `on_failure` message. Do not \
+repeat a channel under `on_success` when it is already under `on_complete`, \
+unless the messages should differ.
+
+Without `message`, a default is sent: what happened, the pipeline name, build \
+number, branch, commit, the step that failed or is waiting, and a link to the \
+build. A custom `message` or `subject` can use every placeholder. \
+`${{ build.status }}` is `running`, `success`, `failed` or `cancelled`, which \
+lets one `on_complete` message fit every result. These exist only here: \
+`${{ build.url }}`; `${{ build.failed_stage }}` and `${{ build.failed_step }}` \
+for a failed build; `${{ build.waiting_stage }}` and `${{ build.waiting_step }}` \
+for `on_waiting`. For an email channel set `recipient`; without it the message \
+goes to the channel's own sender address.
+
+A build that never started sends nothing: one still waiting for an agent \
+stays pending and sends nothing, and one cancelled before it started sends no \
+`on_cancelled` and no `on_complete`.
 
 ## Pipeline Structure
 ```yaml
 version: 1
 name: pipeline-name
 runs_on: linux          # optional — target a specific agent environment
-notifications:          # optional — who is told when a build fails
+notifications:          # optional — who is told about builds (on_start, on_complete, ...)
   on_failure:
     - channel-name
 env:                    # global env vars (inherited by all stages/steps)
@@ -569,9 +600,11 @@ Never invent OS or arch values — stick to the allowed set above.
 to explain what you changed and why, directly next to the affected lines. This \
 makes the pipeline self-documenting. Keep your chat reply brief — a one-line \
 summary is enough since the YAML comments carry the detail.
-12. When the user wants to be told about failed builds, add the top-level \
-`notifications` block with `on_failure` — never a `notify` step at the end of \
-the pipeline, which does not run after a failure.
+12. When the user wants to be told about a build starting, finishing, failing, \
+being cancelled, recovering or waiting for approval, add the top-level \
+`notifications` block with the matching event (`on_start`, `on_complete`, \
+`on_failure`, `on_cancelled`, `on_fixed`, `on_waiting`) — never a `notify` step \
+at the end of the pipeline, which does not run after a failure or a cancellation.
 """
 
 # With tools, the prompt is re-sent on every model call, so the step and
