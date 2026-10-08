@@ -57,6 +57,10 @@ enough to rebuild a server elsewhere.
   schedule, the remote storage settings and the record of past runs are never written into a
   backup, and a restore leaves them untouched. A restore can therefore never break the next
   scheduled backup.
+- **Maintenance mode is server state too.** Whether maintenance mode is on, and its message,
+  are not in a backup and are not changed by a restore: a restore must not turn maintenance
+  mode off under the administrator who just turned it on. They turn it off themselves when
+  they have checked the result.
 
 ## The backup file
 
@@ -153,6 +157,14 @@ administrator, whatever the backup says. If the backup has that account (the sam
 same email), everything else about it comes from the backup; if not, the account is kept as
 it is. Without this rule, restoring an old backup could leave nobody able to sign in.
 
+### Known limitation: exchanged names
+
+A restore rewrites rows one at a time. If two things that both exist in the backup have
+exchanged a unique value since it was made — two projects swapped names, two users swapped
+email addresses — the first rewrite collides with the other row, the restore fails, and
+nothing is changed. Rename one of them and restore again. A name taken by something created
+after the backup is not a problem: that row is on its way out and gives the name up first.
+
 ### Same schema version only
 
 A backup can be restored only by a server whose database schema revision equals the
@@ -193,19 +205,21 @@ upgrade. The page shows the revision of each backup and marks incompatible ones.
 
 ## Access and API
 
-Every endpoint requires a global administrator. A project-scoped role, or an API token
-without the admin scope, gets 403.
+Every endpoint requires a global administrator. A project-scoped role — an admin role held
+for one project included — or an API token without the admin scope, gets 403. The check is
+stricter than the one the other admin pages use, which accepts an admin role in any scope.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/v1/admin/backups` | List backups (name, kind, time, size, schema revision, compatible, remote status) and the last scheduled run. |
+| `GET /api/v1/admin/backups` | List backups (name, kind, time, size, schema revision, compatible, remote status), the settings without their secrets, and the last scheduled run. |
 | `POST /api/v1/admin/backups` | Create a manual backup. |
 | `POST /api/v1/admin/backups/upload` | Upload a backup file (at most 100 MB; the header must be valid). It is stored with kind `uploaded`. |
 | `GET /api/v1/admin/backups/{name}/download` | Download a backup file. |
 | `DELETE /api/v1/admin/backups/{name}` | Delete a backup. |
-| `POST /api/v1/admin/backups/{name}/restore` | Restore. Body: `confirm`, optional `passphrase`. |
+| `GET /api/v1/admin/backups/{name}/restore-checks` | The preconditions of a restore of this backup, and whether each holds now. |
+| `POST /api/v1/admin/backups/{name}/restore` | Restore. Body: `confirm`, optional `passphrase`. Answers 422 when the backup needs a passphrase other than the stored one. |
 | `POST /api/v1/admin/backups/{name}/upload-remote` | Retry the remote copy. |
-| `GET` / `PUT /api/v1/admin/backups/settings` | Read and change schedule and remote settings; set the passphrase. Secrets are write-only. |
+| `PUT /api/v1/admin/backups/settings` | Change the schedule and remote settings; set the passphrase. Only the parts sent are changed. Secrets are write-only; an empty remote secret keeps the stored one. |
 | `POST /api/v1/admin/backups/settings/test-remote` | Test the remote storage settings. |
 
 - `{name}` must be a file name the server would generate: it is matched against a strict
