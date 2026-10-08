@@ -19,6 +19,8 @@ from tests._rbac import build_inmemory_factory
 
 PASSPHRASE = "correct horse battery"
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+# The fixture below replaces this for most tests; one test runs the real one.
+REBUILD_SEARCH_INDEX = service._rebuild_search_index
 REMOTE = RemoteConfig(enabled=True, bucket="b", access_key_id="a", secret_access_key="s")
 
 
@@ -290,6 +292,88 @@ async def test_a_restore_that_cannot_be_applied_changes_nothing(sf, monkeypatch)
     assert "nothing was changed" in str(exc.value) and "RuntimeError" in str(exc.value)
     assert "disk full" not in str(exc.value)
     assert await _pipeline_name(sf, ids) == "changed-since"
+
+
+async def test_a_database_error_names_the_constraint_and_never_shows_or_logs_row_values(
+        sf, monkeypatch, caplog):
+    """The database's error carries the statement's values: password hashes,
+    variable values, API keys. None of that may reach the page or the log."""
+    from sqlalchemy.exc import IntegrityError
+
+    ids = await _world(sf)
+    backup = await service.create_backup(sf, SECRET_KEY, now=NOW)
+
+    async def collides(db, payload, secret_key, *, acting_user_id):
+        raise IntegrityError(
+            "UPDATE env_vars SET value=? WHERE id=?", ("s3cr3t-value", "an-id"),
+            Exception('duplicate key value violates unique constraint "projects_name_key"\n'
+                      "DETAIL:  Key (name)=(Top Secret Project) already exists."))
+
+    monkeypatch.setattr(service, "apply_configuration", collides)
+
+    with caplog.at_level("DEBUG"), pytest.raises(service.RestoreFailed) as exc:
+        await _restore(sf, backup.name, ids)
+
+    message = str(exc.value)
+    assert 'unique constraint "projects_name_key"' in message and "nothing was changed" in message
+    for leaked in ("s3cr3t-value", "Top Secret Project", "UPDATE env_vars"):
+        assert leaked not in message and leaked not in caplog.text, leaked
+    assert "projects_name_key" in caplog.text, "the log still says what went wrong"
+
+
+class FakeSearch:
+    """Just enough of the Meilisearch client: what was done to each index, in order."""
+
+    def __init__(self):
+        self.done = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    def index(self, uid):
+        fake = self
+
+        class Index:
+            async def delete_all_documents(self):
+                fake.done.append((uid, "clear", None))
+
+            async def add_documents(self, documents):
+                fake.done.append((uid, "add", [document["id"] for document in documents]))
+
+        return Index()
+
+
+async def test_the_search_index_is_emptied_before_it_is_filled_again(sf, monkeypatch):
+    """Adding documents never removes one: without emptying first, everything
+    the restore removed would stay findable, as results that lead nowhere."""
+    from app.services import search
+
+    ids = await _world(sf)
+    fake = FakeSearch()
+    monkeypatch.setattr(search, "_get_client", lambda: fake)
+
+    assert await REBUILD_SEARCH_INDEX(sf) is True
+
+    cleared = [uid for uid, action, _ in fake.done if action == "clear"]
+    assert sorted(cleared) == ["artifacts", "builds", "pipelines", "projects"]
+    first_add = next(i for i, (_, action, _) in enumerate(fake.done) if action == "add")
+    assert first_add == 4, "every index is emptied before anything is added"
+    added = {uid: found for uid, action, found in fake.done if action == "add"}
+    assert added["pipelines"] == [str(ids["pipeline"])]
+
+
+async def test_a_search_server_that_is_down_does_not_fail_the_restore(sf, monkeypatch):
+    from app.services import search
+
+    def down():
+        raise ConnectionError("meilisearch is not reachable")
+
+    monkeypatch.setattr(search, "_get_client", down)
+
+    assert await REBUILD_SEARCH_INDEX(sf) is False
 
 
 async def test_restoring_a_backup_that_does_not_exist_or_is_not_a_name(sf):

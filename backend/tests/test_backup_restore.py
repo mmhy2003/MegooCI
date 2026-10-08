@@ -3,6 +3,7 @@ of what still exists, and changes nothing when it cannot finish."""
 import copy
 import os
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
@@ -61,9 +62,10 @@ async def _restore(sf, payload, acting, key=SECRET_KEY):
     return summary
 
 
-async def _comparable(sf, key=SECRET_KEY):
+async def _comparable(sf, key=SECRET_KEY, *, agents_as_restored_elsewhere=False):
     """The configuration with encrypted values shown in the clear, so two
-    servers with different keys can be compared."""
+    servers with different keys can be compared. On another server a restored
+    agent has never connected, which is the one way its row may differ."""
     async with sf() as db:
         tables = await snapshot(db)
     for spec in TABLES:
@@ -74,8 +76,9 @@ async def _comparable(sf, key=SECRET_KEY):
                         row[name] = decrypt(row[name], key)
                     except Exception:
                         pass  # was never encrypted with the server key
-            if spec.name == "agents":
-                row.update(status="offline", connected_at=None, current_build_id=None)
+            if spec.name == "agents" and agents_as_restored_elsewhere:
+                row.update(status="offline", connected_at=None, last_seen_at=None,
+                           agent_version=None, current_build_id=None)
     return tables
 
 
@@ -109,8 +112,9 @@ async def test_restoring_onto_an_empty_server_with_another_key(sf, other_server)
 
     await _restore(other_server, payload, bootstrap, key=OTHER_SECRET_KEY)
 
-    expected = await _comparable(sf)
+    expected = await _comparable(sf, agents_as_restored_elsewhere=True)
     restored = await _comparable(other_server, key=OTHER_SECRET_KEY)
+    assert [(a["status"], a["connected_at"]) for a in restored["agents"]] == [("offline", None)]
     kept = [row for row in restored["users"] if row["email"] == "bootstrap@example.com"]
     restored["users"] = [row for row in restored["users"] if row["email"] != "bootstrap@example.com"]
     expected["system_settings"] = [row for row in expected["system_settings"]
@@ -277,16 +281,25 @@ async def test_a_name_taken_by_something_newer_goes_back_to_its_owner(sf):
     assert projects == {"platform": ids["parent_project"], "web": ids["project"]}
 
 
-async def test_pending_builds_are_cancelled_and_agents_are_offline(sf):
+async def test_pending_builds_are_cancelled_and_connected_agents_stay_usable(sf):
+    """A connected agent only reports that it is alive; it does not connect
+    again. If the restore wrote it as never connected, no build would be
+    sent to it until someone restarted it."""
     from app.models.agent import Agent
     from app.models.build import Build, Stage, Step
+    from app.services.agent_dispatcher import pick_online_agent
 
     ids = await _seed(sf)
     async with sf() as db:
         pending = await insert(db, Build, pipeline_id=ids["pipeline"], number=5, status="pending")
         stage = await insert(db, Stage, build_id=pending, name="s", sort_order=0, status="pending")
         step = await insert(db, Step, stage_id=stage, name="t", sort_order=0, status="pending")
+        # The agent is reserved for the pending build, as the dispatcher leaves it.
+        await db.execute(sa.update(Agent.__table__).values(
+            current_build_id=pending, agent_version="1.4.0",
+            last_seen_at=datetime(2026, 1, 2, 0, 5, tzinfo=timezone.utc)))
         await db.commit()
+        connected_before = (await rows(db, Agent))[0]["connected_at"]
 
     await _restore(sf, await _export(sf), ids["admin"])
 
@@ -298,7 +311,70 @@ async def test_pending_builds_are_cancelled_and_agents_are_offline(sf):
     assert builds[pending]["status"] == "cancelled" and builds[pending]["finished_at"] is not None
     assert (stages[stage], steps[step]) == ("cancelled", "cancelled")
     assert builds[ids["build"]]["status"] == "success" and stages[ids["stage"]] == "success"
-    assert (agent["status"], agent["connected_at"], agent["current_build_id"]) == ("offline", None, None)
+    assert agent["current_build_id"] is None, "the reservation for the cancelled build is gone"
+    assert (agent["status"], agent["agent_version"]) == ("online", "1.4.0")
+    assert agent["connected_at"] == connected_before and agent["last_seen_at"] is not None
+    async with sf() as db:
+        picked = await pick_online_agent(db)
+    assert picked is not None and picked.id == ids["agent"], "builds can be sent to it"
+
+
+async def test_values_handed_from_one_surviving_row_to_another_are_put_back(sf):
+    """Since the backup, one account took over the email another one used to
+    have. Rows are rewritten one at a time, in an order that depends on their
+    ids, so both directions are tried."""
+    from app.models.user import User
+
+    ids = await _seed(sf)
+    payload = await _export(sf)
+    for giver, taker in (("dev", "admin"), ("admin", "dev")):
+        given = f"{giver}@example.com"
+        async with sf() as db:
+            await db.execute(sa.update(User.__table__).where(User.id == ids[giver])
+                             .values(email=f"{giver}-moved@example.com"))
+            await db.execute(sa.update(User.__table__).where(User.id == ids[taker])
+                             .values(email=given))
+            await db.commit()
+
+        await _restore(sf, payload, ids["admin"])
+
+        async with sf() as db:
+            emails = {row["id"]: row["email"] for row in await rows(db, User)}
+        assert emails == {ids["admin"]: "admin@example.com", ids["dev"]: "dev@example.com"}
+
+
+async def test_two_surviving_rows_that_exchanged_names_are_put_back(sf):
+    from app.models.project import Project
+
+    ids = await _seed(sf)
+    payload = await _export(sf)
+    async with sf() as db:
+        for project, name, slug in ((ids["project"], "tmp", "tmp"),
+                                    (ids["parent_project"], "Web", "web"),
+                                    (ids["project"], "Platform", "platform")):
+            await db.execute(sa.update(Project.__table__).where(Project.id == project)
+                             .values(name=name, slug=slug))
+        await db.commit()
+
+    await _restore(sf, payload, ids["admin"])
+
+    async with sf() as db:
+        names = {row["id"]: (row["name"], row["slug"]) for row in await rows(db, Project)}
+    assert names == {ids["project"]: ("Web", "web"), ids["parent_project"]: ("Platform", "platform")}
+
+
+async def test_an_empty_json_column_stays_empty_in_the_database(sf):
+    """Found on PostgreSQL: a column that was NULL came back holding the JSON
+    value null, which the database does not treat as empty."""
+    ids = await _seed(sf)
+    empty = "SELECT token_scopes IS NULL FROM git_provider_connections"
+    async with sf() as db:
+        assert (await db.execute(sa.text(empty))).scalar() in (True, 1)
+
+    await _restore(sf, await _export(sf), ids["admin"])
+
+    async with sf() as db:
+        assert (await db.execute(sa.text(empty))).scalar() in (True, 1)
 
 
 # ── server state ────────────────────────────────────────────────────────

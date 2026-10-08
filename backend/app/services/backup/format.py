@@ -40,6 +40,8 @@ _MAX_HEADER_BYTES = 64 * 1024
 _MAX_SCRYPT_N = 2**20
 _MAX_SCRYPT_R = 16
 _MAX_SCRYPT_P = 4
+# scrypt needs 128 * n * r bytes: 32 MiB for what this server writes.
+_MAX_SCRYPT_MEMORY = 256 * 1024 * 1024
 
 
 class BackupFormatError(Exception):
@@ -152,6 +154,7 @@ def _parse_header(header_bytes: bytes) -> Header:
             or not 2 <= n <= _MAX_SCRYPT_N or n & (n - 1)
             or not 1 <= r <= _MAX_SCRYPT_R
             or not 1 <= p <= _MAX_SCRYPT_P
+            or 128 * n * r > _MAX_SCRYPT_MEMORY
             or len(base64.b64decode(header.nonce)) != 12
             or not base64.b64decode(header.kdf["salt"])
         ):

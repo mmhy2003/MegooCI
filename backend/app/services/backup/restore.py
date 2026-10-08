@@ -51,6 +51,16 @@ def _is_leaf(spec: TableSpec) -> bool:
     )
 
 
+def _storable(spec: TableSpec, row: dict[str, Any]) -> dict[str, Any]:
+    """*row* as it is handed to the database. An empty JSON column must be
+    written as SQL NULL: given a plain ``None``, a JSON column stores the JSON
+    value ``null`` instead, which the database does not treat as empty."""
+    return {
+        name: sa.null() if value is None and isinstance(spec.table.c[name].type, sa.JSON) else value
+        for name, value in row.items()
+    }
+
+
 def _self_references(spec: TableSpec) -> list[sa.Column]:
     return [fk.parent for fk in spec.table.foreign_keys if fk.column.table is spec.table]
 
@@ -105,6 +115,27 @@ async def _keep_acting_admin(
     account["is_active"] = True
 
 
+_AGENT_RUNTIME = ("status", "connected_at", "last_seen_at", "agent_version")
+
+
+async def _keep_agent_connections(db: AsyncSession, agents: list[dict[str, Any]]) -> None:
+    """Whether an agent is connected is a fact about this server, not about
+    the backup. An agent that is connected now stays so: it only reports that
+    it is alive and would not connect again, so writing it as never connected
+    would leave it unused until someone restarted it. An agent this server has
+    not seen yet starts offline. Either way nothing stays reserved for a
+    build: pending builds are cancelled."""
+    table = Agent.__table__
+    current = {row["id"]: row for row in (await db.execute(sa.select(table))).mappings()}
+    for agent in agents:
+        now = current.get(agent["id"])
+        for column in _AGENT_RUNTIME:
+            agent[column] = now[column] if now is not None else None
+        if now is None:
+            agent["status"] = "offline"
+        agent["current_build_id"] = None
+
+
 async def _cancel_pending_builds(db: AsyncSession) -> None:
     """Builds that have not started would run against configuration that is
     about to change."""
@@ -143,21 +174,22 @@ async def _detach_history(db: AsyncSession, spec: TableSpec, keys: list[Any]) ->
                 await db.execute(statement)
 
 
-async def _release_unique_values(db: AsyncSession, spec: TableSpec, keys: list[Any]) -> None:
-    """Rows that will be removed last must not hold a name or an email a row
-    from the backup needs in the meantime."""
-    columns = [
+def _unique_columns(spec: TableSpec) -> list[sa.Column]:
+    """The columns of a table that hold a unique name, email or slug."""
+    return [
         column for column in spec.table.columns
         if column.unique and isinstance(column.type, sa.String) and not column.primary_key
     ]
-    if not columns:
-        return
-    key = spec.table.c[spec.key]
-    for value in keys:
+
+
+async def _release(db: AsyncSession, spec: TableSpec, key: Any, columns: list[sa.Column]) -> None:
+    """Give a row a placeholder in *columns*, so the value it held is free
+    for another row until this one is rewritten or removed."""
+    if columns:
         await db.execute(
             sa.update(spec.table)
-            .where(key == value)
-            .values({column.name: f"~removed~{uuid.uuid4().hex}" for column in columns})
+            .where(spec.table.c[spec.key] == key)
+            .values({column.name: f"~moving~{uuid.uuid4().hex}" for column in columns})
         )
 
 
@@ -194,17 +226,15 @@ async def apply_configuration(
         rows[spec.name] = [row for row in decoded if not is_server_state(spec, row)]
 
     await _keep_acting_admin(db, rows[User.__tablename__], acting_user_id)
-    for agent in rows[Agent.__tablename__]:
-        # Agents reconnect on their own; until then none is connected.
-        agent.update(status="offline", current_build_id=None, connected_at=None)
+    await _keep_agent_connections(db, rows[Agent.__tablename__])
     await _cancel_pending_builds(db)
 
-    existing: dict[str, set[Any]] = {}
+    existing: dict[str, dict[Any, Any]] = {}
     doomed: dict[str, list[Any]] = {}
     for spec in TABLES:
         current = (await db.execute(sa.select(spec.table))).mappings().all()
         keep = {row[spec.key] for row in rows[spec.name]}
-        existing[spec.name] = {row[spec.key] for row in current}
+        existing[spec.name] = {row[spec.key]: row for row in current}
         doomed[spec.name] = [
             row[spec.key]
             for row in current
@@ -220,20 +250,33 @@ async def apply_configuration(
         if _is_leaf(spec):
             await _delete(db, spec, doomed[spec.name])
         else:
-            await _release_unique_values(db, spec, doomed[spec.name])
+            for key_value in doomed[spec.name]:
+                await _release(db, spec, key_value, _unique_columns(spec))
+
+    #    Rows that stay but get another name or email give theirs up as well:
+    #    rows are rewritten one at a time, and without this the order could
+    #    make one take a value another still holds.
+    for spec in TABLES:
+        columns = _unique_columns(spec)
+        for row in rows[spec.name]:
+            now = existing[spec.name].get(row[spec.key])
+            if now is not None:
+                changing = [c for c in columns if c.name in row and row[c.name] != now[c.name]]
+                await _release(db, spec, row[spec.key], changing)
 
     # 2. Write the backup's rows, parents first.
     for spec in TABLES:
         key = spec.table.c[spec.key]
         for row in _parents_first(spec, rows[spec.name]):
+            values = _storable(spec, row)
             if row[spec.key] in existing[spec.name]:
-                values = {name: value for name, value in row.items() if name != spec.key}
+                del values[spec.key]
                 if values:
                     await db.execute(
                         sa.update(spec.table).where(key == row[spec.key]).values(values)
                     )
             else:
-                await db.execute(sa.insert(spec.table).values(row))
+                await db.execute(sa.insert(spec.table).values(values))
 
     # 3. Nothing from the backup points at the remaining rows any more:
     #    remove them, children first.

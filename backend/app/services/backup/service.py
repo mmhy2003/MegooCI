@@ -201,6 +201,17 @@ async def restore_checks(factory: SessionFactory, header: Header | None) -> list
     return checks
 
 
+def _reason(exc: Exception) -> str:
+    """What went wrong while applying a backup, without the values of the row
+    it went wrong on. A database error's own text carries the statement's
+    values — password hashes, variable values, API keys — so only the first
+    line of the database's message is used: it names the constraint."""
+    original = str(getattr(exc, "orig", "") or "").strip()
+    if not original:
+        return type(exc).__name__
+    return f"{type(exc).__name__}: {original.splitlines()[0]}"[:300]
+
+
 def _open(data: bytes, given: str | None, stored: str | None) -> dict[str, Any]:
     if given:
         return read_backup(data, given)[1]
@@ -254,11 +265,13 @@ async def restore_backup(
                 await db.commit()
             except Exception as exc:
                 await db.rollback()
-                logger.exception("Restore of %s failed; nothing was changed", name)
+                reason = _reason(exc)
+                # Deliberately without the traceback or the exception's text.
+                logger.error("Restore of %s failed and was rolled back: %s", name, reason)
                 raise RestoreFailed(
                     "The backup could not be applied, and nothing was changed. "
-                    f"The server reported: {type(exc).__name__}."
-                ) from exc
+                    f"The server reported: {reason}."
+                ) from None
 
     search_rebuilt = await _rebuild_search_index(factory)
     await record_event(factory, "backup.restore", acting_user_id,
@@ -270,6 +283,8 @@ async def _rebuild_search_index(factory: SessionFactory) -> bool:
     try:
         from app.services import search
 
+        # Emptied first: what the restore removed must not stay findable.
+        await search.clear_all()
         async with factory() as db:
             await search.sync_all(db)
         return True

@@ -130,6 +130,26 @@ def test_a_header_asking_for_an_unreasonable_key_derivation_is_refused(field, va
     assert "header cannot be read" in str(exc.value)
 
 
+@pytest.mark.parametrize("n, r, allowed", [
+    (2**15, 8, True),     # 32 MiB: what this server writes
+    (2**18, 8, True),     # 256 MiB: the most a file may ask for
+    (2**19, 8, False),    # 512 MiB
+    (2**20, 16, False),   # 2 GiB: enough to get a small server killed mid-restore
+    (2**17, 16, True),    # 256 MiB
+    (2**18, 16, False),
+])
+def test_the_memory_a_header_may_ask_for_is_bounded(n, r, allowed):
+    def change(header):
+        header["kdf"].update(n=n, r=r)
+
+    data = _with_header(change)
+    if allowed:
+        assert read_header(data).kdf["n"] == n
+    else:
+        with pytest.raises(BackupFormatError):
+            read_header(data)
+
+
 @pytest.mark.parametrize("missing", ["kdf", "nonce", "counts", "created_at", "schema_revision"])
 def test_a_header_missing_a_field_is_refused(missing):
     def change(header):

@@ -249,6 +249,14 @@ async def remove_artifact(artifact_id: str) -> None:
 
 # ── Full re-sync (called once on startup) ──────────────────────────────
 
+async def clear_all() -> None:
+    """Remove every document from every index. Followed by ``sync_all`` this
+    rebuilds the index; ``sync_all`` alone only adds and never removes."""
+    async with _get_client() as client:
+        for uid in INDEX_SETTINGS:
+            await client.index(uid).delete_all_documents()
+
+
 async def sync_all(db: AsyncSession) -> None:
     """Bulk-sync all projects, pipelines, builds, and recent artifacts into Meilisearch."""
     from app.models.project import Project

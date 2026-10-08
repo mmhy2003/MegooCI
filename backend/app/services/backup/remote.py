@@ -37,9 +37,13 @@ def _client(config: RemoteConfig) -> Any:
             # Other S3 implementations are reached by address, not by a
             # bucket-named host.
             s3={"addressing_style": "path"} if config.endpoint_url else {},
+            # boto3 otherwise adds checksum headers and trailers to every
+            # upload; AWS accepts them, several S3-compatible stores do not.
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
             connect_timeout=CONNECT_TIMEOUT_SECONDS,
             read_timeout=READ_TIMEOUT_SECONDS,
-            retries={"max_attempts": MAX_ATTEMPTS},
+            retries={"total_max_attempts": MAX_ATTEMPTS},
         ),
     )
 

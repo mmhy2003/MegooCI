@@ -16,6 +16,7 @@ class FakeS3(BaseHTTPRequestHandler):
 
     objects: dict[str, bytes] = {}
     requests: list[tuple[str, str]] = []
+    headers_seen: list[set[str]] = []
 
     def log_message(self, *args):
         pass
@@ -30,11 +31,14 @@ class FakeS3(BaseHTTPRequestHandler):
 
     def _handle(self):
         type(self).requests.append((self.command, self.path))
+        type(self).headers_seen.append({key.lower() for key in self.headers})
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
         if "authorization" not in {key.lower() for key in self.headers}:
             return self._answer(403, b"<Error><Code>AccessDenied</Code><Message>unsigned</Message></Error>")
         bucket, _, key = self.path.lstrip("/").partition("/")
         key = key.split("?")[0]
+        if bucket == "broken":
+            return self._answer(500, b"<Error><Code>InternalError</Code><Message>try later</Message></Error>")
         if bucket != "backups":
             return self._answer(404, (
                 b"<Error><Code>NoSuchBucket</Code>"
@@ -52,7 +56,7 @@ class FakeS3(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def s3():
-    FakeS3.objects, FakeS3.requests = {}, []
+    FakeS3.objects, FakeS3.requests, FakeS3.headers_seen = {}, [], []
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeS3)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield FakeS3, f"http://127.0.0.1:{server.server_port}"
@@ -113,6 +117,31 @@ async def test_check_connection_fails_the_same_way(s3):
     with pytest.raises(RemoteError) as exc:
         await remote.check_connection(_config(endpoint, bucket="nope"))
     assert "NoSuchBucket" in str(exc.value)
+
+
+async def test_requests_carry_no_checksum_extras_that_other_s3_stores_reject(s3):
+    """Recent boto3 adds CRC checksum headers and trailers to every upload by
+    default. AWS accepts them; several S3-compatible stores answer with an
+    error. They are sent only when the operation requires them."""
+    fake, endpoint = s3
+
+    await remote.upload(_config(endpoint), NAME, b"backup bytes")
+
+    (headers,) = fake.headers_seen
+    extras = {h for h in headers if h.startswith("x-amz-checksum") or h in (
+        "x-amz-sdk-checksum-algorithm", "x-amz-trailer")}
+    assert extras == set()
+    assert "authorization" in headers
+
+
+async def test_a_failing_storage_is_tried_the_stated_number_of_times(s3):
+    fake, endpoint = s3
+
+    with pytest.raises(RemoteError) as exc:
+        await remote.upload(_config(endpoint, bucket="broken"), NAME, b"x")
+
+    assert "InternalError" in str(exc.value)
+    assert len(fake.requests) == remote.MAX_ATTEMPTS == 2
 
 
 async def test_an_unreachable_endpoint_is_a_remote_error_not_a_crash(monkeypatch):

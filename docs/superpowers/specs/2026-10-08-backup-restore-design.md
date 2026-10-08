@@ -132,10 +132,15 @@ do about it:
    - Cancel pending builds.
    - For each configuration table, delete the rows that are not in the backup, then insert
      or overwrite the rows that are, re-encrypting secret values with this server's key.
-   - Mark every agent offline with no current build; agents reconnect on their own.
+   - Leave each agent's connection as it is, with no current build. Whether an agent is
+     connected is a fact about this server, not about the backup: a connected agent only
+     reports that it is alive and does not connect again, so writing it as never connected
+     would leave it unused until it was restarted. An agent this server has not seen before
+     starts offline.
 3. Commit. If any step fails, the transaction is rolled back and the server is exactly as it
    was.
-4. After the commit: rebuild the search index, and record the restore in the audit trail.
+4. After the commit: empty the search index and fill it again (filling alone would leave
+   everything the restore removed findable), and record the restore in the audit trail.
 
 ### What happens to history
 
@@ -157,13 +162,20 @@ administrator, whatever the backup says. If the backup has that account (the sam
 same email), everything else about it comes from the backup; if not, the account is kept as
 it is. Without this rule, restoring an old backup could leave nobody able to sign in.
 
-### Known limitation: exchanged names
+### Names that moved since the backup
 
-A restore rewrites rows one at a time. If two things that both exist in the backup have
-exchanged a unique value since it was made — two projects swapped names, two users swapped
-email addresses — the first rewrite collides with the other row, the restore fails, and
-nothing is changed. Rename one of them and restore again. A name taken by something created
-after the backup is not a problem: that row is on its way out and gives the name up first.
+A restore rewrites rows one at a time, and names, emails and slugs are unique. So before
+any row is rewritten, every row that is about to be removed, and every row whose unique
+value is about to change, gives that value up for a placeholder. Whatever happened since
+the backup — a new account took a removed user's email, one project took over another's
+name, two projects exchanged names — each value goes back to the row the backup gives it
+to, in whatever order the rows are rewritten.
+
+### When a restore fails
+
+The message names what went wrong — for a database error, the constraint — but never the
+values of the row it went wrong on, and neither does the server log: a database error's own
+text carries password hashes, variable values and API keys.
 
 ### Same schema version only
 
@@ -192,6 +204,8 @@ upgrade. The page shows the revision of each backup and marks incompatible ones.
   key and is never returned by the API.
 - **Test connection** writes and deletes a small object under the prefix and reports the
   storage's own error if it fails.
+- Uploads carry no optional checksum headers or trailers: AWS accepts them, but several
+  S3-compatible stores reject them.
 - When enabled, every backup the server makes — manual, scheduled, pre-restore — is uploaded
   after it is written locally, under the same file name.
 - A failed upload does not fail the backup. The page shows, per backup, whether the remote
@@ -267,6 +281,8 @@ A new page, **Admin → Backups**, visible to administrators only.
   secret key are encrypted with the server key and write-only through the API.
 - The key is derived with scrypt, so guessing a passphrase offline is slow; the 12-character
   minimum makes it impractical.
+- A file's header says how costly its key derivation is. A header asking for more than
+  256 MiB of memory is refused, so a crafted file cannot exhaust the server.
 - File names from the client are validated against the generated-name pattern; uploads are
   size-limited and validated before being stored.
 - A restore is the most powerful action in the system: it can replace every account and
@@ -292,7 +308,11 @@ A new page, **Admin → Backups**, visible to administrators only.
 - The restoring administrator keeps their password and admin status: when the backup lacks
   the account, when it has it by id, and when it has it by email.
 - Backup settings are neither exported nor changed by a restore.
-- Agents are offline after a restore; pending builds are cancelled.
+- A connected agent can still be given builds after a restore; an agent restored onto
+  another server is offline; pending builds are cancelled.
+- An account that took over another surviving account's email, and two projects that
+  exchanged names, are put back.
+- An empty JSON column is still SQL NULL afterwards.
 
 **Preconditions and API (pytest)**
 - Each precondition refuses the restore with its own message; the pre-restore backup exists
