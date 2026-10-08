@@ -205,12 +205,15 @@ async def execute_build(
         except Exception:
             pass
 
-    # Last, and only after the agent is free and the next build is on its
-    # way: sending can be slow, and must not hold either of them up. The
-    # sends started while the build ran go first, so "started" cannot arrive
-    # after "failed".
-    if snapshot is not None:
+        # Last, and only after the agent is free and the next build is on
+        # its way: sending can be slow, and must not hold either of them up.
+        # The sends started while the build ran are finished on every way
+        # out, a crash included: a task left pending when this worker's
+        # event loop closes would keep its database session for good.
         await _wait_for_background_sends(build_id)
+
+    # They go first, so "started" cannot arrive after "failed".
+    if snapshot is not None:
         await _send_notifications(snapshot, session_factory)
 
 
@@ -1023,8 +1026,17 @@ def _send_in_background(
     if snapshot is None:
         return
     build_id = snapshot.build_id
-    task = asyncio.ensure_future(_send_notifications(snapshot, session_factory))
     tasks = _background_sends.setdefault(build_id, set())
+    earlier = list(tasks)
+
+    async def send() -> None:
+        # In the order things happened: "started" before "waiting for
+        # approval", even when the first channel is the slower one.
+        if earlier:
+            await asyncio.gather(*earlier, return_exceptions=True)
+        await _send_notifications(snapshot, session_factory)
+
+    task = asyncio.ensure_future(send())
     tasks.add(task)
 
     def forget(done: asyncio.Task) -> None:

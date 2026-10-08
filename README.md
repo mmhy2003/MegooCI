@@ -213,7 +213,7 @@ stages:
 | `on_start` | the build starts running |
 | `on_waiting` | the build pauses at a `wait_input` step and needs approval |
 | `on_success` | the build ends successfully |
-| `on_fixed` | the build succeeds and the previous finished build of the same pipeline and branch had failed |
+| `on_fixed` | the build succeeds and the last build of the same pipeline and branch that succeeded or failed had failed (cancelled builds are skipped) |
 | `on_failure` | the build fails |
 | `on_cancelled` | a running build is cancelled |
 | `on_complete` | the build ends, whatever the result |

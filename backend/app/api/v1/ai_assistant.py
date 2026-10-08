@@ -504,8 +504,9 @@ Events — each is optional, and the block needs at least one:
 - `on_start` — the build starts running.
 - `on_waiting` — the build pauses at a `wait_input` step and needs approval.
 - `on_success` — the build ends successfully.
-- `on_fixed` — the build ends successfully and the previous finished build of \
-the same pipeline and branch had failed.
+- `on_fixed` — the build ends successfully and the last build of the same \
+pipeline and branch that succeeded or failed (cancelled builds are skipped) \
+had failed.
 - `on_failure` — the build ends as failed.
 - `on_cancelled` — a running build is cancelled.
 - `on_complete` — the build ends, whatever the result.

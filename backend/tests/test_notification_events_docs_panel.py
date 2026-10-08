@@ -39,6 +39,7 @@ def test_docs_panel_section_lists_every_event_and_the_rules():
     for event in NOTIFICATION_EVENTS:
         assert event in section["description"], event
     assert "one message" in section["description"]
+    assert "cancelled builds are skipped" in section["description"]
     assert "never started sends nothing" in section["description"]
     assert "Successful and cancelled builds send nothing" not in section["description"]
 

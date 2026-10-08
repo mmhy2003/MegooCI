@@ -323,6 +323,73 @@ async def test_the_end_message_waits_for_a_start_message_still_being_sent(sf, fa
     assert ids["build"] not in build_executor._background_sends, "finished sends are forgotten"
 
 
+async def test_a_send_in_flight_is_finished_even_when_the_executor_crashes(sf, fake_redis, monkeypatch):
+    """Left pending, the task would live as long as the worker process, and
+    its database session with it."""
+    from app.services import build_executor
+    from app.services.build_notifications import BuildSnapshot
+
+    ids = await _seed(sf, "  on_start:\n    - team-chat\n")
+    agent_id = await _agent(sf, ids["build"])
+    order = []
+
+    async def fake_send(snap, session_factory):
+        order.append("send begins")
+        await asyncio.sleep(0.1)
+        order.append("send ends")
+
+    async def crashing_stages(**kwargs):
+        build_executor._send_in_background(
+            BuildSnapshot(
+                build_id=ids["build"], pipeline_id=ids["pipeline"], number=428, failed_stage="",
+                failed_step="", failed_step_id=None, secrets={}, env_vars={}, builtins={},
+                status="running",
+            ),
+            sf,
+        )
+        await asyncio.sleep(0)  # the send gets going
+        raise ConnectionError("redis went away")
+
+    async def noop(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(build_executor, "_send_notifications", fake_send)
+    monkeypatch.setattr(build_executor, "_run_build_stages", crashing_stages)
+    monkeypatch.setattr(build_executor, "release_agent", noop)
+    monkeypatch.setattr(build_executor, "send_build_finished", noop)
+    monkeypatch.setattr(build_executor, "dispatch_pending_builds", noop)
+
+    with pytest.raises(ConnectionError):
+        await build_executor.execute_build(
+            ids["build"], session_factory=sf, claimed_agent_id=agent_id)
+
+    assert order == ["send begins", "send ends"]
+    assert ids["build"] not in build_executor._background_sends
+
+
+async def test_messages_of_one_build_go_out_in_the_order_things_happened(sf, monkeypatch):
+    """A pipeline whose first step is an approval: "started" must not arrive
+    after "waiting for approval", however slow the first send is."""
+    ids = await _seed(sf, "  on_start:\n    - team-chat\n  on_waiting:\n    - team-chat\n",
+                      step_type="wait_input")
+    sent = []
+
+    async def slack_slow_to_say_started(config, message, recipient):
+        first_line = message.splitlines()[0]
+        if first_line.endswith("started"):
+            await asyncio.sleep(0.15)
+        sent.append(first_line)
+
+    monkeypatch.setattr("app.services.notification_service._send_slack", slack_slow_to_say_started)
+
+    await _run_stages(sf, monkeypatch, ids["build"])
+
+    assert sent == [
+        "Build #428 of deploy-staging started",
+        "Build #428 of deploy-staging is waiting for approval",
+    ]
+
+
 @pytest.mark.parametrize("build_status", ["cancelled", "success", "failed", "running"])
 async def test_a_build_that_is_not_pending_is_not_run_and_sends_nothing(sf, slack, fake_redis,
                                                                         monkeypatch, build_status):

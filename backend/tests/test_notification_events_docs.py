@@ -59,7 +59,9 @@ def test_the_section_explains_the_one_message_per_channel_rule():
 
 def test_the_section_defines_fixed_and_what_a_build_that_never_started_sends():
     section = " ".join(_section("## Notifications").split())
-    assert "the previous finished build of the same pipeline and branch had failed" in section
+    assert ("the last build of the same pipeline and branch that succeeded or failed "
+            "(cancelled builds are skipped) had failed") in section
+    assert "previous finished build" not in section
     assert "stays pending and sends nothing" in section
     assert "cancelled before it started sends no `on_cancelled` and no `on_complete`" in section
 

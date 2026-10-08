@@ -183,6 +183,15 @@ Everything runs on the server through the existing channel code. Three moments:
    for background sends of this build that are still running, so "started" cannot arrive
    after "failed".
 
+The messages of one build go out in the order things happened. A background send waits for
+the build's earlier ones, so when the first step is an approval, "started" still arrives
+before "waiting for approval". The cost is that a stalled `on_start` channel can delay the
+approval message by up to its 30-second limit per stalled entry; the approval step itself
+never waits.
+
+The executor also waits for a build's background sends when it stops because of an error,
+so none is left unfinished holding a database session.
+
 The rules of failure notifications apply to every event:
 
 - Best-effort. Nothing here can change a build's status, fail a step, or raise into the
