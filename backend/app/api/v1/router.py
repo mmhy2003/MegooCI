@@ -7,6 +7,7 @@ from app.api.v1 import (
     api_tokens,
     artifacts,
     auth,
+    backups,
     builds,
     gates,
     git_connections,
@@ -42,6 +43,7 @@ api_v1_router.include_router(artifacts.router, prefix="", tags=["artifacts"])
 api_v1_router.include_router(secrets.router, prefix="/secrets-env", tags=["secrets"])
 api_v1_router.include_router(agents.router, prefix="/agents", tags=["agents"])
 api_v1_router.include_router(system.router, prefix="/system", tags=["system"])
+api_v1_router.include_router(backups.router, prefix="/admin/backups", tags=["backups"])
 api_v1_router.include_router(roles.router, prefix="/roles", tags=["roles"])
 api_v1_router.include_router(users.router, prefix="/users", tags=["users"])
 api_v1_router.include_router(invites.router, prefix="/invites", tags=["invites"])

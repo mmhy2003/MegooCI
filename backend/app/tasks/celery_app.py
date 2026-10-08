@@ -36,12 +36,20 @@ celery_app.conf.update(
 
 celery_app.autodiscover_tasks(["app.tasks"], related_name="build_tasks")
 celery_app.autodiscover_tasks(["app.tasks"], related_name="registry_tasks")
+celery_app.autodiscover_tasks(["app.tasks"], related_name="backup_tasks")
 
 from datetime import timedelta
 
 from celery.schedules import crontab
 
 celery_app.conf.beat_schedule = {
+    # Checks whether a scheduled configuration backup is due; the schedule
+    # itself is a setting, read on every tick.
+    "scheduled-backup": {
+        "task": "megooci.scheduled_backup",
+        "schedule": timedelta(minutes=5),
+        "options": {"queue": "megooci"},
+    },
     "registry-gc": {
         "task": "megooci.registry_gc",
         "schedule": crontab(hour=3, minute=0),
