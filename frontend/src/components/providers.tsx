@@ -158,8 +158,19 @@ export function Providers({ children }: { children: React.ReactNode }) {
  * Sonner's <Toaster> needs the app's resolved theme so toast backgrounds
  * and text render correctly in dark mode. Rendering it here lets it read
  * from the same ThemeContext Providers set up above.
+ *
+ * Toasts sit at the top right, just under the page header (h-14 = 56px)
+ * rather than over it. The other edges keep Sonner's default distance.
  */
 export function ThemedToaster() {
   const { resolvedTheme } = useTheme();
-  return <Toaster richColors position="bottom-right" theme={resolvedTheme} />;
+  return (
+    <Toaster
+      richColors
+      position="top-right"
+      offset={{ top: 68 }}
+      mobileOffset={{ top: 64 }}
+      theme={resolvedTheme}
+    />
+  );
 }
