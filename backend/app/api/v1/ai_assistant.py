@@ -366,13 +366,16 @@ a channel configured in Notification Channels, use `notify` instead.
     channel: "deploy-alerts"   # channel name from Admin > Notification Channels
     message: |
       Build finished with status on branch ${{ build.branch }}
-      Commit: ${{ build.commit_sha }}
+      Commit: ${{ build.commit }}
     subject: "Build Report"    # optional (used by email channels)
     recipient: "#deployments"  # optional channel/chat_id/email override
 ```
 
 Supported channel types: email (SMTP), Slack (webhook), Telegram (bot).
 Channels are configured by admins in the Notification Channels UI.
+A `notify` step runs only if the build reaches it. A build stops at the first \
+failed step, so a `notify` step never reports a failure — use the top-level \
+`notifications` block for that.
 
 ### trigger_pipeline — Trigger another pipeline
 ```yaml
@@ -451,11 +454,52 @@ work like `notify`-only pipelines.
 - If no matching agent is online, the build stays pending until one connects \
 or an operator re-enables a disabled agent.
 
+## Notifications — Tell people when a build fails
+Add a top-level `notifications` block (not inside a stage) to send a message \
+through a configured channel whenever a build of this pipeline fails. The \
+server sends it, so it also goes out when no agent could run the build.
+
+```yaml
+version: 1
+name: deploy-staging
+notifications:
+  on_failure:
+    - deploy-alerts                     # short form: a channel name
+    - channel: ops-email                # full form
+      recipient: oncall@example.com     # optional; overrides the channel's default
+      subject: "Staging deploy failed"  # optional; used by email channels
+      message: |                        # optional; a default is sent if omitted
+        Build #${{ build.number }} of ${{ pipeline.name }} failed
+        at ${{ build.failed_stage }} / ${{ build.failed_step }}
+        ${{ build.url }}
+stages:
+  - name: deploy
+    steps:
+      - run: "./deploy.sh"
+```
+
+`on_failure` is the only event, and it must be a non-empty list. Each entry is \
+either a channel name or a mapping whose only fields are `channel` (required), \
+`message`, `subject` and `recipient`. Channels are configured by admins in the \
+Notification Channels UI (email, Slack or Telegram) — never invent a channel \
+name; ask the user which channel to use if they have not said.
+
+Without `message`, a default is sent: the pipeline name, build number, branch, \
+commit, the stage and step that failed, and a link to the build. A custom \
+`message` or `subject` can use every placeholder, plus three that exist only \
+here: `${{ build.failed_stage }}`, `${{ build.failed_step }}` and \
+`${{ build.url }}`. For an email channel set `recipient`; without it the \
+message goes to the channel's own sender address. A successful or cancelled \
+build sends nothing.
+
 ## Pipeline Structure
 ```yaml
 version: 1
 name: pipeline-name
 runs_on: linux          # optional — target a specific agent environment
+notifications:          # optional — who is told when a build fails
+  on_failure:
+    - channel-name
 env:                    # global env vars (inherited by all stages/steps)
   KEY: value
 
@@ -510,6 +554,9 @@ Never invent OS or arch values — stick to the allowed set above.
 to explain what you changed and why, directly next to the affected lines. This \
 makes the pipeline self-documenting. Keep your chat reply brief — a one-line \
 summary is enough since the YAML comments carry the detail.
+12. When the user wants to be told about failed builds, add the top-level \
+`notifications` block with `on_failure` — never a `notify` step at the end of \
+the pipeline, which does not run after a failure.
 """
 
 
