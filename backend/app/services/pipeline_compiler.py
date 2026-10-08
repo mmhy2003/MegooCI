@@ -22,7 +22,7 @@ Supports:
 - parameters
 - secret/env interpolation placeholders (${{ secrets.X }}, ${{ env.X }})
 - artifacts collection (stage-level glob paths)
-- notifications (top-level: who is told when a build fails)
+- notifications (top-level: who is told about a build, and when)
 """
 
 from dataclasses import dataclass
@@ -158,19 +158,29 @@ def assert_pipeline_valid(yaml_content: str | None) -> None:
         raise PipelineValidationError(errors)
 
 
-NOTIFICATION_EVENTS = ("on_failure",)
+# In the order they are listed to authors: by when they happen.
+NOTIFICATION_EVENTS = (
+    "on_start",
+    "on_waiting",
+    "on_success",
+    "on_fixed",
+    "on_failure",
+    "on_cancelled",
+    "on_complete",
+)
 NOTIFICATION_ENTRY_FIELDS = ("channel", "message", "subject", "recipient")
 
 
 def _notification_errors(
     value: Any, line_map: dict[int, int], top_line: int
 ) -> list[PipelineError]:
-    """Validate the top-level ``notifications`` block (who is told when a
-    build fails). ``build_notifications`` reads and sends it."""
+    """Validate the top-level ``notifications`` block (who is told about a
+    build, and when). ``build_notifications`` reads and sends it."""
     if not isinstance(value, dict):
         return [PipelineError(message="'notifications' must be a mapping", line=top_line)]
 
     block_line = line_map.get(id(value)) or top_line
+    allowed = ", ".join(NOTIFICATION_EVENTS)
     errors: list[PipelineError] = []
 
     unknown = sorted(str(k) for k in value if k not in NOTIFICATION_EVENTS)
@@ -179,25 +189,36 @@ def _notification_errors(
             PipelineError(
                 message=(
                     f"'notifications' has unknown key(s): {', '.join(unknown)} "
-                    f"(allowed: {', '.join(NOTIFICATION_EVENTS)})"
+                    f"(allowed: {allowed})"
                 ),
                 line=block_line,
             )
         )
 
-    if "on_failure" not in value:
-        if not unknown:
-            errors.append(
-                PipelineError(message="'notifications' requires 'on_failure'", line=block_line)
+    events = [event for event in NOTIFICATION_EVENTS if event in value]
+    if not events and not unknown:
+        errors.append(
+            PipelineError(
+                message=f"'notifications' requires at least one event ({allowed})",
+                line=block_line,
             )
-        return errors
+        )
+    for event in events:
+        errors.extend(_notification_event_errors(event, value[event], line_map, block_line))
+    return errors
 
-    entries = value["on_failure"]
+
+def _notification_event_errors(
+    event: str, entries: Any, line_map: dict[int, int], block_line: int
+) -> list[PipelineError]:
+    """Validate the entries of one event of the ``notifications`` block."""
+    errors: list[PipelineError] = []
+
     if not isinstance(entries, list) or not entries:
         errors.append(
             PipelineError(
                 message=(
-                    "'notifications.on_failure' must be a non-empty list of "
+                    f"'notifications.{event}' must be a non-empty list of "
                     "channel names or mappings"
                 ),
                 line=block_line,
@@ -206,7 +227,7 @@ def _notification_errors(
         return errors
 
     for index, entry in enumerate(entries):
-        prefix = f"notifications.on_failure[{index}]"
+        prefix = f"notifications.{event}[{index}]"
 
         if isinstance(entry, str):
             if not entry.strip():

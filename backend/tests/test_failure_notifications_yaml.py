@@ -78,10 +78,11 @@ def test_block_does_not_change_what_the_pipeline_compiles_to():
     [
         ("notifications: deploy-alerts\n", "'notifications' must be a mapping"),
         ("notifications: [deploy-alerts]\n", "'notifications' must be a mapping"),
-        ("notifications: {}\n", "'notifications' requires 'on_failure'"),
+        ("notifications: {}\n", "'notifications' requires at least one event (on_start, "),
         (
             "notifications:\n  on_fail:\n    - deploy-alerts\n",
-            "'notifications' has unknown key(s): on_fail (allowed: on_failure)",
+            "'notifications' has unknown key(s): on_fail (allowed: on_start, on_waiting, "
+            "on_success, on_fixed, on_failure, on_cancelled, on_complete)",
         ),
         (
             "notifications:\n  on_failure: deploy-alerts\n",
