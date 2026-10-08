@@ -53,6 +53,13 @@ def _yaml(on_failure_block: str) -> str:
     )
 
 
+def failure_notifications(yaml_content):
+    """The `on_failure` entries of a pipeline's YAML."""
+    from app.services.build_notifications import notifications_by_event
+
+    return notifications_by_event(yaml_content).get("on_failure", [])
+
+
 async def _send(sf, build_id, **kwargs):
     from app.services.build_notifications import BuildSnapshot, send_build_notifications
 
@@ -76,7 +83,7 @@ async def _send(sf, build_id, **kwargs):
 # ── reading the block ───────────────────────────────────────────────────
 
 def test_short_and_full_entries_normalize_to_the_same_shape():
-    from app.services.build_notifications import Notification, failure_notifications
+    from app.services.build_notifications import Notification
 
     entries = failure_notifications(_yaml(
         "    - deploy-alerts\n"
@@ -106,14 +113,10 @@ def test_short_and_full_entries_normalize_to_the_same_shape():
     ],
 )
 def test_reader_returns_nothing_for_missing_or_malformed_input(yaml_content):
-    from app.services.build_notifications import failure_notifications
-
     assert failure_notifications(yaml_content) == []
 
 
 def test_reader_skips_malformed_entries_and_keeps_good_ones():
-    from app.services.build_notifications import failure_notifications
-
     entries = failure_notifications(_yaml(
         "    - 42\n"
         "    - \"\"\n"
@@ -137,8 +140,8 @@ VALUES = {
 def test_default_message_and_subject():
     from app.services.build_notifications import default_message, default_subject
 
-    assert default_subject(VALUES) == "Build #428 of deploy-staging-inbox failed"
-    assert default_message(VALUES) == (
+    assert default_subject(VALUES, "on_failure") == "Build #428 of deploy-staging-inbox failed"
+    assert default_message(VALUES, "on_failure") == (
         "Build #428 of deploy-staging-inbox failed\n"
         "Project: Inbox Staging | Branch: develop | Commit: 3f2a9c1\n"
         "Failed at: stage \"deploy\", step \"apply manifests\"\n"
@@ -155,7 +158,7 @@ def test_default_message_leaves_out_what_the_build_does_not_have():
         "pipeline": {"name": "nightly"},
         "project": {},
     }
-    assert default_message(values) == (
+    assert default_message(values, "on_failure") == (
         "Build #7 of nightly failed\n"
         "https://ci.example.com/builds/x"
     )
@@ -485,6 +488,7 @@ def test_snapshot_is_frozen_and_holds_plain_values():
     assert {f.name for f in dataclasses.fields(BuildSnapshot)} == {
         "build_id", "pipeline_id", "number", "failed_stage", "failed_step",
         "failed_step_id", "secrets", "env_vars", "builtins",
+        "status", "branch", "waiting_stage", "waiting_step", "log_step_id",
     }
     failed = BuildSnapshot(
         build_id=uuid.uuid4(), pipeline_id=uuid.uuid4(), number=1, failed_stage="a",

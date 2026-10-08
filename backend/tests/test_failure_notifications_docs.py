@@ -50,9 +50,9 @@ def test_notifications_example_is_a_valid_pipeline_with_both_entry_forms():
     assert len(examples) == 1
     assert validate_pipeline(examples[0]) == []
 
-    from app.services.build_notifications import failure_notifications
+    from app.services.build_notifications import notifications_by_event
 
-    entries = failure_notifications(examples[0])
+    entries = notifications_by_event(examples[0])["on_failure"]
     assert [e.channel for e in entries] == ["deploy-alerts", "ops-email"]
     assert entries[1].recipient and entries[1].subject and entries[1].message
 
