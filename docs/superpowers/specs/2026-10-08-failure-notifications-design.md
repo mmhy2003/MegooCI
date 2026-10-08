@@ -168,10 +168,30 @@ the failed step, so the author sees it where they are already looking:
 |---|---|
 | No channel with that name | the channel was not found |
 | The channel is disabled | the channel is disabled |
-| The send failed | the delivery failed, with the provider's error text |
+| The send failed | the delivery failed, and an administrator can find the error in the delivery history |
+
+The provider's error text is never put in the build log. It can quote the channel's webhook
+URL or bot token, and the build log is readable by everyone who can see the build. The error
+stays on the delivery row, as today.
 
 When there is no failed step to attach the line to, the problem is written to the server log
-instead. A send failure is also recorded on its delivery row, as today.
+instead.
+
+### Channel types
+
+The block works with all three existing channel types, because it sends through the same
+code as the `notify` step:
+
+- **Email:** `subject` is used. Without `recipient`, the existing sender delivers to the
+  channel's own sender address, so email entries should normally set `recipient`. The docs
+  say so.
+- **Slack:** `recipient`, if set, is sent as a channel override.
+- **Telegram:** the message goes to the channel's default chat, or to `recipient`. The
+  existing sender tells Telegram to read the message as HTML, and Telegram rejects a stray
+  `<` or `&`. So for a Telegram channel the default message is HTML-escaped, and in a custom
+  message the values substituted for `build`, `pipeline`, `project` and `megooci`
+  placeholders are HTML-escaped. Text the author wrote is left alone, so Telegram's own tags
+  such as `<b>` still work. Values from `secrets` and `env` placeholders are not escaped.
 
 ## Documentation
 
@@ -179,13 +199,16 @@ instead. A send failure is also recorded on its delivery row, as today.
   - a new `## Notifications — Tell people when a build fails` section after the `runs_on`
     section, with the YAML, both entry forms, the new placeholders and the default message;
   - the `## Pipeline Structure` example shows the optional top-level `notifications` key;
-  - the `notify` step section states that a `notify` step does not run after a failure;
+  - the `notify` step section states that a `notify` step does not run after a failure,
+    and its example is corrected: it used `${{ build.commit_sha }}`, which the executor does
+    not provide (the value is `${{ build.commit }}`), so it rendered as empty;
   - a new rule: when the user wants to be told about failed builds, use the top-level
     `notifications` block, not a `notify` step at the end.
 - `frontend/src/components/pipeline/docs-panel.tsx`:
   - a new "Failure Notifications" section after "Target Agent (runs_on)";
   - the "Pipeline Structure" description mentions the optional block;
-  - the "Send Notification" section states that the step does not run after a failure.
+  - the "Send Notification" section states that the step does not run after a failure, with
+    the same placeholder correction in its example.
 - `README.md`: a short example in the Pipeline Example section.
 
 ## Testing
@@ -209,7 +232,10 @@ instead. A send failure is also recorded on its delivery row, as today.
 - One send per entry, with the rendered message, subject and recipient, linked to the build.
 - An unknown channel and a disabled channel each produce a log line and do not stop the
   other entries.
-- A failed delivery produces a log line with the error.
+- A failed delivery produces a log line that does not contain the provider's error, and the
+  error is on the delivery row.
+- For a Telegram channel, a `<` or `&` in a step or branch name is escaped in the default
+  message and in substituted values, and tags the author wrote are kept.
 - A pipeline without the block sends nothing.
 
 **Executor (pytest)**
