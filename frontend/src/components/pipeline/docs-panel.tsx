@@ -102,22 +102,26 @@ stages:
   },
   {
     id: "notifications",
-    title: "Failure Notifications",
+    title: "Build Notifications",
     icon: <BellRing className="h-4 w-4" />,
     description:
-      "Be told when a build of this pipeline fails. Add a top-level notifications block (beside runs_on, not inside a stage) listing the channels to notify; channels are set up by admins under Integrations > Notification Channels. The server sends the message, so it also goes out when the build's agent goes offline or stops responding; a build still waiting for an agent stays pending and sends nothing. Each entry is a channel name, or a mapping with channel plus an optional recipient, subject (email) and message. Without a message, a default is sent with the pipeline, build number, branch, commit, the stage and step that failed, and a link to the build. For an email channel set recipient, otherwise the message goes to the channel's own sender address. Successful and cancelled builds send nothing. A channel that does not exist or is disabled is reported in the build log.",
+      "Be told what happens to builds of this pipeline. Add a top-level notifications block (beside runs_on, not inside a stage) and list channels under the events you care about; channels are set up by admins under Integrations > Notification Channels. The events: on_start (the build starts running), on_waiting (it pauses at a wait_input step and needs approval), on_success (it ends successfully), on_fixed (it succeeds and the previous finished build of the same pipeline and branch had failed), on_failure (it fails), on_cancelled (a running build is cancelled) and on_complete (it ends, whatever the result). When a build ends, a channel listed under several matching events gets one message, from the most specific event: on_fixed before on_success before on_complete, and on_failure or on_cancelled before on_complete. Each entry is a channel name, or a mapping with channel plus an optional recipient, subject (email) and message. Without a message, a default is sent with what happened, the pipeline, build number, branch, commit, the step that failed or is waiting, and a link to the build; in a message of your own, build.status is running, success, failed or cancelled. For an email channel set recipient, otherwise the message goes to the channel's own sender address. The server sends the messages, so they also go out when the build's agent goes offline or stops responding. A build that never started sends nothing: one still waiting for an agent stays pending, and one cancelled before it started is not announced. A channel that does not exist or is disabled is reported in the build log.",
     yaml: `version: 1
 name: deploy-staging
 notifications:
+  on_start:
+    - team-chat                         # short form: a channel name
   on_failure:
-    - deploy-alerts                     # short form: a channel name
-    - channel: ops-email                # full form
-      recipient: oncall@example.com     # optional override
-      subject: "Staging deploy failed"  # optional (email only)
-      message: |                        # optional; a default is sent if omitted
+    - channel: team-chat                # full form, with a message of its own
+      message: |
         Build #\${{ build.number }} of \${{ pipeline.name }} failed
         at \${{ build.failed_stage }} / \${{ build.failed_step }}
         \${{ build.url }}
+    - channel: ops-email
+      recipient: oncall@example.com     # optional override
+      subject: "Staging deploy failed"  # optional (email only)
+  on_complete:
+    - team-chat                         # every result; a failure uses the entry above
 stages:
   - name: deploy
     steps:
@@ -396,7 +400,7 @@ stages:
     title: "Wait for User Approval",
     icon: <UserCheck className="h-4 w-4" />,
     description:
-      "Pause the pipeline until a user manually approves or rejects. Great for production deployment gates.",
+      "Pause the pipeline until a user manually approves or rejects. Great for production deployment gates. To tell approvers that a build is waiting for them, list a channel under on_waiting in the top-level notifications block (see Build Notifications).",
     yaml: `- wait_input:
     prompt: "Deploy to production?"
     timeout: 86400
@@ -409,7 +413,7 @@ stages:
     title: "Send Notification",
     icon: <Bell className="h-4 w-4" />,
     description:
-      "Send a notification through a configured channel (email, Slack, or Telegram). Channels are set up by admins under Integrations > Notification Channels. A notify step runs only if the build reaches it: a build stops at the first failed step, so to be told about failed builds use the top-level notifications block (see Failure Notifications).",
+      "Send a notification through a configured channel (email, Slack, or Telegram). Channels are set up by admins under Integrations > Notification Channels. A notify step runs only if the build reaches it: a build stops at the first failed step, so to be told about failed builds, or about builds starting and ending, use the top-level notifications block (see Build Notifications).",
     yaml: `- name: notify-team
   notify:
     channel: "deploy-alerts"

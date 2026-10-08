@@ -190,22 +190,37 @@ To call an external system — a chat webhook, a deployment or ticketing system,
 
 The request is sent from the build agent, so it can reach systems on the agent's network, and the step fails the build when the status is not the expected one. The URL path, headers and body are never written to the build log; the first 2,000 characters of the response are, so avoid endpoints that return a secret. It needs an agent built from this release or later.
 
-To be told when a build fails, add a top-level `notifications` block. The server sends the message through a channel configured under Notification Channels, so it also goes out when the build's agent goes offline mid-build (a build still waiting for an agent stays pending and sends nothing):
+To be told what happens to a pipeline's builds, add a top-level `notifications` block. The server sends the messages through channels configured under Notification Channels, so they also go out when the build's agent goes offline mid-build:
 
 ```yaml
 name: deploy-staging
 notifications:
+  on_start:
+    - team-chat                       # a channel name
   on_failure:
-    - deploy-alerts                   # a channel name
     - channel: ops-email              # or a mapping
       recipient: oncall@example.com
+  on_complete:
+    - team-chat
 stages:
   - name: deploy
     steps:
       - run: ./deploy.sh
 ```
 
-Without a `message`, a default is sent with the pipeline, build number, branch, commit, the stage and step that failed, and a link to the build. A `notify` step at the end of a pipeline cannot do this: a build stops at the first failed step.
+| Event | Sent when |
+|---|---|
+| `on_start` | the build starts running |
+| `on_waiting` | the build pauses at a `wait_input` step and needs approval |
+| `on_success` | the build ends successfully |
+| `on_fixed` | the build succeeds and the previous finished build of the same pipeline and branch had failed |
+| `on_failure` | the build fails |
+| `on_cancelled` | a running build is cancelled |
+| `on_complete` | the build ends, whatever the result |
+
+When a build ends, a channel listed under several matching events gets one message, from the most specific event (`on_fixed`, then `on_success`, then `on_complete`; `on_failure` or `on_cancelled`, then `on_complete`). A build that never started sends nothing: one still waiting for an agent stays pending, and one cancelled before it started is not announced.
+
+Without a `message`, a default is sent with what happened, the pipeline, build number, branch, commit, the step that failed or is waiting, and a link to the build. In a message of your own, `${{ build.status }}` is `running`, `success`, `failed` or `cancelled`. A `notify` step at the end of a pipeline cannot do this: a build stops at the first failed step.
 
 Link the pipeline to a project whose repository points at your GitHub / GitLab repo — a push triggers the webhook and the pipeline runs on the next available agent.
 
