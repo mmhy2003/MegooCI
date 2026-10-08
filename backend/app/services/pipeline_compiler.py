@@ -22,6 +22,7 @@ Supports:
 - parameters
 - secret/env interpolation placeholders (${{ secrets.X }}, ${{ env.X }})
 - artifacts collection (stage-level glob paths)
+- notifications (top-level: who is told when a build fails)
 """
 
 from dataclasses import dataclass
@@ -157,6 +158,106 @@ def assert_pipeline_valid(yaml_content: str | None) -> None:
         raise PipelineValidationError(errors)
 
 
+NOTIFICATION_EVENTS = ("on_failure",)
+NOTIFICATION_ENTRY_FIELDS = ("channel", "message", "subject", "recipient")
+
+
+def _notification_errors(
+    value: Any, line_map: dict[int, int], top_line: int
+) -> list[PipelineError]:
+    """Validate the top-level ``notifications`` block (who is told when a
+    build fails). ``build_notifications`` reads and sends it."""
+    if not isinstance(value, dict):
+        return [PipelineError(message="'notifications' must be a mapping", line=top_line)]
+
+    block_line = line_map.get(id(value)) or top_line
+    errors: list[PipelineError] = []
+
+    unknown = sorted(str(k) for k in value if k not in NOTIFICATION_EVENTS)
+    if unknown:
+        errors.append(
+            PipelineError(
+                message=(
+                    f"'notifications' has unknown key(s): {', '.join(unknown)} "
+                    f"(allowed: {', '.join(NOTIFICATION_EVENTS)})"
+                ),
+                line=block_line,
+            )
+        )
+
+    if "on_failure" not in value:
+        if not unknown:
+            errors.append(
+                PipelineError(message="'notifications' requires 'on_failure'", line=block_line)
+            )
+        return errors
+
+    entries = value["on_failure"]
+    if not isinstance(entries, list) or not entries:
+        errors.append(
+            PipelineError(
+                message=(
+                    "'notifications.on_failure' must be a non-empty list of "
+                    "channel names or mappings"
+                ),
+                line=block_line,
+            )
+        )
+        return errors
+
+    for index, entry in enumerate(entries):
+        prefix = f"notifications.on_failure[{index}]"
+
+        if isinstance(entry, str):
+            if not entry.strip():
+                errors.append(
+                    PipelineError(
+                        message=f"{prefix}: channel name must not be empty", line=block_line
+                    )
+                )
+            continue
+
+        if not isinstance(entry, dict):
+            errors.append(
+                PipelineError(
+                    message=f"{prefix}: must be a channel name or a mapping", line=block_line
+                )
+            )
+            continue
+
+        entry_line = line_map.get(id(entry)) or block_line
+        unknown_fields = sorted(str(k) for k in entry if k not in NOTIFICATION_ENTRY_FIELDS)
+        if unknown_fields:
+            errors.append(
+                PipelineError(
+                    message=(
+                        f"{prefix}: unknown field(s): {', '.join(unknown_fields)} "
+                        f"(allowed: {', '.join(NOTIFICATION_ENTRY_FIELDS)})"
+                    ),
+                    line=entry_line,
+                )
+            )
+
+        channel = entry.get("channel")
+        if not isinstance(channel, str) or not channel.strip():
+            errors.append(
+                PipelineError(message=f"{prefix}: requires 'channel'", line=entry_line)
+            )
+
+        for field in ("message", "subject", "recipient"):
+            if field in entry and (
+                not isinstance(entry[field], str) or not entry[field].strip()
+            ):
+                errors.append(
+                    PipelineError(
+                        message=f"{prefix}: '{field}' must be a non-empty string",
+                        line=entry_line,
+                    )
+                )
+
+    return errors
+
+
 def _structure_errors(data: Any, line_map: dict[int, int]) -> list[PipelineError]:
     errors: list[PipelineError] = []
 
@@ -180,6 +281,9 @@ def _structure_errors(data: Any, line_map: dict[int, int]) -> list[PipelineError
     if runs_on is not None:
         for msg in _validate_runs_on(runs_on):
             errors.append(PipelineError(message=msg, line=top_line))
+
+    if "notifications" in data:
+        errors.extend(_notification_errors(data["notifications"], line_map, top_line))
 
     stages = data.get("stages")
 
