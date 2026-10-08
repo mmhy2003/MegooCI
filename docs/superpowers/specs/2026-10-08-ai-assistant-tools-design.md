@@ -119,6 +119,9 @@ there is one source for the documentation.
 The project context (secret and variable names) and the repository context are appended in
 both modes, as today.
 
+The request itself carries the editor's YAML with line numbers (the first 400 lines), so
+for a short pipeline the model can edit without reading first.
+
 ### Limits
 
 - At most 16 tool calls per request, and at most 120 seconds for the whole loop.
@@ -129,13 +132,26 @@ both modes, as today.
 
 ## Models without tool support
 
-Tool mode is always on. There is no setting to turn it off. It is used whenever the AI
-library reports that the configured model supports tool calls.
+Tool mode is always on. There is no setting to turn it off, and the server does not ask the
+AI library whether the model supports tools: the library answers "no" for custom and
+unknown models, which would silently turn the feature off for them. Every request's first
+model call carries the tools.
 
-For a model that does not, and also when the provider rejects a request because it carries
-tools, the server falls back to today's behavior for that request: one call with the full
-prompt, and the YAML is taken from the reply. The fallback still produces a proposal, by diffing that YAML against
-the editor's, so the review card works the same way.
+Two things can go wrong, and both end in the same review card:
+
+- **The first model call fails.** The server falls back to today's behavior for that
+  request: one call with the full prompt and no tools, and the YAML is taken from the reply
+  (`mode: "legacy"`). The exceptions are failures a second call cannot fix — wrong API key,
+  provider unreachable, timeout, rate limit — which are reported at once.
+- **The model accepts the tools but ignores them** and writes the pipeline into its reply.
+  The server treats that reply like a fallback reply.
+
+In both cases the YAML in the reply becomes the proposal, diffed against the editor's, and
+is removed from the reply text. Only a whole pipeline counts: YAML with a top-level
+`stages:` key. A short snippet in an answer stays in the answer, because proposing it would
+replace the whole editor with a fragment.
+
+A model that neither calls tools nor writes a whole pipeline simply answers in text.
 
 ## API
 
@@ -178,7 +194,7 @@ the editor's, so the review card works the same way.
 ```
 
 - `proposal` is `null` when the working copy is unchanged (the assistant only answered a
-  question) or, in fallback mode, when the reply contains no YAML.
+  question) and the reply contains no whole pipeline.
 - `yaml` is kept for compatibility and equals `proposal.yaml`, or `null`.
 - `mode` is `"tools"` or `"legacy"`.
 - `problems` are the validator's errors for the proposed YAML: `{"message", "line"}`.
@@ -196,6 +212,13 @@ the editor's, so the review card works the same way.
 | `error` | `detail` | Once, instead of `done`, when the request fails. |
 
 The `token` events the endpoint sends today are removed; nothing consumes them.
+
+While the model is thinking the stream would be silent, and proxies close a silent
+connection (the app's own Next.js proxy does after 120 seconds). So the server also sends a
+comment line, `: keep-alive`, every 15 seconds. Clients read only the lines that start with
+`data:`.
+
+When the client disconnects, the server cancels the model call in progress.
 
 Step labels are written by the server from the tool and its outcome. They never include the
 YAML's content beyond a search pattern the model chose.
@@ -258,8 +281,11 @@ States of the card:
 | Discarded | Collapses to `Discarded · +6 −0`. |
 | Stale | The editor's content differs from the YAML the request was sent with. The card shows "The editor changed since this was proposed" and the button reads **Apply anyway**. |
 
-- **Undo** puts back the editor content from just before Apply. It is offered until the
-  editor changes again or another proposal is applied.
+- **Undo** puts back the editor content from just before Apply and returns the card to
+  Pending. It is offered until the editor changes again or another proposal is applied.
+- Where the editor is read-only (the pipeline page outside edit mode), the card has no Apply
+  button and says to edit the pipeline; the diff and Copy YAML still work.
+- Fenced code in a reply (a snippet in an answer) is shown as a code block.
 - Applying is a single editor change, so the editor's own undo also reverts it.
 - When the response says a limit was reached, a line above the card says the assistant
   stopped early and the proposal may be incomplete.
@@ -276,11 +302,14 @@ replies as text, as today. Tool calls from earlier turns are not replayed.
 | Situation | Result |
 |---|---|
 | The AI provider fails (authentication, bad request, unreachable) | The same 502 errors as today from `/ai/assistant`; an `error` event from the stream. |
-| The provider rejects a request because it carries tools | Fall back to the single call for this request. |
+| The first model call fails for another reason (most often: tools are not accepted) | Fall back to the single call for this request. If that fails too, its error is reported. |
+| A model call fails after the first | The loop stops; what was changed so far is proposed and the response says the assistant stopped early. |
 | A tool raises unexpectedly | The model receives "internal error" as that tool's result and the exception is logged; the loop continues. |
 | The model returns neither text nor tool calls | The loop ends with a generic reply; a proposal is still built if the working copy changed. |
 | The stream is cut off mid-request | The chat shows an error message in place of the reply; the steps received so far stay visible. |
-| The user closes the sheet or sends again while a request runs | The request is aborted in the browser. |
+| The user clears the chat or leaves the page while a request runs | The request is aborted in the browser, and the server cancels the model call. |
+| The user closes the sheet while a request runs | The request continues; the sheet keeps its content, so the answer is there when it is reopened. |
+| No answer after 250 seconds | The browser aborts the request and the chat says the assistant took too long. |
 
 ## Security and cost
 
@@ -311,12 +340,15 @@ replies as text, as today. Tool calls from earlier turns are not replayed.
 - A sequence of tool calls followed by a final answer; step events in order.
 - Unknown tool, invalid JSON arguments, wrong argument types, and a tool that raises.
 - The tool-call limit and the time limit.
-- A provider error that rejects tools triggers the fallback.
+- An error on the first model call is raised to the caller; a later one keeps the work done.
 
 **Endpoints (pytest, AI library stubbed)**
 - Tool mode and fallback mode for both endpoints; the event sequence of the stream.
-- A model reported as not supporting tools uses the fallback.
-- `list_agents` with and without the permission.
+- A provider that rejects tools uses the fallback; a wrong key, an unreachable provider, a
+  timeout and a rate limit do not.
+- A whole pipeline in a reply becomes a proposal; a snippet does not.
+- Keep-alive lines while the model is silent; closing the stream cancels the model call.
+- `list_agents` with and without the permission, and that it does not change agent rows.
 
 **Prompt (pytest)**
 - `reference` returns each step type's section and the other topics; the tool-mode prompt
@@ -337,6 +369,7 @@ replies as text, as today. Tool calls from earlier turns are not replayed.
 - `frontend/src/lib/api.ts` — response types and a streaming call.
 - `frontend/src/components/pipeline/ai-assistant-panel.tsx` — steps, streaming, card states.
 - `frontend/src/components/pipeline/ai-proposal-card.tsx` — **new**: the review card.
+- `README.md` — the assistant's feature bullet.
 - `backend/tests/` — new tests.
 
 ## Rollback
