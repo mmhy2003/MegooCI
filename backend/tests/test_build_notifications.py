@@ -54,7 +54,7 @@ def _yaml(on_failure_block: str) -> str:
 
 
 async def _send(sf, build_id, **kwargs):
-    from app.services.build_notifications import FailedBuild, send_failure_notifications
+    from app.services.build_notifications import BuildSnapshot, send_build_notifications
 
     reports = []
 
@@ -63,11 +63,11 @@ async def _send(sf, build_id, **kwargs):
 
     async with sf() as db:
         build = await load_build(db, build_id)
-        failed = FailedBuild.capture(
+        failed = BuildSnapshot.capture(
             build, kwargs.get("secrets", {}), kwargs.get("env_vars", {}), builtins_for(build)
         )
     async with sf() as db:
-        sent = await send_failure_notifications(
+        sent = await send_build_notifications(
             db, failed, report=kwargs.get("report", report)
         )
     return sent, reports
@@ -76,7 +76,7 @@ async def _send(sf, build_id, **kwargs):
 # ── reading the block ───────────────────────────────────────────────────
 
 def test_short_and_full_entries_normalize_to_the_same_shape():
-    from app.services.build_notifications import FailureNotification, failure_notifications
+    from app.services.build_notifications import Notification, failure_notifications
 
     entries = failure_notifications(_yaml(
         "    - deploy-alerts\n"
@@ -86,8 +86,8 @@ def test_short_and_full_entries_normalize_to_the_same_shape():
         "      message: It broke\n"
     ))
     assert entries == [
-        FailureNotification(channel="deploy-alerts"),
-        FailureNotification(channel="ops-email", message="It broke",
+        Notification(channel="deploy-alerts"),
+        Notification(channel="ops-email", message="It broke",
                             subject="Deploy failed", recipient="oncall@example.com"),
     ]
 
@@ -384,7 +384,7 @@ async def test_build_with_no_failed_step_still_sends(sf, providers):
 async def test_problems_go_to_the_server_log_when_there_is_no_reporter(sf, providers, caplog):
     import logging
 
-    from app.services.build_notifications import FailedBuild, send_failure_notifications
+    from app.services.build_notifications import BuildSnapshot, send_build_notifications
 
     async with sf() as db:
         ids = await seed_build(db, yaml_content=_yaml("    - missing-channel\n"))
@@ -392,9 +392,9 @@ async def test_problems_go_to_the_server_log_when_there_is_no_reporter(sf, provi
     with caplog.at_level(logging.WARNING, logger="app.services.build_notifications"):
         async with sf() as db:
             build = await load_build(db, ids["build"])
-            failed = FailedBuild.capture(build, {}, {}, builtins_for(build))
+            failed = BuildSnapshot.capture(build, {}, {}, builtins_for(build))
         async with sf() as db:
-            sent = await send_failure_notifications(db, failed)
+            sent = await send_build_notifications(db, failed)
 
     assert sent == 0
     assert any("missing-channel" in r.getMessage() for r in caplog.records)
@@ -480,13 +480,13 @@ def test_snapshot_is_frozen_and_holds_plain_values():
     import dataclasses
     import uuid
 
-    from app.services.build_notifications import FailedBuild
+    from app.services.build_notifications import BuildSnapshot
 
-    assert {f.name for f in dataclasses.fields(FailedBuild)} == {
+    assert {f.name for f in dataclasses.fields(BuildSnapshot)} == {
         "build_id", "pipeline_id", "number", "failed_stage", "failed_step",
         "failed_step_id", "secrets", "env_vars", "builtins",
     }
-    failed = FailedBuild(
+    failed = BuildSnapshot(
         build_id=uuid.uuid4(), pipeline_id=uuid.uuid4(), number=1, failed_stage="a",
         failed_step="b", failed_step_id=None, secrets={}, env_vars={}, builtins={},
     )

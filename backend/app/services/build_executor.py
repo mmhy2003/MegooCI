@@ -36,7 +36,7 @@ from app.services.agent_dispatcher import (
     send_build_finished,
 )
 from app.services.build_concurrency import pipeline_has_running_build, try_start_build
-from app.services.build_notifications import FailedBuild, send_failure_notifications
+from app.services.build_notifications import BuildSnapshot, send_build_notifications
 from app.services.step_actions import get_handler
 from app.services.step_actions.base import LogLine, StepContext, StepResult
 from app.services.step_actions.interpolation import (
@@ -163,7 +163,7 @@ async def execute_build(
             return
 
     # ── Execute ──────────────────────────────────────────────────────────
-    failed_build: FailedBuild | None = None
+    failed_build: BuildSnapshot | None = None
     try:
         failed_build = await _run_build_stages(
             build_id=build_id,
@@ -204,7 +204,7 @@ async def execute_build(
     # Last, and only after the agent is free and the next build is on its
     # way: sending can be slow, and must not hold either of them up.
     if failed_build is not None:
-        await _notify_build_failure(failed_build, session_factory)
+        await _send_notifications(failed_build, session_factory)
 
 
 async def _run_build_stages(
@@ -213,7 +213,7 @@ async def _run_build_stages(
     session_factory: async_sessionmaker[AsyncSession],
     redis_client: aioredis.Redis,
     channel: str,
-) -> FailedBuild | None:
+) -> BuildSnapshot | None:
     """Inner routine that actually executes all stages/steps for a build.
 
     Returns a snapshot of the failure when the build ended as failed, so the
@@ -389,7 +389,7 @@ async def _run_build_stages(
         # later, and the calls below can roll this session back, which expires
         # every object loaded in it.
         failed_build = (
-            _capture_failure(build, secrets, env_vars, builtins)
+            _capture_snapshot(build, secrets, env_vars, builtins)
             if final_status == "failed"
             else None
         )
@@ -951,23 +951,23 @@ async def _enrich_config_for_agent(
             config["token"] = token
 
 
-def _capture_failure(
+def _capture_snapshot(
     build: Build,
     secrets: dict[str, str],
     env_vars: dict[str, str],
     builtins: dict[str, dict[str, str]],
-) -> FailedBuild | None:
+) -> BuildSnapshot | None:
     """Snapshot a failed build for its notifications. Never raises: a build's
     result must not depend on its notifications."""
     try:
-        return FailedBuild.capture(build, secrets, env_vars, builtins)
+        return BuildSnapshot.capture(build, secrets, env_vars, builtins)
     except Exception:
         logger.exception("Could not snapshot failed build for its notifications")
         return None
 
 
-async def _notify_build_failure(
-    failed: FailedBuild,
+async def _send_notifications(
+    failed: BuildSnapshot,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Send the pipeline's ``notifications.on_failure`` messages.
@@ -997,7 +997,7 @@ async def _notify_build_failure(
                 await _emit_system_log(step, log_db, redis_client, channel, f"⚠️ {text}")
 
         async with session_factory() as db:
-            await send_failure_notifications(db, failed, report=report)
+            await send_build_notifications(db, failed, report=report)
     except Exception:
         logger.exception("Failure notifications for build %s could not be sent", failed.build_id)
     finally:

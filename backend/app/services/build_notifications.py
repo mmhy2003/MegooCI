@@ -58,7 +58,7 @@ _ESCAPED_CHANNEL_TYPES = {"telegram", "slack"}
 
 
 @dataclass(frozen=True)
-class FailureNotification:
+class Notification:
     """One ``on_failure`` entry, in normalized form."""
 
     channel: str
@@ -68,7 +68,7 @@ class FailureNotification:
 
 
 @dataclass(frozen=True)
-class FailedBuild:
+class BuildSnapshot:
     """Everything needed to notify about a failed build, as plain values."""
 
     build_id: uuid.UUID
@@ -88,7 +88,7 @@ class FailedBuild:
         secrets: dict[str, str],
         env_vars: dict[str, str],
         builtins: Values,
-    ) -> FailedBuild:
+    ) -> BuildSnapshot:
         """Snapshot *build* while its session is still usable. Expects
         ``build.stages`` and their steps to be loaded."""
         stage_name, step_name, step = failed_step_of(build)
@@ -109,7 +109,7 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def failure_notifications(yaml_content: str | None) -> list[FailureNotification]:
+def failure_notifications(yaml_content: str | None) -> list[Notification]:
     """Read the ``notifications.on_failure`` entries from pipeline YAML.
 
     Never raises. Missing, unparseable or malformed input yields an empty
@@ -129,16 +129,16 @@ def failure_notifications(yaml_content: str | None) -> list[FailureNotification]
     if not isinstance(entries, list):
         return []
 
-    result: list[FailureNotification] = []
+    result: list[Notification] = []
     for entry in entries:
         if isinstance(entry, str):
             if entry.strip():
-                result.append(FailureNotification(channel=entry.strip()))
+                result.append(Notification(channel=entry.strip()))
         elif isinstance(entry, dict):
             channel = _text(entry.get("channel"))
             if channel:
                 result.append(
-                    FailureNotification(
+                    Notification(
                         channel=channel.strip(),
                         message=_text(entry.get("message")),
                         subject=_text(entry.get("subject")),
@@ -202,9 +202,9 @@ def _escaped(values: Values) -> Values:
     }
 
 
-async def send_failure_notifications(
+async def send_build_notifications(
     db: AsyncSession,
-    failed: FailedBuild,
+    failed: BuildSnapshot,
     *,
     report: Report | None = None,
 ) -> int:

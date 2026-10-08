@@ -44,7 +44,7 @@ def fake_redis(monkeypatch):
 
 async def _run_stages(sf, monkeypatch, build_id, step_result, *, on_step=None):
     """Run the real executor loop with the step itself faked. Returns what
-    _run_build_stages returns: a FailedBuild snapshot, or None."""
+    _run_build_stages returns: a BuildSnapshot snapshot, or None."""
     from app.services import build_executor
     from app.services.step_actions.base import StepResult
 
@@ -166,12 +166,12 @@ async def test_snapshot_survives_a_rollback_in_the_in_app_notice(sf, monkeypatch
 
 async def test_notifier_sends_and_records_a_delivery(sf, slack, fake_redis, monkeypatch):
     from app.models.notification import NotificationDelivery
-    from app.services.build_executor import _notify_build_failure
+    from app.services.build_executor import _send_notifications
 
     ids = await _seed(sf)
     failed = await _run_stages(sf, monkeypatch, ids["build"], FAILED)
 
-    await _notify_build_failure(failed, sf)
+    await _send_notifications(failed, sf)
 
     assert len(slack) == 1
     assert "Build #428 of deploy-staging failed" in slack[0]
@@ -183,7 +183,7 @@ async def test_notifier_sends_and_records_a_delivery(sf, slack, fake_redis, monk
 
 async def test_unknown_channel_is_reported_in_the_build_log(sf, slack, fake_redis, monkeypatch):
     from app.models.build import LogChunk
-    from app.services.build_executor import _notify_build_failure
+    from app.services.build_executor import _send_notifications
 
     yaml_content = (
         "name: deploy-staging\n"
@@ -193,7 +193,7 @@ async def test_unknown_channel_is_reported_in_the_build_log(sf, slack, fake_redi
     ids = await _seed(sf, yaml_content=yaml_content)
     failed = await _run_stages(sf, monkeypatch, ids["build"], FAILED)
 
-    await _notify_build_failure(failed, sf)
+    await _send_notifications(failed, sf)
 
     async with sf() as db:
         lines = [c.content for c in (await db.execute(
@@ -205,7 +205,7 @@ async def test_unknown_channel_is_reported_in_the_build_log(sf, slack, fake_redi
 
 
 async def test_notifier_never_raises(sf, fake_redis, monkeypatch):
-    from app.services.build_executor import _notify_build_failure
+    from app.services.build_executor import _send_notifications
 
     ids = await _seed(sf)
     failed = await _run_stages(sf, monkeypatch, ids["build"], FAILED)
@@ -213,9 +213,9 @@ async def test_notifier_never_raises(sf, fake_redis, monkeypatch):
     async def explode(*args, **kwargs):
         raise RuntimeError("notification subsystem is down")
 
-    monkeypatch.setattr("app.services.build_executor.send_failure_notifications", explode)
+    monkeypatch.setattr("app.services.build_executor.send_build_notifications", explode)
 
-    await _notify_build_failure(failed, sf)  # must not raise
+    await _send_notifications(failed, sf)  # must not raise
 
     assert await _build_status(sf, ids["build"]) == "failed"
 
@@ -227,7 +227,7 @@ async def test_agent_is_released_and_next_build_dispatched_before_notifying(sf, 
     next queued build."""
     from app.models.agent import Agent
     from app.services import build_executor
-    from app.services.build_notifications import FailedBuild
+    from app.services.build_notifications import BuildSnapshot
 
     ids = await _seed(sf)
     agent_id = uuid.uuid4()
@@ -238,7 +238,7 @@ async def test_agent_is_released_and_next_build_dispatched_before_notifying(sf, 
         await db.commit()
 
     order = []
-    snapshot = FailedBuild(
+    snapshot = BuildSnapshot(
         build_id=ids["build"], pipeline_id=ids["pipeline"], number=428, failed_stage="deploy",
         failed_step="apply manifests", failed_step_id=ids["step"], secrets={}, env_vars={},
         builtins={},
@@ -264,7 +264,7 @@ async def test_agent_is_released_and_next_build_dispatched_before_notifying(sf, 
     monkeypatch.setattr(build_executor, "release_agent", fake_release)
     monkeypatch.setattr(build_executor, "send_build_finished", fake_send_finished)
     monkeypatch.setattr(build_executor, "dispatch_pending_builds", fake_dispatch)
-    monkeypatch.setattr(build_executor, "_notify_build_failure", fake_notify)
+    monkeypatch.setattr(build_executor, "_send_notifications", fake_notify)
 
     await build_executor.execute_build(ids["build"], session_factory=sf, claimed_agent_id=agent_id)
 
@@ -298,7 +298,7 @@ async def test_no_notification_when_the_stage_loop_returns_nothing(sf, fake_redi
     monkeypatch.setattr(build_executor, "release_agent", noop)
     monkeypatch.setattr(build_executor, "send_build_finished", noop)
     monkeypatch.setattr(build_executor, "dispatch_pending_builds", noop)
-    monkeypatch.setattr(build_executor, "_notify_build_failure", fake_notify)
+    monkeypatch.setattr(build_executor, "_send_notifications", fake_notify)
 
     await build_executor.execute_build(ids["build"], session_factory=sf, claimed_agent_id=agent_id)
 
