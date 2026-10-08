@@ -1,5 +1,5 @@
-"""The executor notifies when, and only when, a build ends failed — after the
-agent has been released, and without ever disturbing the build's result."""
+"""The executor notifies about a failed build after the agent has been
+released, and without ever disturbing the build's result."""
 import os
 import uuid
 from datetime import datetime, timezone
@@ -44,7 +44,7 @@ def fake_redis(monkeypatch):
 
 async def _run_stages(sf, monkeypatch, build_id, step_result, *, on_step=None):
     """Run the real executor loop with the step itself faked. Returns what
-    _run_build_stages returns: a BuildSnapshot snapshot, or None."""
+    _run_build_stages returns: a snapshot of the build as it ended, or None."""
     from app.services import build_executor
     from app.services.step_actions.base import StepResult
 
@@ -114,14 +114,17 @@ async def test_agent_lost_mid_build_is_a_failed_build(sf, monkeypatch):
     assert failed is not None and failed.failed_step == "apply manifests"
 
 
-async def test_successful_build_returns_nothing(sf, monkeypatch):
+async def test_successful_build_returns_a_snapshot_without_a_failure(sf, monkeypatch):
     ids = await _seed(sf)
 
-    assert await _run_stages(sf, monkeypatch, ids["build"], OK) is None
+    snapshot = await _run_stages(sf, monkeypatch, ids["build"], OK)
+
     assert await _build_status(sf, ids["build"]) == "success"
+    assert snapshot.status == "success"
+    assert (snapshot.failed_stage, snapshot.failed_step, snapshot.failed_step_id) == ("", "", None)
 
 
-async def test_cancelled_build_returns_nothing(sf, monkeypatch):
+async def test_cancelled_build_returns_a_cancelled_snapshot(sf, monkeypatch):
     from app.models.build import Build
 
     ids = await _seed(sf)
@@ -131,8 +134,10 @@ async def test_cancelled_build_returns_nothing(sf, monkeypatch):
             (await other.get(Build, build.id)).status = "cancelled"
             await other.commit()
 
-    assert await _run_stages(sf, monkeypatch, ids["build"], OK, on_step=cancel) is None
+    snapshot = await _run_stages(sf, monkeypatch, ids["build"], OK, on_step=cancel)
+
     assert await _build_status(sf, ids["build"]) == "cancelled"
+    assert snapshot.status == "cancelled" and snapshot.failed_step == ""
 
 
 async def test_snapshot_survives_a_rollback_in_the_in_app_notice(sf, monkeypatch):

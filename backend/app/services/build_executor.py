@@ -36,7 +36,11 @@ from app.services.agent_dispatcher import (
     send_build_finished,
 )
 from app.services.build_concurrency import pipeline_has_running_build, try_start_build
-from app.services.build_notifications import BuildSnapshot, send_build_notifications
+from app.services.build_notifications import (
+    BuildSnapshot,
+    notifications_by_event,
+    send_build_notifications,
+)
 from app.services.step_actions import get_handler
 from app.services.step_actions.base import LogLine, StepContext, StepResult
 from app.services.step_actions.interpolation import (
@@ -163,9 +167,9 @@ async def execute_build(
             return
 
     # ── Execute ──────────────────────────────────────────────────────────
-    failed_build: BuildSnapshot | None = None
+    snapshot: BuildSnapshot | None = None
     try:
-        failed_build = await _run_build_stages(
+        snapshot = await _run_build_stages(
             build_id=build_id,
             claimed_agent_id=claimed_agent_id,
             session_factory=session_factory,
@@ -202,9 +206,12 @@ async def execute_build(
             pass
 
     # Last, and only after the agent is free and the next build is on its
-    # way: sending can be slow, and must not hold either of them up.
-    if failed_build is not None:
-        await _send_notifications(failed_build, session_factory)
+    # way: sending can be slow, and must not hold either of them up. The
+    # sends started while the build ran go first, so "started" cannot arrive
+    # after "failed".
+    if snapshot is not None:
+        await _wait_for_background_sends(build_id)
+        await _send_notifications(snapshot, session_factory)
 
 
 async def _run_build_stages(
@@ -216,9 +223,10 @@ async def _run_build_stages(
 ) -> BuildSnapshot | None:
     """Inner routine that actually executes all stages/steps for a build.
 
-    Returns a snapshot of the failure when the build ended as failed, so the
-    caller can send the pipeline's failure notifications once the agent has
-    been released; otherwise None.
+    Returns a snapshot of the build as it ended, so the caller can send the
+    pipeline's notifications once the agent has been released; None when the
+    build did not run. ``on_start`` and ``on_waiting`` notifications are
+    started from here, in the background.
     """
 
     async with session_factory() as db:
@@ -262,6 +270,12 @@ async def _run_build_stages(
 
         secrets, env_vars, builtins = await _load_scope_context(db, build)
 
+        if await _lists_event(session_factory, build.pipeline_id, "on_start"):
+            _send_in_background(
+                _capture_snapshot(build, secrets, env_vars, builtins, status="running"),
+                session_factory,
+            )
+
         build_failed = False
         cancelled = False
         build_agent_ids: set[uuid.UUID] = set()
@@ -304,6 +318,18 @@ async def _run_build_stages(
                     "step_name": step.name,
                     "step_type": step.step_type,
                 })
+
+                # A person has to act now; a wait_webhook waits for a machine.
+                if step.step_type == "wait_input" and await _lists_event(
+                    session_factory, build.pipeline_id, "on_waiting"
+                ):
+                    _send_in_background(
+                        _capture_snapshot(
+                            build, secrets, env_vars, builtins,
+                            status="running", waiting=(stage, step),
+                        ),
+                        session_factory,
+                    )
 
                 step_result = await _execute_step(
                     step=step,
@@ -385,14 +411,10 @@ async def _run_build_stages(
         build.finished_at = datetime.now(timezone.utc)
         await db.commit()
 
-        # Snapshot the failure now, as plain values. The notification is sent
+        # Snapshot the build now, as plain values. The notifications are sent
         # later, and the calls below can roll this session back, which expires
         # every object loaded in it.
-        failed_build = (
-            _capture_snapshot(build, secrets, env_vars, builtins)
-            if final_status == "failed"
-            else None
-        )
+        snapshot = _capture_snapshot(build, secrets, env_vars, builtins)
 
         await _publish(redis_client, channel, {
             "event": "build_finished",
@@ -416,7 +438,7 @@ async def _run_build_stages(
         await _send_build_finished_notification(
             db, redis_client, build, final_status
         )
-        return failed_build
+        return snapshot
 
 
 async def _cancel_remaining(db: AsyncSession, build: Build) -> None:
@@ -956,50 +978,107 @@ def _capture_snapshot(
     secrets: dict[str, str],
     env_vars: dict[str, str],
     builtins: dict[str, dict[str, str]],
+    **moment: Any,
 ) -> BuildSnapshot | None:
-    """Snapshot a failed build for its notifications. Never raises: a build's
-    result must not depend on its notifications."""
+    """Snapshot a build for its notifications; *moment* is passed on to
+    ``BuildSnapshot.capture``. Never raises: a build's result must not depend
+    on its notifications."""
     try:
-        return BuildSnapshot.capture(build, secrets, env_vars, builtins)
+        return BuildSnapshot.capture(build, secrets, env_vars, builtins, **moment)
     except Exception:
-        logger.exception("Could not snapshot failed build for its notifications")
+        logger.exception("Could not snapshot build for its notifications")
         return None
 
 
-async def _send_notifications(
-    failed: BuildSnapshot,
+async def _lists_event(
+    session_factory: async_sessionmaker[AsyncSession],
+    pipeline_id: uuid.UUID,
+    event: str,
+) -> bool:
+    """Whether the pipeline's YAML, as stored now, lists *event* in its
+    ``notifications`` block. Asked on a session of its own, and never raises:
+    a build must not depend on its notifications."""
+    try:
+        async with session_factory() as db:
+            yaml_content = await db.scalar(
+                select(Pipeline.yaml_content).where(Pipeline.id == pipeline_id)
+            )
+        return event in notifications_by_event(yaml_content)
+    except Exception:
+        logger.exception("Could not read the notifications of pipeline %s", pipeline_id)
+        return False
+
+
+# Sends started while a build runs (on_start, on_waiting), by build. The event
+# loop keeps only weak references to tasks, so they are held here until done.
+_background_sends: dict[uuid.UUID, set[asyncio.Task]] = {}
+
+
+def _send_in_background(
+    snapshot: BuildSnapshot | None,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Send the pipeline's ``notifications.on_failure`` messages.
+    """Start sending the notifications for *snapshot* without waiting: a slow
+    channel must not delay the build."""
+    if snapshot is None:
+        return
+    build_id = snapshot.build_id
+    task = asyncio.ensure_future(_send_notifications(snapshot, session_factory))
+    tasks = _background_sends.setdefault(build_id, set())
+    tasks.add(task)
 
-    Runs after the build has been committed as failed and its agent released,
-    on its own database session and Redis client, so nothing here can affect
-    the build or the executor. Never raises.
+    def forget(done: asyncio.Task) -> None:
+        tasks.discard(done)
+        if not tasks and _background_sends.get(build_id) is tasks:
+            del _background_sends[build_id]
+
+    task.add_done_callback(forget)
+
+
+async def _wait_for_background_sends(build_id: uuid.UUID) -> None:
+    """Wait for the sends started while the build ran. Never raises."""
+    tasks = list(_background_sends.get(build_id, ()))
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _send_notifications(
+    snapshot: BuildSnapshot,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Send what the pipeline's ``notifications`` block asks for at the moment
+    in *snapshot*.
+
+    Runs on its own database session and Redis client, so nothing here can
+    affect the build or the executor. Never raises.
     """
     redis_client: aioredis.Redis | None = None
     try:
-        settings = get_settings()
-        redis_client = aioredis.from_url(settings.MEGOOCI_REDIS_URL, decode_responses=True)
-        channel = f"build:{failed.build_id}:logs"
+        channel = f"build:{snapshot.build_id}:logs"
 
         async def report(text: str) -> None:
-            # Shown under the failed step, where the author is already looking.
+            # Shown under the step the author is most likely looking at.
             # A session of its own: the sending session may just have been
             # rolled back.
-            if failed.failed_step_id is None:
-                logger.warning("build %s: %s", failed.build_id, text)
+            nonlocal redis_client
+            if snapshot.log_step_id is None:
+                logger.warning("build %s: %s", snapshot.build_id, text)
                 return
             async with session_factory() as log_db:
-                step = await log_db.get(Step, failed.failed_step_id)
+                step = await log_db.get(Step, snapshot.log_step_id)
                 if step is None:
-                    logger.warning("build %s: %s", failed.build_id, text)
+                    logger.warning("build %s: %s", snapshot.build_id, text)
                     return
+                if redis_client is None:
+                    redis_client = aioredis.from_url(
+                        get_settings().MEGOOCI_REDIS_URL, decode_responses=True
+                    )
                 await _emit_system_log(step, log_db, redis_client, channel, f"⚠️ {text}")
 
         async with session_factory() as db:
-            await send_build_notifications(db, failed, report=report)
+            await send_build_notifications(db, snapshot, report=report)
     except Exception:
-        logger.exception("Failure notifications for build %s could not be sent", failed.build_id)
+        logger.exception("Notifications for build %s could not be sent", snapshot.build_id)
     finally:
         if redis_client is not None:
             try:
