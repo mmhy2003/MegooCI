@@ -190,6 +190,23 @@ To call an external system — a chat webhook, a deployment or ticketing system,
 
 The request is sent from the build agent, so it can reach systems on the agent's network, and the step fails the build when the status is not the expected one. The URL path, headers and body are never written to the build log; the first 2,000 characters of the response are, so avoid endpoints that return a secret. It needs an agent built from this release or later.
 
+To be told when a build fails, add a top-level `notifications` block. The server sends the message through a channel configured under Notification Channels, so it also goes out when no agent could run the build:
+
+```yaml
+name: deploy-staging
+notifications:
+  on_failure:
+    - deploy-alerts                   # a channel name
+    - channel: ops-email              # or a mapping
+      recipient: oncall@example.com
+stages:
+  - name: deploy
+    steps:
+      - run: ./deploy.sh
+```
+
+Without a `message`, a default is sent with the pipeline, build number, branch, commit, the stage and step that failed, and a link to the build. A `notify` step at the end of a pipeline cannot do this: a build stops at the first failed step.
+
 Link the pipeline to a project whose repository points at your GitHub / GitLab repo — a push triggers the webhook and the pipeline runs on the next available agent.
 
 ## Running a Self-Hosted Build Agent

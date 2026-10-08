@@ -4,6 +4,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import {
   Bell,
+  BellRing,
   Boxes,
   ChevronDown,
   ChevronRight,
@@ -44,7 +45,7 @@ const DOCS: DocSection[] = [
     title: "Pipeline Structure",
     icon: <BookOpen className="h-4 w-4" />,
     description:
-      "Every pipeline starts with a version, name, optional global env vars, an optional runs_on targeting the build agent, and a list of stages. Each stage has steps.",
+      "Every pipeline starts with a version, name, optional global env vars, an optional runs_on targeting the build agent, an optional notifications block naming who is told when a build fails, and a list of stages. Each stage has steps.",
     yaml: `version: 1
 name: my-pipeline
 runs_on: linux          # optional — route the whole build to a Linux agent
@@ -98,6 +99,29 @@ stages:
       - notify:
           channel: "deploy-alerts"
           message: "Build done"`,
+  },
+  {
+    id: "notifications",
+    title: "Failure Notifications",
+    icon: <BellRing className="h-4 w-4" />,
+    description:
+      "Be told when a build of this pipeline fails. Add a top-level notifications block (beside runs_on, not inside a stage) listing the channels to notify; channels are set up by admins under Integrations > Notification Channels. The server sends the message, so it also goes out when no agent could run the build. Each entry is a channel name, or a mapping with channel plus an optional recipient, subject (email) and message. Without a message, a default is sent with the pipeline, build number, branch, commit, the stage and step that failed, and a link to the build. For an email channel set recipient, otherwise the message goes to the channel's own sender address. Successful and cancelled builds send nothing. A channel that does not exist or is disabled is reported in the build log.",
+    yaml: `version: 1
+name: deploy-staging
+notifications:
+  on_failure:
+    - deploy-alerts                     # short form: a channel name
+    - channel: ops-email                # full form
+      recipient: oncall@example.com     # optional override
+      subject: "Staging deploy failed"  # optional (email only)
+      message: |                        # optional; a default is sent if omitted
+        Build #\${{ build.number }} of \${{ pipeline.name }} failed
+        at \${{ build.failed_stage }} / \${{ build.failed_step }}
+        \${{ build.url }}
+stages:
+  - name: deploy
+    steps:
+      - run: "./deploy.sh"`,
   },
   {
     id: "run",
@@ -385,13 +409,13 @@ stages:
     title: "Send Notification",
     icon: <Bell className="h-4 w-4" />,
     description:
-      "Send a notification through a configured channel (email, Slack, or Telegram). Channels are set up by admins under Integrations > Notification Channels.",
+      "Send a notification through a configured channel (email, Slack, or Telegram). Channels are set up by admins under Integrations > Notification Channels. A notify step runs only if the build reaches it: a build stops at the first failed step, so to be told about failed builds use the top-level notifications block (see Failure Notifications).",
     yaml: `- name: notify-team
   notify:
     channel: "deploy-alerts"
     message: |
       Build finished on branch \${{ build.branch }}
-      Commit: \${{ build.commit_sha }}
+      Commit: \${{ build.commit }}
     subject: "Build Report"       # optional (email only)
     recipient: "#deployments"     # optional override`,
   },
