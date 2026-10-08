@@ -2,15 +2,20 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { aiAssistantApi, type AiChatMessage } from "@/lib/api";
+import {
+  aiAssistantApi,
+  type AiAssistantStep,
+  type AiChatMessage,
+  type AiProposal,
+} from "@/lib/api";
 import { toast } from "sonner";
 import {
   Sparkles,
   Send,
-  Copy,
   Check,
+  ChevronDown,
+  ChevronRight,
   Loader2,
-  ArrowDownToLine,
   User,
   Bot,
   Trash2,
@@ -18,12 +23,35 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  AiProposalCard,
+  type ProposalDecision,
+} from "@/components/pipeline/ai-proposal-card";
+
+/**
+ * Longer than the server needs for its tool loop (120s) plus one retry
+ * without tools, so the server's own answer normally arrives first.
+ */
+const REQUEST_TIMEOUT_MS = 250_000;
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
-  yaml?: string | null;
+  /** Tools the assistant used for this reply. */
+  steps?: AiAssistantStep[];
+  proposal?: AiProposal | null;
+  limitReached?: boolean;
+  /** Editor content when the request was sent; the proposal is a diff against it. */
+  baseYaml?: string;
+  decision?: ProposalDecision;
+}
+
+/** The last applied proposal, while it can still be undone. */
+interface UndoState {
+  messageId: string;
+  before: string;
+  after: string;
 }
 
 interface AiAssistantPanelProps {
@@ -46,53 +74,70 @@ const QUICK_PROMPTS = [
   "Clone repo, install, test, and push",
 ];
 
-function YamlBlock({
-  yaml,
-  onApply,
-}: {
-  yaml: string;
-  onApply?: (yaml: string) => void;
-}) {
-  const [copied, setCopied] = React.useState(false);
-
+function StepRows({ steps }: { steps: AiAssistantStep[] }) {
   return (
-    <div className="my-2 rounded-md border bg-muted/30 overflow-hidden">
-      <div className="flex items-center justify-between border-b bg-muted/50 px-3 py-1.5">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          Generated YAML
-        </span>
-        <div className="flex gap-1">
-          <button
-            type="button"
-            onClick={() => {
-              navigator.clipboard.writeText(yaml);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            }}
-            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          >
-            {copied ? (
-              <Check className="h-3 w-3" />
-            ) : (
-              <Copy className="h-3 w-3" />
-            )}
-            {copied ? "Copied" : "Copy"}
-          </button>
-          {onApply && (
-            <button
-              type="button"
-              onClick={() => onApply(yaml)}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-primary hover:bg-primary/10 transition-colors"
-            >
-              <ArrowDownToLine className="h-3 w-3" />
-              Apply to editor
-            </button>
+    <ul className="space-y-0.5 text-xs text-muted-foreground">
+      {steps.map((step, i) => (
+        <li key={i} className="flex items-start gap-1.5">
+          {step.ok ? (
+            <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
+          ) : (
+            <X className="mt-0.5 h-3 w-3 shrink-0 text-destructive" />
           )}
+          <span className="min-w-0 break-words">{step.label}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The steps of a finished reply: one line that expands to the list. */
+function StepSummary({ steps }: { steps: AiAssistantStep[] }) {
+  const [open, setOpen] = React.useState(false);
+  if (steps.length === 0) return null;
+  return (
+    <div className="mb-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-1 rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+        {steps.length} {steps.length === 1 ? "step" : "steps"}
+      </button>
+      {open && (
+        <div className="mt-1 pl-4">
+          <StepRows steps={steps} />
         </div>
-      </div>
-      <pre className="overflow-x-auto p-3 text-xs leading-relaxed max-h-72 overflow-y-auto">
-        <code>{yaml}</code>
-      </pre>
+      )}
+    </div>
+  );
+}
+
+/** Reply text, with ``` fenced blocks shown as code. */
+function ReplyText({ text }: { text: string }) {
+  const parts = text.split(/```[\w-]*\n?([\s\S]*?)```/g);
+  return (
+    <div className="text-sm leading-relaxed">
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <pre
+            key={i}
+            className="my-2 overflow-x-auto rounded-md border bg-muted/30 p-3 text-xs leading-relaxed"
+          >
+            <code>{part.replace(/\n$/, "")}</code>
+          </pre>
+        ) : part.trim() ? (
+          <div key={i} className="whitespace-pre-wrap">
+            {part.trim()}
+          </div>
+        ) : null,
+      )}
     </div>
   );
 }
@@ -110,16 +155,28 @@ export function AiAssistantPanel({
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [input, setInput] = React.useState("");
   const [loading, setLoading] = React.useState(false);
+  const [liveSteps, setLiveSteps] = React.useState<AiAssistantStep[]>([]);
+  const [undo, setUndo] = React.useState<UndoState | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const yamlRef = React.useRef(currentYaml);
   yamlRef.current = currentYaml;
+  /** The request in flight, if any. */
+  const requestRef = React.useRef<AbortController | null>(null);
 
   React.useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, liveSteps]);
+
+  // Leaving the page stops the request.
+  React.useEffect(() => {
+    return () => {
+      requestRef.current?.abort();
+      requestRef.current = null;
+    };
+  }, []);
 
   async function sendMessage(prompt: string) {
     if (!prompt.trim() || loading) return;
@@ -132,8 +189,17 @@ export function AiAssistantPanel({
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setLoading(true);
+    setLiveSteps([]);
 
     const latestYaml = yamlRef.current;
+    const received: AiAssistantStep[] = [];
+    const controller = new AbortController();
+    requestRef.current = controller;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
 
     try {
       const history: AiChatMessage[] = messages.map((m) => ({
@@ -141,26 +207,45 @@ export function AiAssistantPanel({
         content: m.content,
       }));
 
-      const resp = await aiAssistantApi.ask({
-        prompt: prompt.trim(),
-        current_yaml: latestYaml || null,
-        project_id: projectId || null,
-        pipeline_id: pipelineId || null,
-        repo_url: repoUrl || null,
-        branch: branch || null,
-        history: history.length > 0 ? history : undefined,
-      });
+      const resp = await aiAssistantApi.stream(
+        {
+          prompt: prompt.trim(),
+          current_yaml: latestYaml || null,
+          project_id: projectId || null,
+          pipeline_id: pipelineId || null,
+          repo_url: repoUrl || null,
+          branch: branch || null,
+          history: history.length > 0 ? history : undefined,
+        },
+        {
+          signal: controller.signal,
+          onStep: (step) => {
+            received.push(step);
+            setLiveSteps([...received]);
+          },
+        },
+      );
 
-      const assistantMsg: Message = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: resp.reply,
-        yaml: resp.yaml,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
+      // Cleared or left while the answer was on its way.
+      if (requestRef.current !== controller) return;
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: resp.reply,
+          steps: resp.steps,
+          proposal: resp.proposal,
+          limitReached: resp.limit_reached,
+          baseYaml: latestYaml,
+        },
+      ]);
     } catch (err) {
-      const detail =
-        err instanceof Error && err.message
+      if (requestRef.current !== controller) return;
+      const detail = timedOut
+        ? "The assistant took too long to answer. Please try again."
+        : err instanceof Error && err.message
           ? err.message
           : "An unexpected error occurred. Please try again.";
       toast.error(detail);
@@ -170,11 +255,17 @@ export function AiAssistantPanel({
           id: crypto.randomUUID(),
           role: "assistant",
           content: detail,
+          steps: received,
         },
       ]);
     } finally {
-      setLoading(false);
-      inputRef.current?.focus();
+      clearTimeout(timer);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setLoading(false);
+        setLiveSteps([]);
+        inputRef.current?.focus();
+      }
     }
   }
 
@@ -186,7 +277,36 @@ export function AiAssistantPanel({
   }
 
   function clearChat() {
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setLoading(false);
+    setLiveSteps([]);
     setMessages([]);
+    setUndo(null);
+  }
+
+  function setDecision(id: string, decision: ProposalDecision | undefined) {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, decision } : m)),
+    );
+  }
+
+  function applyProposal(msg: Message) {
+    if (!onApplyYaml || !msg.proposal) return;
+    setUndo({
+      messageId: msg.id,
+      before: yamlRef.current,
+      after: msg.proposal.yaml,
+    });
+    onApplyYaml(msg.proposal.yaml);
+    setDecision(msg.id, "applied");
+  }
+
+  function undoApply() {
+    if (!onApplyYaml || !undo) return;
+    onApplyYaml(undo.before);
+    setDecision(undo.messageId, undefined);
+    setUndo(null);
   }
 
   return (
@@ -231,8 +351,8 @@ export function AiAssistantPanel({
               </div>
               <p className="text-sm font-medium">Pipeline AI Assistant</p>
               <p className="mx-auto mt-1.5 max-w-xs text-xs leading-relaxed text-muted-foreground">
-                Describe what you want and I&apos;ll generate the YAML
-                pipeline definition for you.
+                Describe what you want. I&apos;ll edit the pipeline YAML and
+                show you the changes before anything reaches the editor.
               </p>
             </div>
             <div className="space-y-1.5">
@@ -270,16 +390,31 @@ export function AiAssistantPanel({
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  {msg.yaml ? (
-                    <YamlBlock yaml={msg.yaml} onApply={onApplyYaml} />
-                  ) : (
-                    <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                      {msg.content}
-                    </div>
+                  {msg.steps && <StepSummary steps={msg.steps} />}
+                  <ReplyText text={msg.content} />
+                  {msg.proposal && (
+                    <AiProposalCard
+                      proposal={msg.proposal}
+                      decision={msg.decision}
+                      stale={
+                        msg.baseYaml !== undefined &&
+                        currentYaml !== msg.baseYaml
+                      }
+                      limitReached={msg.limitReached ?? false}
+                      canUndo={
+                        undo?.messageId === msg.id &&
+                        currentYaml === undo.after
+                      }
+                      onApply={
+                        onApplyYaml ? () => applyProposal(msg) : undefined
+                      }
+                      onDiscard={() => setDecision(msg.id, "discarded")}
+                      onUndo={undoApply}
+                    />
                   )}
-                  {msg.yaml && msg.content !== msg.yaml && (
-                    <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
-                      {msg.content.replace(/```[\s\S]*?```/g, "").trim()}
+                  {!msg.proposal && msg.limitReached && (
+                    <p className="mt-1.5 text-xs text-warning">
+                      The assistant stopped early.
                     </p>
                   )}
                 </div>
@@ -290,9 +425,12 @@ export function AiAssistantPanel({
                 <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
                   <Bot className="h-3.5 w-3.5" />
                 </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Thinking...
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    {liveSteps.length > 0 ? "Working..." : "Thinking..."}
+                  </div>
+                  <StepRows steps={liveSteps} />
                 </div>
               </div>
             )}
