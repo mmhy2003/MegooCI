@@ -9,9 +9,14 @@ native API, Azure, Ollama, etc.) via a single ``completion()`` interface.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -22,6 +27,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import database
+from app.api.v1.agents import _normalize_status
 from app.config import get_settings
 from app.core.access import has_global_permission, project_id_for_pipeline
 from app.core.deps import (
@@ -30,11 +37,17 @@ from app.core.deps import (
     get_current_active_user,
 )
 from app.database import get_db
+from app.models.agent import Agent
 from app.models.git_integration import ProjectRepository
 from app.models.pipeline import Pipeline
 from app.models.secret import EnvVar, Secret
 from app.models.user import User
+from app.services.assistant.diff import build_proposal
+from app.services.assistant.document import DocumentError, WorkingDocument
+from app.services.assistant.loop import LoopResult, ModelTurn, OnStep, Step, ToolCall, run_loop
 from app.services.assistant.reference import build_tool_prompt, split_topics
+from app.services.assistant.tools import TOOL_DEFINITIONS, ToolContext
+from app.services.pipeline_compiler import validate_pipeline_definition
 
 # Let LiteLLM silently drop unsupported params per model (e.g. temperature
 # for reasoning models) instead of raising errors.
@@ -582,9 +595,50 @@ class AssistantRequest(BaseModel):
     history: list[ChatMessage] | None = None
 
 
+class AssistantStep(BaseModel):
+    """One tool call the assistant made, as shown in the chat."""
+
+    tool: str
+    label: str
+    ok: bool = True
+
+
+class AssistantProblem(BaseModel):
+    message: str
+    line: int | None = None
+
+
+class AssistantDiffLine(BaseModel):
+    kind: str  # "context" | "add" | "remove"
+    old: int | None = None
+    new: int | None = None
+    text: str
+
+
+class AssistantDiffHunk(BaseModel):
+    old_start: int
+    new_start: int
+    lines: list[AssistantDiffLine]
+
+
+class AssistantProposal(BaseModel):
+    """The YAML the assistant proposes, and how it differs from the editor's."""
+
+    yaml: str
+    added: int
+    removed: int
+    problems: list[AssistantProblem] = []
+    hunks: list[AssistantDiffHunk] = []
+
+
 class AssistantResponse(BaseModel):
     reply: str
+    # Same as proposal.yaml; kept for clients that predate the proposal.
     yaml: str | None = None
+    mode: str = "tools"  # "tools" | "legacy"
+    limit_reached: bool = False
+    steps: list[AssistantStep] = []
+    proposal: AssistantProposal | None = None
 
 
 async def _build_project_context(
@@ -708,15 +762,116 @@ async def _build_repo_context(
     return "\n".join(parts)
 
 
-async def _prepare_messages(
+MAX_AGENTS_LISTED = 50
+
+
+@dataclass
+class _Job:
+    """Everything one assistant request needs, gathered while the request's
+    database session is still open."""
+
+    model_id: str
+    ai_cfg: dict
+    tool_messages: list[Any]
+    legacy_messages: list[Any]
+    current_yaml: str | None
+    # None when the user may not see agents.
+    list_agents: Callable[[], Awaitable[str]] | None
+
+
+def _history(body: AssistantRequest) -> list[dict[str, str]]:
+    return [
+        {"role": msg.role, "content": msg.content}
+        for msg in body.history or []
+        if msg.role in ("user", "assistant")
+    ]
+
+
+def _legacy_messages(body: AssistantRequest, system_content: str) -> list[Any]:
+    """The conversation for a model called without tools: it gets the whole
+    YAML and must return the whole YAML."""
+    messages: list[Any] = [{"role": "system", "content": system_content}, *_history(body)]
+
+    if body.current_yaml:
+        messages.append({
+            "role": "user",
+            "content": (
+                "Here is my current pipeline YAML from the editor "
+                "(this reflects the latest state, including any manual edits I made).\n"
+                "IMPORTANT: When I ask you to modify, fix, or update this pipeline, "
+                "you MUST return the COMPLETE updated pipeline YAML inside a "
+                "```yaml code block — not just the changed part. My editor replaces "
+                "the entire pipeline with your output.\n\n"
+                f"```yaml\n{body.current_yaml}\n```"
+            ),
+        })
+        messages.append({
+            "role": "assistant",
+            "content": (
+                "Got it — I can see your full pipeline YAML. "
+                "When you ask me to make changes, I'll always return the "
+                "complete updated pipeline in a ```yaml block so you can "
+                "apply it directly. What would you like me to do?"
+            ),
+        })
+
+    messages.append({"role": "user", "content": body.prompt})
+    return messages
+
+
+def _tool_messages(body: AssistantRequest, system_content: str) -> list[Any]:
+    """The conversation for a model called with tools. The YAML is shown with
+    line numbers so the model can edit short pipelines without reading first."""
+    document = WorkingDocument(body.current_yaml)
+    if document.line_count:
+        editor = (
+            f"The pipeline YAML in my editor right now ({document.line_count} lines, "
+            f"each prefixed with its line number):\n{document.read_lines()}"
+        )
+    else:
+        editor = "My editor is empty: there is no pipeline YAML yet."
+    return [
+        {"role": "system", "content": system_content},
+        *_history(body),
+        {"role": "user", "content": f"{editor}\n\nMy request: {body.prompt}"},
+    ]
+
+
+def _agent_lister() -> Callable[[], Awaitable[str]]:
+    """The ``list_agents`` tool. It opens its own session because the
+    request's session may be closed by the time a streamed reply calls it."""
+
+    async def list_agents() -> str:
+        async with database.async_session() as session:
+            result = await session.execute(
+                select(Agent).order_by(Agent.name).limit(MAX_AGENTS_LISTED)
+            )
+            agents = list(result.scalars().all())
+            # Detached, so working out who is offline below cannot be saved.
+            session.expunge_all()
+        if not agents:
+            return "No agents are registered."
+        lines = []
+        for agent in agents:
+            _normalize_status(agent)
+            state = agent.status if agent.enabled else "disabled"
+            labels = ", ".join(str(label) for label in agent.labels or []) or "none"
+            lines.append(
+                f"- {agent.name}: os={agent.os or 'unknown'}, "
+                f"arch={agent.arch or 'unknown'}, labels={labels}, {state}"
+            )
+        return "\n".join(lines)
+
+    return list_agents
+
+
+async def _prepare_job(
     body: AssistantRequest,
     db: AsyncSession,
     current_user: User,
-) -> tuple[list[dict[str, str]], str, dict]:
-    """Shared logic for both the regular and streaming assistant endpoints.
-
-    Returns ``(messages, model_id, ai_cfg)``.
-    """
+) -> _Job:
+    """Shared by both assistant endpoints: check the AI configuration and
+    build the conversations for a request."""
     from app.api.v1.system import get_ai_overrides, resolve_ai_config
 
     overrides = await get_ai_overrides(db)
@@ -746,7 +901,8 @@ async def _prepare_messages(
             detail="AI API key is not configured",
         )
 
-    system_content = SYSTEM_PROMPT
+    # Appended to the system prompt in both modes.
+    context = ""
 
     if body.project_id:
         # Resolve project_id for scoped secrets.read check.
@@ -765,7 +921,7 @@ async def _prepare_messages(
             db, body.project_id, include_values=can_read_secrets,
         )
         if project_ctx:
-            system_content += (
+            context += (
                 "\n\n## Project Context\n"
                 "The user's project has the following secrets and variables "
                 "configured. Use these exact names in the generated YAML "
@@ -781,54 +937,26 @@ async def _prepare_messages(
         pipeline_id=body.pipeline_id,
     )
     if repo_ctx:
-        system_content += repo_ctx
+        context += repo_ctx
 
     model_id = _build_model_id(ai_cfg)
 
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": system_content},
-    ]
-
-    if body.history:
-        for msg in body.history:
-            if msg.role in ("user", "assistant"):
-                messages.append({"role": msg.role, "content": msg.content})
-
-    if body.current_yaml:
-        messages.append({
-            "role": "user",
-            "content": (
-                "Here is my current pipeline YAML from the editor "
-                "(this reflects the latest state, including any manual edits I made).\n"
-                "IMPORTANT: When I ask you to modify, fix, or update this pipeline, "
-                "you MUST return the COMPLETE updated pipeline YAML inside a "
-                "```yaml code block — not just the changed part. My editor replaces "
-                "the entire pipeline with your output.\n\n"
-                f"```yaml\n{body.current_yaml}\n```"
-            ),
-        })
-        messages.append({
-            "role": "assistant",
-            "content": (
-                "Got it — I can see your full pipeline YAML. "
-                "When you ask me to make changes, I'll always return the "
-                "complete updated pipeline in a ```yaml block so you can "
-                "apply it directly. What would you like me to do?"
-            ),
-        })
-
-    messages.append({"role": "user", "content": body.prompt})
-
     logger.info(
-        "Sending AI request — model_id=%s provider=%s message_count=%d "
-        "base_url=%s",
+        "Sending AI request — model_id=%s provider=%s history=%d base_url=%s",
         model_id,
         ai_cfg["provider"],
-        len(messages),
+        len(body.history or []),
         ai_cfg["base_url"] or "(default)",
     )
 
-    return messages, model_id, ai_cfg
+    return _Job(
+        model_id=model_id,
+        ai_cfg=ai_cfg,
+        tool_messages=_tool_messages(body, TOOL_SYSTEM_PROMPT + context),
+        legacy_messages=_legacy_messages(body, SYSTEM_PROMPT + context),
+        current_yaml=body.current_yaml,
+        list_agents=_agent_lister() if has_global_permission(current_user, "agents.read") else None,
+    )
 
 
 async def _check_ai_access(
@@ -871,6 +999,170 @@ async def _check_ai_access(
             )
 
 
+def _model_options(job: _Job) -> dict[str, Any]:
+    ai_cfg = job.ai_cfg
+    return {
+        "model": job.model_id,
+        "temperature": 0.3,
+        "timeout": 120,
+        "api_key": str(ai_cfg["api_key"]) if ai_cfg["api_key"] else None,
+        "api_base": str(ai_cfg["base_url"]) if ai_cfg["base_url"] else None,
+    }
+
+
+def _count_tokens(response: Any, usage: dict[str, int]) -> None:
+    total = getattr(getattr(response, "usage", None), "total_tokens", None)
+    if isinstance(total, int):
+        usage["tokens"] += total
+
+
+def _tool_completer(job: _Job, usage: dict[str, int]) -> Callable[[list[Any]], Awaitable[ModelTurn]]:
+    """One model call with the tools attached, as the loop wants it."""
+
+    async def complete(messages: list[Any]) -> ModelTurn:
+        response = await litellm.acompletion(
+            messages=messages,
+            tools=TOOL_DEFINITIONS,
+            tool_choice="auto",
+            **_model_options(job),
+        )
+        _count_tokens(response, usage)
+        message = response.choices[0].message
+        calls = [
+            ToolCall(id=call.id, name=call.function.name, arguments=call.function.arguments)
+            for call in getattr(message, "tool_calls", None) or []
+        ]
+        # The provider's own message object goes back into the conversation
+        # unchanged, so anything it needs to see again (ids, reasoning) is kept.
+        return ModelTurn(text=message.content, tool_calls=calls, message=message)
+
+    return complete
+
+
+async def _legacy_reply(job: _Job, usage: dict[str, int]) -> str:
+    """One model call without tools; the YAML comes back inside the reply."""
+    response = await litellm.acompletion(messages=job.legacy_messages, **_model_options(job))
+    _count_tokens(response, usage)
+    return (response.choices[0].message.content or "").strip()
+
+
+_YAML_BLOCK = re.compile(r"```(?:ya?ml)?\s*\n.*?```", re.DOTALL)
+
+
+def _is_whole_pipeline(text: str) -> bool:
+    """True for a full pipeline, false for a snippet shown in an answer: only
+    a full pipeline may replace the editor's content."""
+    return re.search(r"(?m)^stages\s*:", text) is not None
+
+
+def _without_yaml_block(reply: str, yaml_text: str) -> str:
+    """The reply with its YAML removed, once that YAML is shown as a diff."""
+    rest = _YAML_BLOCK.sub("", reply, count=1).strip()
+    return "" if rest == yaml_text else rest
+
+
+def _default_reply(changed: bool, limit_reached: bool) -> str:
+    if limit_reached and changed:
+        return (
+            "I ran out of steps before finishing. The changes I made so far are "
+            "below — check them before applying."
+        )
+    if limit_reached:
+        return "I ran out of steps before making a change. Try a more specific request."
+    if changed:
+        return "I updated the pipeline. Review the changes below."
+    return "I could not produce an answer. Please try again."
+
+
+async def _answer(job: _Job, on_step: OnStep | None = None) -> AssistantResponse:
+    """Answer one request: with tools when the model accepts them, otherwise
+    with a single call whose reply carries the YAML.
+
+    Raises whatever the AI provider raised when no answer could be had.
+    """
+    document = WorkingDocument(job.current_yaml)
+    ctx = ToolContext(document=document, topics=REFERENCE_TOPICS, list_agents=job.list_agents)
+    usage = {"tokens": 0}
+    mode = "tools"
+    result = LoopResult()
+
+    try:
+        result = await run_loop(job.tool_messages, _tool_completer(job, usage), ctx, on_step=on_step)
+        reply = result.reply
+    except (
+        litellm.exceptions.AuthenticationError,
+        litellm.exceptions.APIConnectionError,
+        litellm.exceptions.Timeout,
+        litellm.exceptions.RateLimitError,
+    ):
+        # A call without tools would fail the same way.
+        raise
+    except Exception as exc:
+        # Most often a model or endpoint that does not accept tools.
+        logger.warning(
+            "AI call with tools failed (%s: %s) — retrying without tools",
+            type(exc).__name__, exc,
+        )
+        mode = "legacy"
+        reply = await _legacy_reply(job, usage)
+
+    if not document.changed:
+        # Without tools — or with a model that ignored them — the whole
+        # pipeline is in the reply. Turn it into the same proposal.
+        candidate = _extract_yaml(reply)
+        if candidate and _is_whole_pipeline(candidate):
+            try:
+                document.write(candidate)
+            except DocumentError as exc:
+                logger.warning("AI reply YAML not usable as a proposal — %s", exc)
+            else:
+                reply = _without_yaml_block(reply, candidate)
+
+    proposal = None
+    if document.changed:
+        problems = [
+            {"message": problem.message, "line": problem.line}
+            for problem in validate_pipeline_definition(document.text)
+        ]
+        built = build_proposal(document.original, document.text, problems)
+        if built is not None:
+            proposal = AssistantProposal.model_validate(built.to_dict())
+
+    logger.info(
+        "AI assistant response — mode=%s model_calls=%d tool_calls=%d tokens=%d "
+        "limit_reached=%s proposal=%s",
+        mode, result.model_calls, len(result.steps), usage["tokens"],
+        result.limit_reached, proposal is not None,
+    )
+
+    return AssistantResponse(
+        reply=reply or _default_reply(proposal is not None, result.limit_reached),
+        yaml=proposal.yaml if proposal else None,
+        mode=mode,
+        limit_reached=result.limit_reached,
+        steps=[AssistantStep(tool=s.tool, label=s.label, ok=s.ok) for s in result.steps],
+        proposal=proposal,
+    )
+
+
+def _provider_error_detail(exc: Exception) -> str:
+    """Log a failed assistant request and describe it for the user."""
+    if isinstance(exc, litellm.exceptions.AuthenticationError):
+        logger.error("AI provider authentication failed — %s", exc)
+        return f"AI provider authentication failed: {exc.message}"
+    if isinstance(exc, litellm.exceptions.BadRequestError):
+        logger.error("AI provider bad request — %s", exc)
+        return f"AI provider rejected request: {exc.message}"
+    if isinstance(exc, litellm.exceptions.APIConnectionError):
+        logger.error("AI provider unreachable — %s", exc)
+        return f"AI provider unreachable: {exc.message}"
+    if isinstance(exc, (AttributeError, IndexError, TypeError)):
+        logger.error("Failed to parse AI response — %s", exc)
+        return f"Unexpected AI provider response format: {exc}"
+    logger.error("AI provider error — %s: %s", type(exc).__name__, exc)
+    return f"AI provider error: {exc}"
+
+
 @router.post("/assistant", response_model=AssistantResponse)
 async def pipeline_assistant(
     body: AssistantRequest,
@@ -878,91 +1170,59 @@ async def pipeline_assistant(
     current_user: User = Depends(get_current_active_user),
 ) -> AssistantResponse:
     await _check_ai_access(body, db, current_user)
-    messages, model_id, ai_cfg = await _prepare_messages(body, db, current_user)
+    job = await _prepare_job(body, db, current_user)
 
     try:
-        response = await litellm.acompletion(
-            model=model_id,
-            messages=messages,
-            temperature=0.3,
-            timeout=120,
-            api_key=str(ai_cfg["api_key"]) if ai_cfg["api_key"] else None,
-            api_base=str(ai_cfg["base_url"]) if ai_cfg["base_url"] else None,
-        )
-    except litellm.exceptions.AuthenticationError as exc:
-        logger.error("AI provider authentication failed — %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"AI provider authentication failed: {exc.message}",
-        )
-    except litellm.exceptions.BadRequestError as exc:
-        logger.error("AI provider bad request — %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"AI provider rejected request: {exc.message}",
-        )
-    except litellm.exceptions.APIConnectionError as exc:
-        logger.error("AI provider unreachable — %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"AI provider unreachable: {exc.message}",
-        )
+        return await _answer(job)
     except Exception as exc:
-        logger.error("AI provider error — %s: %s", type(exc).__name__, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"AI provider error: {exc}",
+            detail=_provider_error_detail(exc),
         )
 
+
+# Proxies close a connection that stays silent; a long model call is silent.
+KEEPALIVE_SECONDS = 15.0
+
+
+def _event(payload: dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+async def _stream_events(job: _Job) -> AsyncIterator[str]:
+    """Server-sent events for one request: a ``step`` after each tool call,
+    then one ``done`` (the response) or one ``error``."""
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def on_step(step: Step) -> None:
+        await queue.put(_event({"type": "step", "tool": step.tool, "label": step.label, "ok": step.ok}))
+
+    async def work() -> None:
+        try:
+            response = await _answer(job, on_step)
+            await queue.put(_event({"type": "done", **response.model_dump()}))
+        except Exception as exc:
+            await queue.put(_event({"type": "error", "detail": _provider_error_detail(exc)}))
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(work())
+    waiting = asyncio.ensure_future(queue.get())
     try:
-        reply_text = response.choices[0].message.content.strip()
-    except (AttributeError, IndexError, TypeError) as exc:
-        logger.error(
-            "Failed to parse AI response — error=%s response=%s",
-            exc,
-            str(response)[:2000],
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Unexpected AI provider response format: {exc}",
-        )
-
-    logger.info(
-        "AI assistant response — reply_length=%d usage=%s has_yaml=%s",
-        len(reply_text),
-        getattr(response, "usage", None),
-        bool(_extract_yaml(reply_text)),
-    )
-
-    yaml_block = _extract_yaml(reply_text)
-
-    return AssistantResponse(reply=reply_text, yaml=yaml_block)
-
-
-async def _stream_generator(messages, model_id, ai_cfg):
-    """Async generator that yields SSE events for the streaming endpoint."""
-    try:
-        response = await litellm.acompletion(
-            model=model_id,
-            messages=messages,
-            temperature=0.3,
-            stream=True,
-            timeout=120,
-            api_key=str(ai_cfg["api_key"]) if ai_cfg["api_key"] else None,
-            api_base=str(ai_cfg["base_url"]) if ai_cfg["base_url"] else None,
-        )
-        full_reply = ""
-        async for chunk in response:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                full_reply += delta
-                yield f"data: {json.dumps({'type': 'token', 'content': delta})}\n\n"
-
-        yaml_block = _extract_yaml(full_reply)
-        yield f"data: {json.dumps({'type': 'done', 'reply': full_reply.strip(), 'yaml': yaml_block})}\n\n"
-    except Exception as exc:
-        logger.error("AI streaming error — %s: %s", type(exc).__name__, exc)
-        yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+        while True:
+            done, _ = await asyncio.wait({waiting}, timeout=KEEPALIVE_SECONDS)
+            if not done:
+                yield ": keep-alive\n\n"
+                continue
+            item = waiting.result()
+            if item is None:
+                break
+            yield item
+            waiting = asyncio.ensure_future(queue.get())
+    finally:
+        # Reached early when the client goes away: stop paying for the model.
+        waiting.cancel()
+        task.cancel()
 
 
 @router.post("/assistant/stream")
@@ -972,9 +1232,9 @@ async def pipeline_assistant_stream(
     current_user: User = Depends(get_current_active_user),
 ):
     await _check_ai_access(body, db, current_user)
-    messages, model_id, ai_cfg = await _prepare_messages(body, db, current_user)
+    job = await _prepare_job(body, db, current_user)
     return StreamingResponse(
-        _stream_generator(messages, model_id, ai_cfg),
+        _stream_events(job),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
