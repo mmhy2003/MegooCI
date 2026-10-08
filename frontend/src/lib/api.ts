@@ -931,6 +931,166 @@ export const systemApi = {
 };
 
 // ------------------------------------------------------------------
+// Configuration backup and restore (administrators only)
+// ------------------------------------------------------------------
+export type BackupKind = "manual" | "scheduled" | "pre-restore" | "uploaded";
+
+export interface BackupRemoteStatus {
+  status: "uploaded" | "failed";
+  error: string | null;
+  at: string;
+}
+
+export interface BackupEntry {
+  name: string;
+  kind: BackupKind;
+  created_at: string;
+  size: number;
+  /** Null when the file's header cannot be read; `error` then says why. */
+  schema_revision: string | null;
+  compatible: boolean;
+  rows: number | null;
+  error: string | null;
+  /** Null when no remote copy was attempted. */
+  remote: BackupRemoteStatus | null;
+}
+
+export interface BackupSchedule {
+  frequency: "off" | "daily" | "weekly";
+  /** HH:MM, UTC. */
+  time: string;
+  /** 0 = Monday. Used by "weekly". */
+  weekday: number;
+  keep: number;
+}
+
+export interface BackupRemoteSettings {
+  enabled: boolean;
+  endpoint_url: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  access_key_id: string;
+}
+
+export interface BackupOverview {
+  backups: BackupEntry[];
+  schema_revision: string;
+  passphrase_set: boolean;
+  schedule: BackupSchedule;
+  remote: BackupRemoteSettings & { secret_access_key_set: boolean };
+  last_run: { at: string; ok: boolean; error: string | null; name: string | null } | null;
+}
+
+export interface BackupRestoreCheck {
+  name: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface BackupRestoreResult {
+  tables: Record<string, { written: number; removed: number }>;
+  pre_restore: string;
+  search_index_rebuilt: boolean;
+}
+
+/** A request that is not JSON in one direction: a file upload or download. */
+async function fetchRaw(endpoint: string, options: RequestInit): Promise<Response> {
+  const send = (token: string | null) =>
+    fetch(`${BASE_URL}${endpoint}`, {
+      ...options,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      cache: "no-store",
+    });
+  let res: Response;
+  try {
+    res = await send(getAccessToken());
+    if (res.status === 401) {
+      const newAccess = await refreshAccessTokenOnce();
+      if (newAccess) res = await send(newAccess);
+    }
+  } catch {
+    throw new ApiError(
+      0,
+      null,
+      "Couldn't reach the server. Please check your connection and try again.",
+    );
+  }
+  if (!res.ok) {
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    throw new ApiError(res.status, body, extractErrorMessage(res.status, body));
+  }
+  return res;
+}
+
+const BACKUPS = "/api/v1/admin/backups";
+
+export const backupsApi = {
+  overview: () => fetchApi<BackupOverview>(BACKUPS),
+
+  create: () => fetchApi<{ name: string }>(BACKUPS, { method: "POST" }),
+
+  upload: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetchRaw(`${BACKUPS}/upload`, { method: "POST", body: form });
+    return (await res.json()) as { name: string };
+  },
+
+  download: async (name: string) => {
+    const res = await fetchRaw(`${BACKUPS}/${encodeURIComponent(name)}/download`, {
+      method: "GET",
+    });
+    return res.blob();
+  },
+
+  remove: (name: string) =>
+    fetchApi<{ deleted: string; remote_error: string | null }>(
+      `${BACKUPS}/${encodeURIComponent(name)}`,
+      { method: "DELETE" },
+    ),
+
+  restoreChecks: (name: string) =>
+    fetchApi<{ checks: BackupRestoreCheck[]; ready: boolean }>(
+      `${BACKUPS}/${encodeURIComponent(name)}/restore-checks`,
+    ),
+
+  /** Rejects with status 422 when the backup needs another passphrase. */
+  restore: (name: string, body: { confirm: string; passphrase?: string | null }) =>
+    fetchApi<BackupRestoreResult>(`${BACKUPS}/${encodeURIComponent(name)}/restore`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  retryRemote: (name: string) =>
+    fetchApi<BackupRemoteStatus>(`${BACKUPS}/${encodeURIComponent(name)}/upload-remote`, {
+      method: "POST",
+    }),
+
+  /** Only the given parts change. An empty secret key keeps the stored one. */
+  updateSettings: (body: {
+    passphrase?: string;
+    schedule?: BackupSchedule;
+    remote?: BackupRemoteSettings & { secret_access_key: string };
+  }) =>
+    fetchApi<BackupOverview>(`${BACKUPS}/settings`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  testRemote: (body: BackupRemoteSettings & { secret_access_key: string }) =>
+    fetchApi<{ ok: boolean }>(`${BACKUPS}/settings/test-remote`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+};
+
+// ------------------------------------------------------------------
 // Search
 // ------------------------------------------------------------------
 export interface SearchHit {

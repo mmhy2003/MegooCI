@@ -23,6 +23,7 @@ import {
   X,
   Plug,
   Container,
+  DatabaseBackup,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
@@ -57,6 +58,7 @@ const navItems: NavItem[] = [
   { href: "/agents", label: "Agents", icon: Server, permission: "agents.read" },
   { href: "/integrations", label: "Integrations", icon: Plug, adminOnly: true },
   { href: "/admin/users", label: "Users", icon: Users, adminOnly: true },
+  { href: "/admin/backups", label: "Backups", icon: DatabaseBackup, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
