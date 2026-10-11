@@ -15,6 +15,15 @@ from app.models.user import User
 _UNSET = object()
 
 
+@pytest.fixture(autouse=True)
+def _cheap_recovery_code_hashes(monkeypatch):
+    """Ten recovery codes are hashed in one go; at the real cost that is
+    most of a second for every test that turns two-step verification on."""
+    from app.services.two_step import recovery_codes
+
+    monkeypatch.setattr(recovery_codes, "HASH_ROUNDS", 4)
+
+
 @pytest.fixture
 def make_user():
     def _make(
