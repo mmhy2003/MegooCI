@@ -25,6 +25,12 @@ from app.models.role import Role, UserRole
 from app.models.secret import EnvVar, Secret
 from app.models.system_setting import SystemSetting
 from app.models.trigger import Trigger, WebhookEndpoint
+from app.models.two_step import (
+    TwoStepTicket,
+    UserPasskey,
+    UserRecoveryCode,
+    UserTwoStep,
+)
 from app.models.user import User
 
 __all__ = [
@@ -59,4 +65,8 @@ __all__ = [
     "RegistryDeployToken",
     "RegistryEvent",
     "SystemSetting",
+    "UserTwoStep",
+    "UserPasskey",
+    "UserRecoveryCode",
+    "TwoStepTicket",
 ]

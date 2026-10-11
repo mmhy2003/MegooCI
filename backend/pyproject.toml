@@ -22,6 +22,8 @@ dependencies = [
     "email-validator",
     "cryptography",
     "boto3",
+    "pyotp",
+    "webauthn",
     "meilisearch-python-sdk",
     "litellm",
     "mcp>=2,<3",
