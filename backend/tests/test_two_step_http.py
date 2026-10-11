@@ -112,7 +112,7 @@ async def test_setting_up_an_authenticator_then_signing_in_with_it(sf, http):
     setup = (await http.post(f"{API}/auth/two-step/totp", headers=session)).json()
     confirmed = await http.post(
         f"{API}/auth/two-step/totp/confirm", headers=session,
-        json={"code": code_at(setup["secret"], NOW)})
+        json={"code": code_at(setup["secret"], NOW), "password": PASSWORD})
     assert confirmed.status_code == 200 and len(confirmed.json()["recovery_codes"]) == 10
     summary = (await http.get(f"{API}/auth/two-step", headers=session)).json()
     assert summary["enabled"] is True and summary["recovery_codes"]["left"] == 10
@@ -160,7 +160,7 @@ async def test_a_passkey_added_in_settings_signs_in(sf, http):
     added = await http.post(
         f"{API}/auth/two-step/passkeys", headers=session,
         json={"ticket": offered["ticket"], "credential": device.create(offered["options"]),
-              "name": "Work laptop"})
+              "name": "Work laptop", "password": PASSWORD})
     assert added.status_code == 200 and added.json()["passkey"]["name"] == "Work laptop"
     passkey_id = added.json()["passkey"]["id"]
     renamed = await http.patch(
@@ -202,7 +202,7 @@ async def test_an_administrator_requires_it_and_a_user_sets_it_up_to_get_in(sf, 
     assert early.status_code == 409
     setup = (await http.post(f"{API}/auth/two-step/totp", headers=admin_session)).json()
     await http.post(f"{API}/auth/two-step/totp/confirm", headers=admin_session,
-                    json={"code": code_at(setup["secret"], NOW)})
+                    json={"code": code_at(setup["secret"], NOW), "password": PASSWORD})
     turned_on = await http.put(f"{API}/system/security", headers=admin_session,
                                json={"require_two_step": True})
     assert turned_on.json() == {"require_two_step": True, "users_total": 2, "users_with_two_step": 1}

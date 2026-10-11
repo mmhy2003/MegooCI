@@ -3,6 +3,11 @@
 Every route needs a browser session. An API token cannot add or remove a
 method, whatever its scope: a leaked token must not be able to weaken, or
 take over, the way its owner signs in.
+
+A session alone is not enough either. Adding a method, removing one and
+replacing the recovery codes each ask for the password, so a session that has
+fallen into the wrong hands cannot put its holder's own second step on the
+account.
 """
 
 from __future__ import annotations
@@ -20,8 +25,8 @@ from app.core.security import verify_password
 from app.database import get_db
 from app.models.user import User
 from app.schemas.two_step import (
-    CodeRequest,
-    NamedPasskeyAnswer,
+    AddPasskeyRequest,
+    ConfirmTotpRequest,
     PasskeyAdded,
     PasskeyInfo,
     PasskeyOptions,
@@ -105,10 +110,12 @@ async def begin_totp(
 
 @router.post("/totp/confirm", response_model=RecoveryCodes)
 async def confirm_totp(
-    body: CodeRequest,
+    body: ConfirmTotpRequest,
     user: User = Depends(session_user),
     db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(_password_limit),
 ) -> dict[str, Any]:
+    _check_password(user, body.password)
     now = clock.now()
     # Not counted towards the pause: the secret being tested is the user's own.
     if not await totp.confirm(db, user.id, body.code, now):
@@ -162,10 +169,14 @@ async def passkey_registration_options(
 
 @router.post("/passkeys", response_model=PasskeyAdded)
 async def add_passkey(
-    body: NamedPasskeyAnswer,
+    body: AddPasskeyRequest,
     user: User = Depends(session_user),
     db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(_password_limit),
 ) -> dict[str, Any]:
+    # Before the ticket is touched: a mistyped password must not waste the
+    # passkey the browser has just created.
+    _check_password(user, body.password)
     now = clock.now()
     ticket = await tickets.find(db, body.ticket, tickets.REGISTER, now)
     challenge = (

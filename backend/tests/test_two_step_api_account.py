@@ -21,8 +21,8 @@ from app.core.deps import authenticate_pat, get_current_user
 from app.core.security import create_access_token
 from app.models.audit import AuditLogEntry
 from app.schemas.two_step import (
-    CodeRequest,
-    NamedPasskeyAnswer,
+    AddPasskeyRequest,
+    ConfirmTotpRequest,
     PasswordRequest,
     RenameRequest,
     TwoStepSummary,
@@ -124,11 +124,11 @@ async def test_setting_an_authenticator_up_turns_it_on_and_gives_codes(sf):
         user = await add_user(db)
         setup = await account.begin_totp(user, db)
 
-        wrong = await _refused(account.confirm_totp(CodeRequest(code="000000"), user, db))
+        wrong = await _refused(account.confirm_totp(ConfirmTotpRequest(password=PASSWORD, code="000000"), user, db))
         assert (wrong.status_code, wrong.detail) == (400, "That code is not right.")
         assert (await account.get_two_step(user, db))["enabled"] is False
 
-        confirmed = await account.confirm_totp(CodeRequest(code=code_at(setup["secret"], NOW)), user, db)
+        confirmed = await account.confirm_totp(ConfirmTotpRequest(password=PASSWORD, code=code_at(setup["secret"], NOW)), user, db)
         summary = await account.get_two_step(user, db)
 
         assert len(confirmed["recovery_codes"]) == 10
@@ -143,8 +143,8 @@ async def test_wrong_codes_while_setting_up_never_pause_the_account(sf):
         setup = await account.begin_totp(user, db)
 
         for _ in range(8):
-            await _refused(account.confirm_totp(CodeRequest(code="000000"), user, db))
-        await account.confirm_totp(CodeRequest(code=code_at(setup["secret"], NOW)), user, db)
+            await _refused(account.confirm_totp(ConfirmTotpRequest(password=PASSWORD, code="000000"), user, db))
+        await account.confirm_totp(ConfirmTotpRequest(password=PASSWORD, code=code_at(setup["secret"], NOW)), user, db)
 
         assert (await account.get_two_step(user, db))["enabled"] is True
 
@@ -163,7 +163,7 @@ async def test_adding_a_second_method_gives_no_new_codes(sf):
         user = await add_user(db)
         await add_passkey(db, user)
         setup = await account.begin_totp(user, db)
-        confirmed = await account.confirm_totp(CodeRequest(code=code_at(setup["secret"], NOW)), user, db)
+        confirmed = await account.confirm_totp(ConfirmTotpRequest(password=PASSWORD, code=code_at(setup["secret"], NOW)), user, db)
 
         assert confirmed["recovery_codes"] is None
         assert await recovery_codes.remaining(db, user.id) == 10
@@ -216,7 +216,7 @@ async def _add_through_the_routes(db, user, device=None, name="Laptop") -> dict:
     device = device or SoftwareAuthenticator()
     offered = await account.passkey_registration_options(user, db)
     return await account.add_passkey(
-        NamedPasskeyAnswer(ticket=offered["ticket"], credential=device.create(offered["options"]),
+        AddPasskeyRequest(password=PASSWORD, ticket=offered["ticket"], credential=device.create(offered["options"]),
                            name=name), user, db)
 
 
@@ -245,15 +245,15 @@ async def test_a_passkey_answer_needs_the_ticket_it_was_offered_with(sf):
         # No ticket, a made-up one, and one that belongs to someone else.
         for ticket in ("", "nonsense"):
             refused = await _refused(account.add_passkey(
-                NamedPasskeyAnswer(ticket=ticket, credential=answer), user, db))
+                AddPasskeyRequest(password=PASSWORD, ticket=ticket, credential=answer), user, db))
             assert refused.status_code == 400
         refused = await _refused(account.add_passkey(
-            NamedPasskeyAnswer(ticket=offered["ticket"], credential=answer), other, db))
+            AddPasskeyRequest(password=PASSWORD, ticket=offered["ticket"], credential=answer), other, db))
         assert refused.status_code == 400
         assert await passkeys.count(db, other.id) == 0
 
         added = await account.add_passkey(
-            NamedPasskeyAnswer(ticket=offered["ticket"], credential=answer), user, db)
+            AddPasskeyRequest(password=PASSWORD, ticket=offered["ticket"], credential=answer), user, db)
         assert added["passkey"]["id"]
 
 
@@ -262,7 +262,7 @@ async def test_a_passkey_answer_is_accepted_once(sf):
         user = await add_user(db)
         device = SoftwareAuthenticator()
         offered = await account.passkey_registration_options(user, db)
-        body = NamedPasskeyAnswer(ticket=offered["ticket"], credential=device.create(offered["options"]))
+        body = AddPasskeyRequest(password=PASSWORD, ticket=offered["ticket"], credential=device.create(offered["options"]))
         await account.add_passkey(body, user, db)
 
         assert (await _refused(account.add_passkey(body, user, db))).status_code == 400
@@ -278,7 +278,7 @@ async def test_a_sign_in_ticket_cannot_add_a_passkey(sf):
         offered = await account.passkey_registration_options(user, db)
 
         refused = await _refused(account.add_passkey(
-            NamedPasskeyAnswer(ticket=sign_in_ticket, credential=device.create(offered["options"])),
+            AddPasskeyRequest(password=PASSWORD, ticket=sign_in_ticket, credential=device.create(offered["options"])),
             user, db))
         assert refused.status_code == 400
 
@@ -291,12 +291,12 @@ async def test_a_bad_answer_adds_nothing_and_spends_the_ticket(sf):
         offered = await account.passkey_registration_options(user, db)
 
         refused = await _refused(account.add_passkey(
-            NamedPasskeyAnswer(ticket=offered["ticket"], credential=phishing.create(offered["options"])),
+            AddPasskeyRequest(password=PASSWORD, ticket=offered["ticket"], credential=phishing.create(offered["options"])),
             user, db))
         assert (refused.status_code, refused.detail) == (400, "That passkey was not accepted.")
 
         again = await _refused(account.add_passkey(
-            NamedPasskeyAnswer(ticket=offered["ticket"], credential=honest.create(offered["options"])),
+            AddPasskeyRequest(password=PASSWORD, ticket=offered["ticket"], credential=honest.create(offered["options"])),
             user, db))
         assert again.status_code == 400
         assert (await account.get_two_step(user, db))["enabled"] is False

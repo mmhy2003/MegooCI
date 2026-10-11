@@ -170,6 +170,35 @@ async def test_a_wrong_password_gets_no_ticket(sf):
         assert (await db.execute(sa.select(TwoStepTicket))).scalars().all() == []
 
 
+async def test_a_ticket_is_stored_before_the_answer_goes_out(sf, signup_open):
+    """The request's transaction is committed only after the response has been
+    sent. A browser that acts on the ticket at once (a passkey-only account's
+    prompt opens by itself) must find it there."""
+    async with sf() as db:
+        enrolled = await add_user(db)
+        await turn_on_totp(db, enrolled)
+        await db.commit()
+        outcome = await auth.login(LoginRequest(email=enrolled.email, password=PASSWORD), db)
+        assert outcome["status"] == "two_step_required" and not db.in_transaction()
+
+        await status.set_required(db, True)
+        owing = await add_user(db)
+        await db.commit()
+        outcome = await auth.login(LoginRequest(email=owing.email, password=PASSWORD), db)
+        assert outcome["status"] == "two_step_setup_required" and not db.in_transaction()
+
+        outcome = await auth.signup(
+            SignupRequest(email="new@example.com", name="New", password="long enough"), db)
+        assert outcome["status"] == "two_step_setup_required" and not db.in_transaction()
+
+        invite = await _invitation(db, "invite-token")
+        await db.commit()
+        outcome = await invites.accept_invite(
+            AcceptInviteRequest(token="invite-token", name="Invited", password="long enough"), db)
+        assert outcome["status"] == "two_step_setup_required" and not db.in_transaction()
+        assert invite.status == "accepted"
+
+
 # ── the second step: a code ─────────────────────────────────────────────
 
 async def test_a_right_code_signs_in_and_uses_the_ticket_up(sf, clock):

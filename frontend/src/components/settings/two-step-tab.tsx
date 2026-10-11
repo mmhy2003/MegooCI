@@ -57,6 +57,30 @@ function message(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+/** Adding a method changes how the account signs in, so it asks for the password. */
+function PasswordField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <label htmlFor="two-step-add-password" className="text-sm font-medium">
+        Your password
+      </label>
+      <Input
+        id="two-step-add-password"
+        type="password"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete="current-password"
+      />
+    </div>
+  );
+}
+
 /** Settings → Account → Two-step verification. */
 export function TwoStepTab() {
   const [summary, setSummary] = React.useState<TwoStepSummary | null>(null);
@@ -64,6 +88,7 @@ export function TwoStepTab() {
   const [prompt, setPrompt] = React.useState<PasswordPrompt | null>(null);
   const [code, setCode] = React.useState("");
   const [name, setName] = React.useState("");
+  const [password, setPassword] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
   const load = React.useCallback(async () => {
@@ -122,13 +147,14 @@ export function TwoStepTab() {
     run(async () => {
       const setup = await twoStepApi.beginTotp();
       setCode("");
+      setPassword("");
       setOpen({ kind: "authenticator", setup });
     }, "Could not start the setup.");
 
   const confirmAuthenticator = (e: React.FormEvent) => {
     e.preventDefault();
     return run(async () => {
-      const { recovery_codes } = await twoStepApi.confirmTotp(code.trim());
+      const { recovery_codes } = await twoStepApi.confirmTotp(code.trim(), password);
       await changed();
       showCodesOr(recovery_codes, "Authenticator app added");
     }, "That code is not right.");
@@ -159,6 +185,7 @@ export function TwoStepTab() {
       const { options, ticket } = await twoStepApi.passkeyRegistrationOptions();
       const credential = await createPasskey(options);
       setName("My passkey");
+      setPassword("");
       setOpen({ kind: "passkey-name", ticket, credential });
     }, "That passkey was not accepted.");
 
@@ -167,7 +194,12 @@ export function TwoStepTab() {
     if (open?.kind !== "passkey-name") return;
     const { ticket, credential } = open;
     return run(async () => {
-      const { recovery_codes } = await twoStepApi.addPasskey(ticket, credential, name.trim());
+      const { recovery_codes } = await twoStepApi.addPasskey(
+        ticket,
+        credential,
+        name.trim(),
+        password,
+      );
       await changed();
       showCodesOr(recovery_codes, "Passkey added");
     }, "That passkey was not accepted.");
@@ -400,13 +432,16 @@ export function TwoStepTab() {
                 setup={open.setup}
                 code={code}
                 onCodeChange={setCode}
-                className="py-4"
+                className="pt-4"
               />
+              <div className="pb-4 pt-3">
+                <PasswordField value={password} onChange={setPassword} />
+              </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setOpen(null)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={busy || !code.trim()}>
+                <Button type="submit" disabled={busy || !code.trim() || !password}>
                   Confirm
                 </Button>
               </DialogFooter>
@@ -425,23 +460,31 @@ export function TwoStepTab() {
                     : "Your browser has created the passkey. Give it a name you will recognise."}
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-2 py-4">
-                <label htmlFor="passkey-name" className="text-sm font-medium">
-                  Name
-                </label>
-                <Input
-                  id="passkey-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  maxLength={100}
-                  autoFocus
-                />
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <label htmlFor="passkey-name" className="text-sm font-medium">
+                    Name
+                  </label>
+                  <Input
+                    id="passkey-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    maxLength={100}
+                    autoFocus
+                  />
+                </div>
+                {open.kind === "passkey-name" && (
+                  <PasswordField value={password} onChange={setPassword} />
+                )}
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setOpen(null)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={busy || !name.trim()}>
+                <Button
+                  type="submit"
+                  disabled={busy || !name.trim() || (open.kind === "passkey-name" && !password)}
+                >
                   Save
                 </Button>
               </DialogFooter>

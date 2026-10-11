@@ -180,7 +180,7 @@ async def accept_invite(
 
     # On a server that requires two-step verification, a new account sets
     # it up before it gets a session.
-    return await sign_in.decide(db, user, clock.now())
+    return await sign_in.decide_and_store(db, user, clock.now())
 
 
 

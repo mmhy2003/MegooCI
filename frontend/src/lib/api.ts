@@ -394,7 +394,8 @@ export const authApi = {
       body: JSON.stringify({ token, new_password }),
     }),
 
-  updateProfile: (data: { name?: string; email?: string }) =>
+  /** Changing the email needs `current_password`; changing the name does not. */
+  updateProfile: (data: { name?: string; email?: string; current_password?: string }) =>
     fetchApi<User>("/api/v1/auth/update-profile", {
       method: "PUT",
       body: JSON.stringify(data),
@@ -432,16 +433,18 @@ export const twoStepApi = {
   // One's own account, from Settings.
   summary: () => fetchApi<TwoStepSummary>(TWO_STEP),
   beginTotp: () => postTwoStep<TotpSetup>("/totp"),
-  confirmTotp: (code: string) => postTwoStep<RecoveryCodes>("/totp/confirm", { code }),
+  confirmTotp: (code: string, password: string) =>
+    postTwoStep<RecoveryCodes>("/totp/confirm", { code, password }),
   removeTotp: (password: string) =>
     postTwoStep<TwoStepSummary>("/totp/remove", { password }),
   passkeyRegistrationOptions: () =>
     postTwoStep<{ options: PasskeyJson; ticket: string }>("/passkeys/options"),
-  addPasskey: (ticket: string, credential: PasskeyJson, name: string) =>
+  addPasskey: (ticket: string, credential: PasskeyJson, name: string, password: string) =>
     postTwoStep<{ passkey: PasskeyInfo; recovery_codes: string[] | null }>("/passkeys", {
       ticket,
       credential,
       name,
+      password,
     }),
   renamePasskey: (id: string, name: string) =>
     fetchApi<PasskeyInfo>(`${TWO_STEP}/passkeys/${id}`, {

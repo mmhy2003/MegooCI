@@ -36,6 +36,8 @@ class ResetPasswordRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     name: str | None = None
     email: EmailStr | None = None
+    # Needed to change the email, and only for that.
+    current_password: str | None = None
 
 
 class TokenResponse(BaseModel):

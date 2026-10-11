@@ -64,11 +64,19 @@ class RecoveryCodes(BaseModel):
     recovery_codes: list[str] | None = None
 
 
-class CodeRequest(BaseModel):
+class PasswordRequest(BaseModel):
+    password: str = Field(max_length=1024)
+
+
+class ConfirmTotpRequest(PasswordRequest):
+    """Turning an authenticator on from Settings: its code, and the password."""
+
     code: str = Field(max_length=64)
 
 
-class PasswordRequest(BaseModel):
+class AddPasskeyRequest(NamedPasskeyAnswer):
+    """Adding a passkey from Settings: the browser's answer, and the password."""
+
     password: str = Field(max_length=1024)
 
 

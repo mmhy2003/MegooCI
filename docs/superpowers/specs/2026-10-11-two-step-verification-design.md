@@ -471,6 +471,18 @@ differ from the text above, they are what gets built.
 10. **The refusal for `docker login` was tried against a real docker client** and a stub
     registry: it prints `unauthorized:` followed by the message.
 
+Found by the review of the finished branch:
+
+11. **Adding a method from Settings asks for the password too,** not only removing one, and
+    **changing the account's email asks for the current password.** Without both, someone
+    holding only an open session could add a passkey of their own, move the email to a
+    mailbox they read, reset the password through it, and then remove the owner's methods.
+    The forced setup is unchanged: its ticket was just given for a correct password.
+12. **A ticket is committed before the answer that carries it is sent.** A route's own
+    transaction is committed only after its response, and the passkey prompt of an account
+    with passkeys only opens by itself, so it could ask about a ticket that was not stored
+    yet.
+
 ## Rollback
 
 Turn the requirement off and nobody is asked to set it up. To remove the feature, revert

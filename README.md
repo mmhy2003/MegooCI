@@ -239,7 +239,7 @@ Administrators can back up and restore the server's **configuration** under **Ba
 
 Signing in always starts with the password. An account with two-step verification then proves itself a second time, with a 6-digit code from an authenticator app or with a passkey.
 
-- **Turning it on.** Under **Settings → Two-step verification**, set up an authenticator app (Google Authenticator, 1Password, Authy, …), add one or more passkeys, or both. Removing a method asks for your password.
+- **Turning it on.** Under **Settings → Two-step verification**, set up an authenticator app (Google Authenticator, 1Password, Authy, …), add one or more passkeys, or both. Adding or removing a method asks for your password, and so does changing your email, which is where a password reset goes: a session left open on someone else's screen is not enough to change how you sign in.
 - **Recovery codes.** Adding your first method gives you ten one-time codes, shown once. Any of them works in place of the second step when you have neither your phone nor a passkey. Generate new ones in Settings at any time; the old ones stop working.
 - **Passkeys and the server address.** A passkey works only at the address in `MEGOOCI_PUBLIC_URL`, over HTTPS or on `localhost`. Opened anywhere else, the app hides the passkey option and says where it works. If that address ever changes, existing passkeys stop working; authenticator and recovery codes do not.
 - **Requiring it.** Administrators turn on **Settings → Security → Require two-step verification**, after setting it up on their own account. New accounts then set it up before their first sign-in. People already signed in see a notice, and within 12 hours their session ends and the sign-in page takes them through the setup.

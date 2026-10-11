@@ -56,6 +56,19 @@ async def decide(db: AsyncSession, user: User, now: datetime) -> dict[str, Any]:
     return session(user)
 
 
+async def decide_and_store(db: AsyncSession, user: User, now: datetime) -> dict[str, Any]:
+    """``decide``, with the ticket it issued already committed.
+
+    A route's own transaction is committed only after its response has been
+    sent. A browser may act on a ticket the moment it arrives (the passkey
+    prompt of an account with passkeys only opens by itself), and would then
+    be told the ticket does not exist.
+    """
+    outcome = await decide(db, user, now)
+    await db.commit()
+    return outcome
+
+
 async def may_renew(db: AsyncSession, user_id: uuid.UUID) -> bool:
     """Whether a session may renew itself. Not when two-step verification is
     required and the account still has none: a session renews every time it

@@ -92,7 +92,7 @@ async def signup(
 
     # On a server that requires two-step verification, a new account sets
     # it up before it gets a session.
-    return await sign_in.decide(db, user, clock.now())
+    return await sign_in.decide_and_store(db, user, clock.now())
 
 
 @router.get("/signup-status", response_model=SignupStatus)
@@ -155,7 +155,7 @@ async def login(
     # The password is right. Whether that is enough depends on the account:
     # with two-step verification the session comes after the second step,
     # and that is when the sign-in is recorded.
-    outcome = await sign_in.decide(db, user, clock.now())
+    outcome = await sign_in.decide_and_store(db, user, clock.now())
     if outcome["status"] == sign_in.SIGNED_IN:
         await audit_record(action="login_success", actor_id=user.id)
     return outcome
@@ -289,6 +289,19 @@ async def update_profile(
     if body.email is not None:
         normalised = body.email.strip().lower()
         if normalised != current_user.email:
+            # A password reset goes to this address, so whoever may change it
+            # may as well change the password: it asks for the current one.
+            if not body.current_password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Enter your current password to change your email.",
+                )
+            if not current_user.hashed_password or not verify_password(
+                body.current_password, current_user.hashed_password
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Wrong password."
+                )
             existing = await db.execute(
                 select(User).where(User.email == normalised)
             )

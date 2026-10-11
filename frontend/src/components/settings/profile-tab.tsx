@@ -22,6 +22,11 @@ export function ProfileTab() {
   const [profileEmail, setProfileEmail] = React.useState("");
   const [savingProfile, setSavingProfile] = React.useState(false);
   const [profileDirty, setProfileDirty] = React.useState(false);
+  const [currentPassword, setCurrentPassword] = React.useState("");
+
+  // A password reset goes to the email, so changing it asks for the password.
+  const emailChanged =
+    !!user && profileEmail.trim().toLowerCase() !== (user.email || "");
 
   // Sync local profile state when user loads.
   React.useEffect(() => {
@@ -43,11 +48,14 @@ export function ProfileTab() {
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
-    const updates: { name?: string; email?: string } = {};
+    const updates: { name?: string; email?: string; current_password?: string } = {};
     const trimmedName = profileName.trim();
     const trimmedEmail = profileEmail.trim().toLowerCase();
     if (trimmedName !== user.name) updates.name = trimmedName;
-    if (trimmedEmail !== user.email) updates.email = trimmedEmail;
+    if (trimmedEmail !== user.email) {
+      updates.email = trimmedEmail;
+      updates.current_password = currentPassword;
+    }
     if (!Object.keys(updates).length) return;
 
     if (!trimmedName) {
@@ -60,6 +68,7 @@ export function ProfileTab() {
       const updatedUser = await authApi.updateProfile(updates);
       // Refresh the auth store with updated user data.
       useAuthStore.setState({ user: updatedUser });
+      setCurrentPassword("");
       toast.success("Profile updated");
     } catch (err: unknown) {
       const detail =
@@ -101,6 +110,18 @@ export function ProfileTab() {
               placeholder="you@example.com"
             />
           </div>
+          {emailChanged && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Current password</label>
+              <Input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                autoComplete="current-password"
+                placeholder="Needed to change your email"
+              />
+            </div>
+          )}
           <div className="space-y-2">
             <label className="text-sm font-medium">Role</label>
             <div>
@@ -117,7 +138,10 @@ export function ProfileTab() {
               </Badge>
             </div>
           </div>
-          <Button type="submit" disabled={!profileDirty || savingProfile}>
+          <Button
+            type="submit"
+            disabled={!profileDirty || savingProfile || (emailChanged && !currentPassword)}
+          >
             {savingProfile ? "Saving..." : "Save changes"}
           </Button>
         </form>
