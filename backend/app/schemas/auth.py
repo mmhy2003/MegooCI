@@ -60,3 +60,6 @@ class UserResponse(BaseModel):
     created_at: datetime
     role: str | None = None
     permissions: list[str] = []
+    two_step_enabled: bool = False
+    # The server requires two-step verification and this account has none.
+    two_step_setup_required: bool = False

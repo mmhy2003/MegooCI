@@ -10,8 +10,6 @@ from app.core.deps import get_current_active_user
 from app.core.email import send_password_reset_email
 from app.core.rate_limit import rate_limit
 from app.core.security import (
-    create_access_token,
-    create_refresh_token,
     create_reset_token,
     decode_token,
     hash_password,
@@ -32,13 +30,21 @@ from app.schemas.auth import (
     UpdateProfileRequest,
     UserResponse,
 )
+from app.schemas.two_step import SignInResponse
+from app.services.two_step import clock, sign_in
+from app.services.two_step import status as two_step_status
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/signup",
+    response_model=SignInResponse,
+    response_model_exclude_none=True,
+    status_code=status.HTTP_201_CREATED,
+)
 async def signup(
     body: SignupRequest,
     db: AsyncSession = Depends(get_db),
@@ -84,12 +90,9 @@ async def signup(
     if is_first_user:
         settings.MEGOOCI_SIGNUP_ENABLED = False
 
-    token_data = {"sub": str(user.id)}
-    return {
-        "access_token": create_access_token(token_data),
-        "refresh_token": create_refresh_token(token_data),
-        "token_type": "bearer",
-    }
+    # On a server that requires two-step verification, a new account sets
+    # it up before it gets a session.
+    return await sign_in.decide(db, user, clock.now())
 
 
 @router.get("/signup-status", response_model=SignupStatus)
@@ -106,7 +109,7 @@ async def signup_status(db: AsyncSession = Depends(get_db)) -> dict:
     return {"signup_enabled": anyone is None}
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=SignInResponse, response_model_exclude_none=True)
 async def login(
     body: LoginRequest,
     db: AsyncSession = Depends(get_db),
@@ -149,14 +152,13 @@ async def login(
             detail="Account is deactivated",
         )
 
-    await audit_record(action="login_success", actor_id=user.id)
-
-    token_data = {"sub": str(user.id)}
-    return {
-        "access_token": create_access_token(token_data),
-        "refresh_token": create_refresh_token(token_data),
-        "token_type": "bearer",
-    }
+    # The password is right. Whether that is enough depends on the account:
+    # with two-step verification the session comes after the second step,
+    # and that is when the sign-in is recorded.
+    outcome = await sign_in.decide(db, user, clock.now())
+    if outcome["status"] == sign_in.SIGNED_IN:
+        await audit_record(action="login_success", actor_id=user.id)
+    return outcome
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -199,17 +201,29 @@ async def refresh_token(
             detail="User not found or inactive",
         )
 
-    token_data = {"sub": str(user.id)}
+    if not await sign_in.may_renew(db, user.id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Two-step verification is required. Sign in again to set it up.",
+        )
+
+    return sign_in.session(user)
+
+
+async def _two_step_fields(db: AsyncSession, user_id) -> dict:
+    """Whether the account has two-step verification on, and whether it still
+    owes the server a setup (the app shows a banner for that)."""
+    enabled = await two_step_status.is_on(db, user_id)
     return {
-        "access_token": create_access_token(token_data),
-        "refresh_token": create_refresh_token(token_data),
-        "token_type": "bearer",
+        "two_step_enabled": enabled,
+        "two_step_setup_required": not enabled and await two_step_status.is_required(db),
     }
 
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
     current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
     from app.core.deps import _collect_permissions, get_user_primary_role_name
 
@@ -223,6 +237,7 @@ async def get_me(
         "created_at": current_user.created_at,
         "role": get_user_primary_role_name(current_user),
         "permissions": sorted(_collect_permissions(current_user)),
+        **await _two_step_fields(db, current_user.id),
     }
 
 
@@ -303,6 +318,7 @@ async def update_profile(
         "created_at": current_user.created_at,
         "role": get_user_primary_role_name(current_user),
         "permissions": sorted(_collect_permissions(current_user)),
+        **await _two_step_fields(db, current_user.id),
     }
 
 

@@ -15,7 +15,8 @@ from app.database import get_db
 from app.models.invite import Invite
 from app.models.role import Role, UserRole
 from app.models.user import User
-from app.schemas.auth import TokenResponse
+from app.services.two_step import clock, sign_in
+from app.schemas.two_step import SignInResponse
 from app.schemas.invites import (
     AcceptInviteRequest,
     InviteCreate,
@@ -121,13 +122,11 @@ async def create_invite(
     }
 
 
-@router.post("/accept", response_model=TokenResponse)
+@router.post("/accept", response_model=SignInResponse, response_model_exclude_none=True)
 async def accept_invite(
     body: AcceptInviteRequest,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    from app.core.security import create_access_token, create_refresh_token
-
     token_hash = _hash_token(body.token)
     result = await db.execute(
         select(Invite)
@@ -179,12 +178,9 @@ async def accept_invite(
     invite.accepted_at = datetime.now(timezone.utc)
     await db.flush()
 
-    token_data = {"sub": str(user.id)}
-    return {
-        "access_token": create_access_token(token_data),
-        "refresh_token": create_refresh_token(token_data),
-        "token_type": "bearer",
-    }
+    # On a server that requires two-step verification, a new account sets
+    # it up before it gets a session.
+    return await sign_in.decide(db, user, clock.now())
 
 
 
