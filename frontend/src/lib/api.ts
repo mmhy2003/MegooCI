@@ -14,6 +14,11 @@ class ApiError extends Error {
   }
 }
 
+/** The HTTP status an API call failed with, or null for any other error. */
+export function errorStatus(error: unknown): number | null {
+  return error instanceof ApiError ? error.status : null;
+}
+
 /**
  * Turn a FastAPI error response into a human-readable string.
  *
@@ -279,6 +284,58 @@ export interface AuthTokens {
   token_type: string;
 }
 
+export type TwoStepMethod = "totp" | "passkey";
+
+/**
+ * The answer to a correct password. Only `signed_in` carries a session; the
+ * other two carry a ticket for the second step, or for setting two-step
+ * verification up when the server requires it.
+ */
+export type SignInResult =
+  | (AuthTokens & { status: "signed_in"; recovery_codes_left?: number })
+  | {
+      status: "two_step_required";
+      ticket: string;
+      methods: TwoStepMethod[];
+      passkey_origin: string;
+    }
+  | { status: "two_step_setup_required"; ticket: string; passkey_origin: string };
+
+/** WebAuthn options and answers, as JSON. The browser library gives them shape. */
+export type PasskeyJson = Record<string, unknown>;
+
+export interface PasskeyInfo {
+  id: string;
+  name: string;
+  created_at: string | null;
+  last_used_at: string | null;
+}
+
+export interface TwoStepSummary {
+  enabled: boolean;
+  required: boolean;
+  totp: { confirmed_at: string | null; last_used_at: string | null } | null;
+  passkeys: PasskeyInfo[];
+  recovery_codes: { left: number; generated_at: string | null } | null;
+  passkey_origin: string;
+}
+
+export interface TotpSetup {
+  secret: string;
+  otpauth_uri: string;
+}
+
+/** Ten new codes, or null when the account already had its codes. */
+export interface RecoveryCodes {
+  recovery_codes: string[] | null;
+}
+
+export interface SecuritySettings {
+  require_two_step: boolean;
+  users_total: number;
+  users_with_two_step: number;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -289,17 +346,20 @@ export interface User {
   created_at: string;
   role: string | null;
   permissions: string[];
+  two_step_enabled: boolean;
+  /** The server requires two-step verification and this account has none. */
+  two_step_setup_required: boolean;
 }
 
 export const authApi = {
   signup: (data: SignupRequest) =>
-    fetchApi<AuthTokens>("/api/v1/auth/signup", {
+    fetchApi<SignInResult>("/api/v1/auth/signup", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   login: (data: LoginRequest) =>
-    fetchApi<AuthTokens>("/api/v1/auth/login", {
+    fetchApi<SignInResult>("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -339,6 +399,59 @@ export const authApi = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+};
+
+// ------------------------------------------------------------------
+// Two-step verification
+// ------------------------------------------------------------------
+const TWO_STEP = "/api/v1/auth/two-step";
+
+function postTwoStep<T>(path: string, body: unknown = {}): Promise<T> {
+  return fetchApi<T>(`${TWO_STEP}${path}`, { method: "POST", body: JSON.stringify(body) });
+}
+
+export const twoStepApi = {
+  // While signing in: each call carries the ticket the password step gave.
+  verify: (ticket: string, answer: { code: string } | { recovery_code: string }) =>
+    postTwoStep<SignInResult>("/verify", { ticket, ...answer }),
+  passkeyOptions: (ticket: string) =>
+    postTwoStep<{ options: PasskeyJson }>("/passkey/options", { ticket }),
+  passkeyVerify: (ticket: string, credential: PasskeyJson) =>
+    postTwoStep<SignInResult>("/passkey/verify", { ticket, credential }),
+
+  // The forced setup, when the server requires two-step verification.
+  setupTotp: (ticket: string) => postTwoStep<TotpSetup>("/setup/totp", { ticket }),
+  setupTotpConfirm: (ticket: string, code: string) =>
+    postTwoStep<RecoveryCodes>("/setup/totp/confirm", { ticket, code }),
+  setupPasskeyOptions: (ticket: string) =>
+    postTwoStep<{ options: PasskeyJson }>("/setup/passkey/options", { ticket }),
+  setupPasskey: (ticket: string, credential: PasskeyJson, name: string) =>
+    postTwoStep<RecoveryCodes>("/setup/passkey", { ticket, credential, name }),
+  setupFinish: (ticket: string) => postTwoStep<SignInResult>("/setup/finish", { ticket }),
+
+  // One's own account, from Settings.
+  summary: () => fetchApi<TwoStepSummary>(TWO_STEP),
+  beginTotp: () => postTwoStep<TotpSetup>("/totp"),
+  confirmTotp: (code: string) => postTwoStep<RecoveryCodes>("/totp/confirm", { code }),
+  removeTotp: (password: string) =>
+    postTwoStep<TwoStepSummary>("/totp/remove", { password }),
+  passkeyRegistrationOptions: () =>
+    postTwoStep<{ options: PasskeyJson; ticket: string }>("/passkeys/options"),
+  addPasskey: (ticket: string, credential: PasskeyJson, name: string) =>
+    postTwoStep<{ passkey: PasskeyInfo; recovery_codes: string[] | null }>("/passkeys", {
+      ticket,
+      credential,
+      name,
+    }),
+  renamePasskey: (id: string, name: string) =>
+    fetchApi<PasskeyInfo>(`${TWO_STEP}/passkeys/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  removePasskey: (id: string, password: string) =>
+    postTwoStep<TwoStepSummary>(`/passkeys/${id}/remove`, { password }),
+  regenerateRecoveryCodes: (password: string) =>
+    postTwoStep<RecoveryCodes>("/recovery-codes", { password }),
 };
 
 // ------------------------------------------------------------------
@@ -954,6 +1067,14 @@ export const systemApi = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+
+  security: () => fetchApi<SecuritySettings>("/api/v1/system/security"),
+
+  setSecurity: (require_two_step: boolean) =>
+    fetchApi<SecuritySettings>("/api/v1/system/security", {
+      method: "PUT",
+      body: JSON.stringify({ require_two_step }),
+    }),
 };
 
 // ------------------------------------------------------------------
@@ -1436,6 +1557,7 @@ export interface UserDetail {
   created_at: string;
   updated_at: string | null;
   roles: UserRoleInfo[];
+  two_step_enabled: boolean;
 }
 
 export interface CreateUserRequest {
@@ -1506,6 +1628,10 @@ export const usersApi = {
 
   delete: (id: string) =>
     fetchApi<void>(`/api/v1/users/${id}`, { method: "DELETE" }),
+
+  /** Remove a user's authenticator app, passkeys and recovery codes. */
+  resetTwoStep: (id: string) =>
+    fetchApi<void>(`/api/v1/users/${id}/two-step/reset`, { method: "POST" }),
 };
 
 // ------------------------------------------------------------------
@@ -1561,7 +1687,7 @@ export const invitesApi = {
     fetchApi<{ deleted: number }>("/api/v1/invites/cleanup", { method: "DELETE" }),
 
   accept: (data: AcceptInviteRequest) =>
-    fetchApi<AuthTokens>("/api/v1/invites/accept", {
+    fetchApi<SignInResult>("/api/v1/invites/accept", {
       method: "POST",
       body: JSON.stringify(data),
     }),

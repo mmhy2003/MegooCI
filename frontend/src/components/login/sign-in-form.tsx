@@ -47,9 +47,13 @@ export function SignInForm({
     }
     setIsSubmitting(true);
     try {
-      await login(email, password);
-      toast.success("Welcome back!");
-      router.push(redirectTo);
+      const result = await login(email, password);
+      // With two-step verification the password is not the end: the store
+      // now holds a pending sign-in, and the page shows its next step.
+      if (result.status === "signed_in") {
+        toast.success("Welcome back!");
+        router.push(redirectTo);
+      }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Invalid credentials";

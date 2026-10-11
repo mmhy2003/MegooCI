@@ -61,9 +61,16 @@ export default function SignupPage() {
     }
     setIsSubmitting(true);
     try {
-      await signup(email, password, fullName);
-      toast.success("Account created! Welcome to MegooCI.");
-      router.push("/dashboard");
+      const result = await signup(email, password, fullName);
+      if (result.status === "signed_in") {
+        toast.success("Account created! Welcome to MegooCI.");
+        router.push("/dashboard");
+      } else {
+        // This server requires two-step verification: the sign-in page
+        // takes the new account through setting it up.
+        toast.success("Account created. One more step: set up two-step verification.");
+        router.push("/login");
+      }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Could not create account";

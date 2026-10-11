@@ -11,13 +11,15 @@ import {
 } from "@/lib/known-accounts";
 import { AccountChooser } from "@/components/login/account-chooser";
 import { AuthBackdrop } from "@/components/login/auth-backdrop";
+import { SecondStep } from "@/components/login/second-step";
 import { SignInForm } from "@/components/login/sign-in-form";
+import { TwoStepSetup } from "@/components/login/two-step-setup";
 
 function Login() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirect") || "/dashboard";
-  const { accessToken, hasHydrated } = useAuthStore();
+  const { accessToken, hasHydrated, pending } = useAuthStore();
 
   React.useEffect(() => {
     if (hasHydrated && accessToken) router.replace(redirectTo);
@@ -46,6 +48,16 @@ function Login() {
   const [useAnother, setUseAnother] = React.useState(false);
 
   if (accounts === null) return null;
+
+  // A correct password that is waiting for its second step, or for two-step
+  // verification to be set up, here or on the sign-up or invitation page.
+  if (pending) {
+    return pending.kind === "verify" ? (
+      <SecondStep key={pending.ticket} pending={pending} />
+    ) : (
+      <TwoStepSetup key={pending.ticket} pending={pending} />
+    );
+  }
 
   if (chosen) {
     return (

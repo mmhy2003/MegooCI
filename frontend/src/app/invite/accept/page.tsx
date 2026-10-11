@@ -20,7 +20,7 @@ function AcceptInviteContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") || "";
-  const { setTokens, loadUser } = useAuthStore();
+  const acceptSignIn = useAuthStore((s) => s.acceptSignIn);
 
   const [name, setName] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -47,11 +47,19 @@ function AcceptInviteContent() {
 
     setSubmitting(true);
     try {
-      const tokens = await invitesApi.accept({ token, name, password });
-      setTokens(tokens);
-      await loadUser();
-      toast.success("Welcome to MegooCI!");
-      router.push("/dashboard");
+      const result = await acceptSignIn(
+        await invitesApi.accept({ token, name, password }),
+        "",
+      );
+      if (result.status === "signed_in") {
+        toast.success("Welcome to MegooCI!");
+        router.push("/dashboard");
+      } else {
+        // This server requires two-step verification: the sign-in page
+        // takes the new account through setting it up.
+        toast.success("Account created. One more step: set up two-step verification.");
+        router.push("/login");
+      }
     } catch (e: unknown) {
       const detail = (e as { body?: { detail?: string } })?.body?.detail;
       setError(detail || "Failed to accept invitation. The link may be expired or invalid.");

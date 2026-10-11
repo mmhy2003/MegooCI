@@ -1,7 +1,14 @@
 "use client";
 
 import { create } from "zustand";
-import { authApi, onTokensChanged, type User, type AuthTokens } from "./api";
+import {
+  authApi,
+  onTokensChanged,
+  type AuthTokens,
+  type SignInResult,
+  type TwoStepMethod,
+  type User,
+} from "./api";
 import { rememberAccount } from "./known-accounts";
 
 const TOKEN_KEY = "megooci_access_token";
@@ -16,16 +23,38 @@ function setTokenCookie(name: string, value: string | null) {
   }
 }
 
+/**
+ * A sign-in that has got as far as a correct password and now waits for the
+ * second step ("verify"), or for two-step verification to be set up because
+ * the server requires it ("setup"). Kept in memory only: a reload forgets it
+ * and starts again from the password.
+ */
+export interface PendingTwoStep {
+  kind: "verify" | "setup";
+  ticket: string;
+  methods: TwoStepMethod[];
+  passkeyOrigin: string;
+  email: string;
+}
+
 interface AuthState {
   user: User | null;
   accessToken: string | null;
   refreshToken: string | null;
   isLoading: boolean;
   hasHydrated: boolean;
+  pending: PendingTwoStep | null;
 
   hydrate: () => void;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string, name: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<SignInResult>;
+  signup: (email: string, password: string, name: string) => Promise<SignInResult>;
+  /**
+   * Take what the server answered to a password, a second step or a finished
+   * setup: a session is stored and the user loaded; anything else becomes
+   * `pending`. Returns the answer, so the caller can tell which it was.
+   */
+  acceptSignIn: (result: SignInResult, email: string) => Promise<SignInResult>;
+  clearPending: () => void;
   logout: () => void;
   refreshAccessToken: () => Promise<void>;
   loadUser: () => Promise<void>;
@@ -38,6 +67,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   refreshToken: null,
   isLoading: true,
   hasHydrated: false,
+  pending: null,
 
   hydrate: () => {
     if (typeof window === "undefined") return;
@@ -62,19 +92,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 
-  login: async (email: string, password: string) => {
-    const tokens = await authApi.login({ email, password });
-    get().setTokens(tokens);
-    const user = await authApi.getMe();
-    set({ user });
+  acceptSignIn: async (result: SignInResult, email: string) => {
+    if (result.status === "signed_in") {
+      get().setTokens(result);
+      const user = await authApi.getMe();
+      set({ user, pending: null });
+    } else {
+      set({
+        pending: {
+          kind: result.status === "two_step_required" ? "verify" : "setup",
+          ticket: result.ticket,
+          methods: result.status === "two_step_required" ? result.methods : [],
+          passkeyOrigin: result.passkey_origin,
+          email,
+        },
+      });
+    }
+    return result;
   },
 
-  signup: async (email: string, password: string, name: string) => {
-    const tokens = await authApi.signup({ email, password, name });
-    get().setTokens(tokens);
-    const user = await authApi.getMe();
-    set({ user });
-  },
+  clearPending: () => set({ pending: null }),
+
+  login: async (email: string, password: string) =>
+    get().acceptSignIn(await authApi.login({ email, password }), email),
+
+  signup: async (email: string, password: string, name: string) =>
+    get().acceptSignIn(await authApi.signup({ email, password, name }), email),
 
   logout: () => {
     if (typeof window !== "undefined") {
@@ -82,7 +125,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.removeItem(REFRESH_KEY);
     }
     setTokenCookie(TOKEN_KEY, null);
-    set({ user: null, accessToken: null, refreshToken: null });
+    set({ user: null, accessToken: null, refreshToken: null, pending: null });
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }
