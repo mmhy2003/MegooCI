@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Clock,
   Send,
+  ShieldOff,
   Trash2,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -256,6 +257,26 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleResetTwoStep = async (u: UserDetail) => {
+    const ok = await confirm({
+      title: "Reset two-step verification?",
+      description: `This removes the authenticator app, passkeys and recovery codes of ${u.name} (${u.email}). They sign in with their password alone until they set it up again; where it is required, they are asked to at their next sign-in.`,
+      confirmText: "Reset",
+      tone: "warning",
+    });
+    if (!ok) return;
+    try {
+      await usersApi.resetTwoStep(u.id);
+      toast.success(`Two-step verification reset for ${u.name}`);
+      loadData();
+    } catch (e: unknown) {
+      const msg =
+        (e as { body?: { detail?: string } })?.body?.detail ||
+        "Failed to reset two-step verification";
+      toast.error(msg);
+    }
+  };
+
   const handleDeleteUser = async (u: UserDetail) => {
     const ok = await confirm({
       title: "Delete user permanently?",
@@ -451,6 +472,13 @@ export default function AdminUsersPage() {
                         {!u.is_active && (
                           <Badge variant="failed" className="text-[10px]">Inactive</Badge>
                         )}
+                        <Badge
+                          variant={u.two_step_enabled ? "success" : "pending"}
+                          className="text-[10px]"
+                          title="Two-step verification"
+                        >
+                          {u.two_step_enabled ? "Two-step on" : "Two-step off"}
+                        </Badge>
                       </div>
                       <p className="text-xs text-muted-foreground truncate">{u.email}</p>
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -509,6 +537,12 @@ export default function AdminUsersPage() {
                               <CheckCircle2 className="mr-2 h-4 w-4" /> Activate
                             </>
                           )}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleResetTwoStep(u)}
+                          disabled={!u.two_step_enabled || u.id === currentUser?.id}
+                        >
+                          <ShieldOff className="mr-2 h-4 w-4" /> Reset two-step verification
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => handleDeleteUser(u)}
