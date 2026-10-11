@@ -435,6 +435,42 @@ Frontend:
 
 Docs: a "Two-step verification" section in `README.md`.
 
+## Amendments found while planning
+
+Writing and testing the code ahead of the plan changed or added these points. Where they
+differ from the text above, they are what gets built.
+
+1. **A password-reset link is a session today.** The existing code builds the link's token
+   as an access token, so whoever reads the email is signed in for an hour, and the reset
+   endpoint itself has never accepted the token. Left alone, that link would walk past the
+   second step. The plan fixes it first: the link's token becomes a `reset` token that sets a
+   new password and nothing else.
+2. **A new API token scope, "Container registry"** (pull and push). No existing scope
+   allows a push, so without it an account with two-step verification would need a
+   Full-access token for `docker login`. A scoped token that does not cover the registry is
+   refused with "This API token's scope does not include the registry." No scope allows
+   deleting images.
+3. **An administrator cannot reset their own two-step verification from the Users page.**
+   In Settings the same change asks for the password, and the reset must not be a way
+   around that.
+4. **Status codes on the sign-in routes:** a wrong answer is 401, a ticket that is unknown,
+   expired or used is 410, a pause is 429. The page goes back to the password on 410.
+5. **A setup ticket turns into a `setup_done` ticket** once it has added its method, and
+   only that opens `/setup/finish`. A setup ticket is refused outright once the account has
+   a method that was not added with it, so a ticket held by someone who has only the
+   password is worthless as soon as the owner sets two-step verification up.
+6. **Codes typed with digits of another script** (an Arabic or Persian keyboard) are read
+   as their digits.
+7. **The forced setup asks for a passkey's name** after the browser has created it, as
+   Settings does.
+8. **The Users page is a list of rows, not a table,** so "Two-step" is a badge beside each
+   name rather than a column.
+9. **Modules the file list above does not name:** `state.py` (the per-user row), `clock.py`
+   (the time, in one place), `two_step_account.py` (the own-account routes, apart from the
+   sign-in routes in `two_step.py`), and `password-dialog.tsx`.
+10. **The refusal for `docker login` was tried against a real docker client** and a stub
+    registry: it prints `unauthorized:` followed by the message.
+
 ## Rollback
 
 Turn the requirement off and nobody is asked to set it up. To remove the feature, revert
