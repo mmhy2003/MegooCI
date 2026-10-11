@@ -2,7 +2,17 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { KeyRound, Lock, Monitor, Palette, Sparkles, User, Wrench } from "lucide-react";
+import {
+  KeyRound,
+  Lock,
+  Monitor,
+  Palette,
+  Shield,
+  ShieldCheck,
+  Sparkles,
+  User,
+  Wrench,
+} from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { useAuthStore } from "@/lib/auth";
 import { systemApi, type SystemInfo } from "@/lib/api";
@@ -14,18 +24,22 @@ import {
 } from "@/components/settings/settings-tabs";
 import { ProfileTab } from "@/components/settings/profile-tab";
 import { PasswordTab } from "@/components/settings/password-tab";
+import { TwoStepTab } from "@/components/settings/two-step-tab";
 import { AppearanceTab } from "@/components/settings/appearance-tab";
 import { ApiTokensTab } from "@/components/settings/api-tokens-tab";
 import { MaintenanceCard } from "@/components/settings/maintenance-tab";
+import { SecurityTab } from "@/components/settings/security-tab";
 import { AiConfigCard } from "@/components/settings/ai-assistant-tab";
 import { SystemTab } from "@/components/settings/system-tab";
 
 type TabId =
   | "profile"
   | "password"
+  | "two-step"
   | "appearance"
   | "api-tokens"
   | "maintenance"
+  | "security"
   | "ai-assistant"
   | "system";
 
@@ -62,6 +76,7 @@ export default function SettingsPage() {
           ...(user?.auth_provider === "local"
             ? [{ id: "password" as const, label: "Password", icon: Lock }]
             : []),
+          { id: "two-step", label: "Two-step verification", icon: ShieldCheck },
           { id: "appearance", label: "Appearance", icon: Palette },
           { id: "api-tokens", label: "API tokens", icon: KeyRound },
         ],
@@ -70,7 +85,10 @@ export default function SettingsPage() {
         label: "Server",
         tabs: [
           ...(isAdmin
-            ? [{ id: "maintenance" as const, label: "Maintenance", icon: Wrench }]
+            ? [
+                { id: "maintenance" as const, label: "Maintenance", icon: Wrench },
+                { id: "security" as const, label: "Security", icon: Shield },
+              ]
             : []),
           { id: "ai-assistant", label: "AI assistant", icon: Sparkles },
           { id: "system", label: "System", icon: Monitor },
@@ -118,6 +136,7 @@ export default function SettingsPage() {
   const panels: Record<TabId, () => React.ReactNode> = {
     profile: () => <ProfileTab />,
     password: () => <PasswordTab />,
+    "two-step": () => <TwoStepTab />,
     appearance: () => <AppearanceTab />,
     "api-tokens": () => <ApiTokensTab info={info} />,
     maintenance: () => (
@@ -129,6 +148,7 @@ export default function SettingsPage() {
         }}
       />
     ),
+    security: () => <SecurityTab />,
     "ai-assistant": () => (
       <AiConfigCard
         info={info}
