@@ -12,6 +12,10 @@ Registry Token Authentication specification:
 
 This module handles credential validation for user logins (Basic auth
 with username/password), deploy tokens, and build-scoped tokens.
+
+The registry has no second step. So an account that uses two-step
+verification cannot log in here with its password: it uses an API token as
+the password instead, which works for any account.
 """
 
 from __future__ import annotations
@@ -25,13 +29,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
-from app.core.security import verify_password
+from app.core.deps import authenticate_pat, effective_permissions
+from app.core.security import is_pat, verify_password
 from app.models.registry import RegistryDeployToken
 from app.models.role import UserRole
 from app.models.user import User
+from app.services.two_step import status as two_step_status
 
 
 _REGISTRY_TOKEN_EXPIRY = timedelta(minutes=30)
+
+TWO_STEP_MESSAGE = (
+    "This account uses two-step verification. Use an API token as the password "
+    "(Settings → API tokens)."
+)
+TOKEN_SCOPE_MESSAGE = "This API token's scope does not include the registry."
+
+
+class RegistryLoginRefused(Exception):
+    """The credentials are who they say they are, but may not be used here.
+    The message is safe to show: it is only raised for a correct password
+    or a valid token, so it tells a stranger nothing about an account."""
 
 
 async def authenticate_basic(
@@ -46,6 +64,8 @@ async def authenticate_basic(
     """
     if username == "deploy-token":
         return await _auth_deploy_token(db, password)
+    if is_pat(password):
+        return await _auth_api_token(db, password)
 
     from sqlalchemy import or_
 
@@ -57,10 +77,41 @@ async def authenticate_basic(
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         return None, None, []
-    if not verify_password(password, user.hashed_password):
+    if not user.hashed_password or not verify_password(password, user.hashed_password):
         return None, None, []
 
+    # The password is right, and here it would be the only proof. Where the
+    # account has a second step, or must set one up, that is not enough.
+    if await two_step_status.is_on(db, user.id) or await two_step_status.is_required(db):
+        raise RegistryLoginRefused(TWO_STEP_MESSAGE)
+
     actions = _user_actions(user)
+    return str(user.id), user.id, actions
+
+
+async def _auth_api_token(
+    db: AsyncSession, token: str
+) -> tuple[str | None, uuid.UUID | None, list[str]]:
+    """An API token as the password. The token says who it is (the username
+    is not checked), and its scope limits what it may do, as everywhere."""
+    user = await authenticate_pat(db, token)
+    if user is None or not user.is_active:
+        return None, None, []
+    if user.active_token_scopes is None:
+        # A Full-access token stands for the account itself.
+        return str(user.id), user.id, _user_actions(user)
+    allowed = effective_permissions(user)
+    actions = [
+        action
+        for action, permission in (
+            ("pull", "registry.read"),
+            ("push", "registry.push"),
+            ("delete", "registry.manage"),
+        )
+        if permission in allowed
+    ]
+    if not actions:
+        raise RegistryLoginRefused(TOKEN_SCOPE_MESSAGE)
     return str(user.id), user.id, actions
 
 

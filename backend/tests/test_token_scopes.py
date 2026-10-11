@@ -43,6 +43,7 @@ def test_scope_catalog_lists_full_access_first():
         "automate.workflows",
         "read.only",
         "coding.agent",
+        "container.registry",
     ]
     assert catalog[0]["label"] == "Full access"
 

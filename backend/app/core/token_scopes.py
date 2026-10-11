@@ -64,6 +64,13 @@ TOKEN_SCOPES: dict[str, ScopeEntry] = {
             "artifacts.read",
         }),
     },
+    "container.registry": {
+        "label": "Container registry",
+        "description": (
+            "Pull and push images. Use the token as the password for docker login."
+        ),
+        "permissions": frozenset({"registry.read", "registry.push"}),
+    },
 }
 
 

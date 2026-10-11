@@ -35,13 +35,14 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.registry_auth import (
+    RegistryLoginRefused,
     authenticate_basic,
     decode_registry_token,
     issue_registry_token,
@@ -205,14 +206,27 @@ async def _record_event(
 # Token endpoint (Docker token auth)
 # ---------------------------------------------------------------------------
 
-@router.get("/v2/token")
-@router.post("/v2/token")
+def _login_refused(message: str) -> JSONResponse:
+    """A refusal the docker client prints: it shows ``details`` (or the
+    first error's message) after "unauthorized:"."""
+    return JSONResponse(
+        status_code=401,
+        content={
+            "errors": [{"code": "UNAUTHORIZED", "message": message}],
+            "details": message,
+        },
+        headers={"Docker-Distribution-Api-Version": "registry/2.0"},
+    )
+
+
+@router.get("/v2/token", response_model=None)
+@router.post("/v2/token", response_model=None)
 async def get_token(
     request: Request,
     service: str = Query(""),
     scope: str = Query(""),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict | JSONResponse:
     _registry_disabled_check()
 
     svc = service
@@ -237,13 +251,19 @@ async def get_token(
     if auth_header.lower().startswith("basic "):
         decoded = base64.b64decode(auth_header[6:]).decode("utf-8", errors="replace")
         username, _, password = decoded.partition(":")
-        subject, actor_id, actions = await authenticate_basic(db, username, password)
+        try:
+            subject, actor_id, actions = await authenticate_basic(db, username, password)
+        except RegistryLoginRefused as refused:
+            return _login_refused(str(refused))
         if subject is None:
             raise HTTPException(status_code=401, detail="Invalid credentials")
     elif form_username and form_password:
-        subject, actor_id, actions = await authenticate_basic(
-            db, form_username, form_password
-        )
+        try:
+            subject, actor_id, actions = await authenticate_basic(
+                db, form_username, form_password
+            )
+        except RegistryLoginRefused as refused:
+            return _login_refused(str(refused))
         if subject is None:
             raise HTTPException(status_code=401, detail="Invalid credentials")
     else:
