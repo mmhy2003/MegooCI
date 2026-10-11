@@ -88,6 +88,7 @@ async def seed_world(db, secret_key: str = SECRET_KEY) -> dict:
     from app.models.secret import EnvVar, Secret
     from app.models.system_setting import SystemSetting
     from app.models.trigger import Trigger, WebhookEndpoint
+    from app.models.two_step import UserPasskey, UserRecoveryCode, UserTwoStep
     from app.models.user import User
 
     ids = {}
@@ -95,6 +96,16 @@ async def seed_world(db, secret_key: str = SECRET_KEY) -> dict:
                                 hashed_password="hash-of-admin", is_admin=True, is_active=True)
     ids["dev"] = await insert(db, User, email="dev@example.com", name="Dev",
                               hashed_password="hash-of-dev", is_admin=False, is_active=True)
+    # The developer signs in with two-step verification.
+    ids["two_step"] = await insert(
+        db, UserTwoStep, user_id=ids["dev"],
+        totp_secret_encrypted=encrypt("JBSWY3DPEHPK3PXP", secret_key),
+        totp_confirmed_at=datetime(2026, 1, 2, tzinfo=timezone.utc))
+    ids["passkey"] = await insert(
+        db, UserPasskey, user_id=ids["dev"], credential_id=b"credential-id",
+        public_key=b"public-key", transports=["usb"], name="Dev key")
+    ids["recovery_code"] = await insert(
+        db, UserRecoveryCode, user_id=ids["dev"], code_hash="$2b$04$a-hash-not-a-code")
     ids["role"] = await insert(db, Role, name="developer", permissions=["pipelines.manage"])
     ids["user_role"] = await insert(db, UserRole, user_id=ids["dev"], role_id=ids["role"],
                                     scope_type="global", scope_id=None)

@@ -26,7 +26,11 @@ HISTORY_TABLES = {
     "builds", "stages", "steps", "log_chunks", "artifacts", "audit_log", "invites",
     "notification_deliveries", "webhook_deliveries", "user_notifications",
     "container_repositories", "container_images", "container_tags", "registry_events",
+    # A sign-in in progress: gone in minutes, and no use to another server.
+    "two_step_tickets",
 }
+# Binary columns that hold nothing secret and are carried over as they are.
+PLAIN_BINARY = {"user_passkeys": {"credential_id", "public_key"}}
 KNOWN_TYPES = (sa.Uuid, sa.DateTime, sa.LargeBinary, sa.String, sa.Integer, sa.Boolean,
                sa.JSON, sa.ARRAY)
 
@@ -71,6 +75,7 @@ def test_every_binary_column_of_the_configuration_is_declared_encrypted():
     unreadable on a server with another key."""
     for spec in TABLES:
         binary = {c.name for c in spec.table.columns if isinstance(c.type, sa.LargeBinary)}
+        binary -= PLAIN_BINARY.get(spec.name, set())
         assert binary <= set(spec.encrypted), f"{spec.name}: {binary - set(spec.encrypted)}"
 
 

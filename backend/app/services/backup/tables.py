@@ -30,6 +30,7 @@ from app.models.role import Role, UserRole
 from app.models.secret import EnvVar, Secret
 from app.models.system_setting import SystemSetting
 from app.models.trigger import Trigger, WebhookEndpoint
+from app.models.two_step import UserPasskey, UserRecoveryCode, UserTwoStep
 from app.models.user import User
 
 
@@ -55,6 +56,11 @@ class TableSpec:
 # and removed in the reverse.
 TABLES: tuple[TableSpec, ...] = (
     TableSpec(User.__table__),
+    # Two-step verification travels with the accounts, so a restore does not
+    # quietly turn it off for everyone. Tickets are not configuration.
+    TableSpec(UserTwoStep.__table__, encrypted=("totp_secret_encrypted",)),
+    TableSpec(UserPasskey.__table__),
+    TableSpec(UserRecoveryCode.__table__),
     TableSpec(Role.__table__),
     TableSpec(UserRole.__table__),
     TableSpec(Project.__table__),

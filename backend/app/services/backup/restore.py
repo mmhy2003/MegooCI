@@ -24,6 +24,7 @@ import app.models  # noqa: F401 — every table must be registered on the metada
 from app.models.agent import Agent
 from app.models.base import Base
 from app.models.build import Build, Stage, Step
+from app.models.two_step import UserPasskey, UserRecoveryCode, UserTwoStep
 from app.models.user import User
 from app.services.backup.tables import (
     TABLES,
@@ -93,16 +94,20 @@ def _parents_first(spec: TableSpec, rows: list[dict[str, Any]]) -> list[dict[str
 
 async def _keep_acting_admin(
     db: AsyncSession, users: list[dict[str, Any]], acting_user_id: uuid.UUID
-) -> None:
+) -> uuid.UUID | None:
     """The administrator who restores is never locked out: their account
     keeps its current password and stays an active administrator. Everything
-    else about it comes from the backup, when the backup has it."""
+    else about it comes from the backup, when the backup has it.
+
+    Returns the id the account has after the restore: the backup may know
+    it, by its email, under another id.
+    """
     table = User.__table__
     current = (
         await db.execute(sa.select(table).where(table.c.id == acting_user_id))
     ).mappings().first()
     if current is None:
-        return
+        return None
     email = str(current["email"]).lower()
     account = next((row for row in users if row["id"] == current["id"]), None)
     if account is None:
@@ -113,6 +118,42 @@ async def _keep_acting_admin(
     account["hashed_password"] = current["hashed_password"]
     account["is_admin"] = True
     account["is_active"] = True
+    return account["id"]
+
+
+_TWO_STEP_TABLES = (UserTwoStep.__table__, UserPasskey.__table__, UserRecoveryCode.__table__)
+
+
+async def _keep_acting_admin_two_step(
+    db: AsyncSession,
+    rows: dict[str, list[dict[str, Any]]],
+    acting_user_id: uuid.UUID,
+    account_id: uuid.UUID,
+) -> None:
+    """The administrator who restores also keeps their two-step verification
+    exactly as it is now: authenticator app, passkeys and recovery codes,
+    whatever the backup holds for the account. An old backup must not ask
+    them for a second step they no longer have, nor take away the one that
+    protects the account today."""
+    for table in _TWO_STEP_TABLES:
+        current = (
+            await db.execute(sa.select(table).where(table.c.user_id == acting_user_id))
+        ).mappings().all()
+        from_backup = [
+            row for row in rows[table.name]
+            if row["user_id"] not in (account_id, acting_user_id)
+        ]
+        rows[table.name] = from_backup + [{**row, "user_id": account_id} for row in current]
+
+    # A passkey belongs to one account. Where the backup gives one of the
+    # kept passkeys to somebody else, it stays with the administrator who
+    # holds it now.
+    passkeys = rows[UserPasskey.__tablename__]
+    kept = {bytes(row["credential_id"]) for row in passkeys if row["user_id"] == account_id}
+    rows[UserPasskey.__tablename__] = [
+        row for row in passkeys
+        if row["user_id"] == account_id or bytes(row["credential_id"]) not in kept
+    ]
 
 
 _AGENT_RUNTIME = ("status", "connected_at", "last_seen_at", "agent_version")
@@ -225,7 +266,9 @@ async def apply_configuration(
         ]
         rows[spec.name] = [row for row in decoded if not is_server_state(spec, row)]
 
-    await _keep_acting_admin(db, rows[User.__tablename__], acting_user_id)
+    account_id = await _keep_acting_admin(db, rows[User.__tablename__], acting_user_id)
+    if account_id is not None:
+        await _keep_acting_admin_two_step(db, rows, acting_user_id, account_id)
     await _keep_agent_connections(db, rows[Agent.__tablename__])
     await _cancel_pending_builds(db)
 
