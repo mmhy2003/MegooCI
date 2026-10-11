@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.audit import record as audit_record
 from app.core.deps import require_permission
 from app.core.security import hash_password
 from app.database import get_db
@@ -18,11 +19,15 @@ from app.schemas.users import (
     UserDetailResponse,
     UserUpdateRequest,
 )
+from app.services.two_step import status as two_step_status
+from app.services.two_step.reset import reset as reset_two_step
 
 router = APIRouter()
 
 
-def _user_to_detail(user: User, project_names: dict | None = None) -> dict:
+def _user_to_detail(
+    user: User, project_names: dict | None = None, two_step_enabled: bool = False
+) -> dict:
     if project_names is None:
         project_names = {}
     roles = []
@@ -45,6 +50,7 @@ def _user_to_detail(user: User, project_names: dict | None = None) -> dict:
         "created_at": user.created_at,
         "updated_at": user.updated_at,
         "roles": roles,
+        "two_step_enabled": two_step_enabled,
     }
 
 
@@ -78,7 +84,8 @@ async def list_users(
     )
     users = list(result.scalars().all())
     pnames = await _project_name_map(db, users)
-    return [_user_to_detail(u, pnames) for u in users]
+    with_two_step = await two_step_status.enabled_user_ids(db)
+    return [_user_to_detail(u, pnames, u.id in with_two_step) for u in users]
 
 
 @router.post("/", response_model=UserCreatedResponse, status_code=status.HTTP_201_CREATED)
@@ -145,7 +152,7 @@ async def get_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     pnames = await _project_name_map(db, [user])
-    return _user_to_detail(user, pnames)
+    return _user_to_detail(user, pnames, await two_step_status.is_on(db, user.id))
 
 
 @router.put("/{user_id}", response_model=UserDetailResponse)
@@ -184,7 +191,38 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     pnames = await _project_name_map(db, [user])
-    return _user_to_detail(user, pnames)
+    return _user_to_detail(user, pnames, await two_step_status.is_on(db, user.id))
+
+
+@router.post("/{user_id}/two-step/reset", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_user_two_step(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("users.manage")),
+) -> None:
+    """Remove a user's authenticator app, passkeys and recovery codes, for a
+    user who has lost all of them. Their open sessions are left alone. If
+    two-step verification is required they set it up again at the next
+    sign-in."""
+    if user_id == current_user.id:
+        # Removing one's own methods asks for the password, in Settings.
+        # This route must not be a way around that.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Change your own two-step verification in Settings.",
+        )
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    was_on = await reset_two_step(db, user_id)
+    await audit_record(
+        action="two_step_reset_by_admin",
+        actor_id=current_user.id,
+        target_type="user",
+        target_id=user_id,
+        metadata={"was_on": was_on},
+        db=db,
+    )
 
 
 @router.post("/{user_id}/roles", response_model=UserRoleResponse, status_code=status.HTTP_201_CREATED)

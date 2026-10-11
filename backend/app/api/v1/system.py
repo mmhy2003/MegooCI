@@ -2,11 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.api.v1.backups import require_global_admin
 from app.config import get_settings
+from app.core.audit import record as audit_record
 from app.core.deps import get_current_active_user, get_current_admin_user
 from app.database import get_db
 from app.models.system_setting import SystemSetting
 from app.models.user import User
+from app.schemas.two_step import SecuritySettings, SecuritySettingsUpdate
+from app.services.two_step import status as two_step_status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
@@ -405,3 +409,51 @@ async def set_maintenance(
             pass  # best-effort; builds will be picked up on the next cycle
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Security: whether every account must use two-step verification
+# ---------------------------------------------------------------------------
+
+async def _security_settings(db: AsyncSession) -> dict:
+    total, with_two_step = await two_step_status.counts(db)
+    return {
+        "require_two_step": await two_step_status.is_required(db),
+        "users_total": total,
+        "users_with_two_step": with_two_step,
+    }
+
+
+@router.get("/security", response_model=SecuritySettings)
+async def get_security(
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_global_admin),
+) -> dict:
+    return await _security_settings(db)
+
+
+@router.put("/security", response_model=SecuritySettings)
+async def set_security(
+    body: SecuritySettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_global_admin),
+) -> dict:
+    """Require two-step verification for every account, or stop requiring it.
+
+    Only an administrator who has it on can turn the requirement on, so
+    nobody requires it and then finds they cannot get in themselves.
+    """
+    if body.require_two_step and not await two_step_status.is_on(db, admin.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Set up two-step verification on your own account first.",
+        )
+    if body.require_two_step != await two_step_status.is_required(db):
+        await two_step_status.set_required(db, body.require_two_step)
+        await audit_record(
+            action="two_step_requirement_changed",
+            actor_id=admin.id,
+            metadata={"required": body.require_two_step},
+            db=db,
+        )
+    return await _security_settings(db)

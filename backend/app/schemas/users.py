@@ -25,6 +25,7 @@ class UserDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime | None = None
     roles: list[UserRoleInfo] = []
+    two_step_enabled: bool = False
 
 
 class UserCreateRequest(BaseModel):
