@@ -4,8 +4,10 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { authApi } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { AuthBackdrop } from "@/components/login/auth-backdrop";
+import { AuthCard } from "@/components/login/auth-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,6 +34,16 @@ export default function SignupPage() {
   React.useEffect(() => {
     if (hasHydrated && accessToken) router.replace("/dashboard");
   }, [hasHydrated, accessToken, router]);
+
+  // The server refuses a sign-up it has disabled; say so up front instead of
+  // after the form is filled in. If it cannot be asked, the form stays.
+  const [signupClosed, setSignupClosed] = React.useState(false);
+  React.useEffect(() => {
+    authApi
+      .signupStatus()
+      .then((status) => setSignupClosed(!status.signup_enabled))
+      .catch(() => {});
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -61,19 +73,27 @@ export default function SignupPage() {
     }
   }
 
+  if (signupClosed) {
+    return (
+      <AuthBackdrop>
+        <AuthCard
+          title="Sign-up is disabled"
+          description="Ask an administrator for an invitation."
+        >
+          <CardFooter className="px-8 pb-8 pt-4">
+            <Link href="/login" className="w-full">
+              <Button type="button" className="h-10 w-full text-sm font-semibold">
+                Back to sign in
+              </Button>
+            </Link>
+          </CardFooter>
+        </AuthCard>
+      </AuthBackdrop>
+    );
+  }
+
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-violet-50 via-fuchsia-50/40 to-cyan-50/50 dark:from-[#0a0118] dark:via-[#0d0026] dark:to-[#001a1f] px-4">
-      {/* Ambient glow blobs */}
-      <div className="pointer-events-none absolute -top-40 -left-40 h-[30rem] w-[30rem] rounded-full bg-primary/10 blur-[100px]" />
-      <div className="pointer-events-none absolute -bottom-40 -right-40 h-[30rem] w-[30rem] rounded-full bg-fuchsia-500/10 blur-[100px]" />
-      <div className="pointer-events-none absolute top-1/3 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-cyan-400/5 blur-[80px]" />
-
-      {/* Theme toggle floats in the top-right so pre-login users can match
-          the app to their OS preference without signing in. */}
-      <div className="absolute right-4 top-4 z-20">
-        <ThemeToggle variant="icon" />
-      </div>
-
+    <AuthBackdrop>
       <Card className="relative z-10 w-full max-w-md overflow-hidden border-0 shadow-2xl dark:border dark:border-white/[0.08]">
         {/* Decorative top accent bar */}
         <div className="h-1 w-full bg-gradient-to-r from-primary via-fuchsia-500 to-cyan-400" />
@@ -238,6 +258,6 @@ export default function SignupPage() {
           </CardFooter>
         </form>
       </Card>
-    </div>
+    </AuthBackdrop>
   );
 }

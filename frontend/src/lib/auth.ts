@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { authApi, onTokensChanged, type User, type AuthTokens } from "./api";
+import { rememberAccount } from "./known-accounts";
 
 const TOKEN_KEY = "megooci_access_token";
 const REFRESH_KEY = "megooci_refresh_token";
@@ -122,6 +123,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 }));
+
+// Whoever is signed in here is offered again on the login page. Wherever the
+// user is set (sign-in, sign-up, an accepted invitation, a page load, a
+// profile change), the list gets the current name and email.
+useAuthStore.subscribe((state, previous) => {
+  if (state.user && state.user !== previous.user) rememberAccount(state.user);
+});
 
 // The API client renews an expired access token on its own, and gives up the
 // session when the refresh token is refused. Keep the store, and the cookie

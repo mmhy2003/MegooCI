@@ -312,6 +312,10 @@ export const authApi = {
 
   getMe: () => fetchApi<User>("/api/v1/auth/me"),
 
+  /** Public: whether a new account can be created right now. */
+  signupStatus: () =>
+    fetchApi<{ signup_enabled: boolean }>("/api/v1/auth/signup-status"),
+
   changePassword: (data: { current_password: string; new_password: string }) =>
     fetchApi<{ message: string }>("/api/v1/auth/change-password", {
       method: "PUT",

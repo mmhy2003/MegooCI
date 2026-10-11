@@ -26,6 +26,7 @@ from app.schemas.auth import (
     RefreshRequest,
     ResetPasswordRequest,
     SignupRequest,
+    SignupStatus,
     TokenResponse,
     UpdateProfileRequest,
     UserResponse,
@@ -88,6 +89,20 @@ async def signup(
         "refresh_token": create_refresh_token(token_data),
         "token_type": "bearer",
     }
+
+
+@router.get("/signup-status", response_model=SignupStatus)
+async def signup_status(db: AsyncSession = Depends(get_db)) -> dict:
+    """Whether a new account can be created right now.
+
+    Public: the login page asks before anyone is signed in, to decide whether
+    to offer "Create an account". Follows the rule ``signup`` applies: the
+    first account can always be created, whatever the setting says.
+    """
+    if get_settings().MEGOOCI_SIGNUP_ENABLED:
+        return {"signup_enabled": True}
+    anyone = await db.scalar(select(User.id).limit(1))
+    return {"signup_enabled": anyone is None}
 
 
 @router.post("/login", response_model=TokenResponse)

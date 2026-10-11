@@ -44,6 +44,10 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class SignupStatus(BaseModel):
+    signup_enabled: bool
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
