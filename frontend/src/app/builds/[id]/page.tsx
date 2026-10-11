@@ -114,19 +114,9 @@ export default function BuildDetailPage() {
     build?.status === "queued" ||
     build?.status === "running";
 
-  const wsUrl = React.useMemo(() => {
-    if (!isActive || !accessToken || typeof window === "undefined") return null;
-    const tokenParam = `token=${encodeURIComponent(accessToken)}`;
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
-    if (apiBase) {
-      const url = new URL(apiBase);
-      const wsProto = url.protocol === "https:" ? "wss:" : "ws:";
-      return `${wsProto}//${url.host}/api/v1/ws/builds/${id}/logs?${tokenParam}`;
-    }
-    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${wsProto}//${window.location.host}/api/v1/ws/builds/${id}/logs?${tokenParam}`;
-  }, [isActive, id, accessToken]);
-  const { messages } = useWebSocket(wsUrl);
+  const { messages } = useWebSocket(
+    isActive && accessToken ? `/api/v1/ws/builds/${id}/logs` : null,
+  );
 
   const [logLines, setLogLines] = React.useState<LogLine[]>([]);
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { authApi, type User, type AuthTokens } from "./api";
+import { authApi, onTokensChanged, type User, type AuthTokens } from "./api";
 
 const TOKEN_KEY = "megooci_access_token";
 const REFRESH_KEY = "megooci_refresh_token";
@@ -122,3 +122,36 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 }));
+
+// The API client renews an expired access token on its own, and gives up the
+// session when the refresh token is refused. Keep the store, and the cookie
+// the middleware reads, in step with it.
+onTokensChanged((tokens) => {
+  if (tokens) {
+    setTokenCookie(TOKEN_KEY, tokens.access_token);
+    useAuthStore.setState({
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+    });
+  } else {
+    setTokenCookie(TOKEN_KEY, null);
+    useAuthStore.setState({ user: null, accessToken: null, refreshToken: null });
+  }
+});
+
+// Another tab signed in, signed out or renewed its tokens: follow it, so this
+// tab does not carry on with tokens that are no longer the stored ones.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    // A null key means the whole storage was cleared.
+    if (event.key !== null && event.key !== TOKEN_KEY && event.key !== REFRESH_KEY) return;
+    if (!useAuthStore.getState().hasHydrated) return;
+    const accessToken = localStorage.getItem(TOKEN_KEY);
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    useAuthStore.setState(
+      accessToken
+        ? { accessToken, refreshToken }
+        : { user: null, accessToken: null, refreshToken: null },
+    );
+  });
+}

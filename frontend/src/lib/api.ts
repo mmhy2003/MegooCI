@@ -79,7 +79,7 @@ function extractErrorMessage(status: number, body: unknown): string {
   }
 }
 
-function getAccessToken(): string | null {
+export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(ACCESS_KEY);
 }
@@ -102,13 +102,33 @@ function clearTokens(): void {
 }
 
 /**
+ * Told when the silent refresh below replaces the stored tokens, or discards
+ * them (null). The auth store registers itself here, since it cannot be
+ * imported from this module (it imports this one), so that the tokens it
+ * holds stay the ones in localStorage.
+ */
+type TokensListener = (
+  tokens: { access_token: string; refresh_token: string } | null,
+) => void;
+
+let tokensListener: TokensListener | null = null;
+
+export function onTokensChanged(listener: TokensListener): void {
+  tokensListener = listener;
+}
+
+/**
  * Single-flight refresh: concurrent 401s share one /refresh call instead of
  * racing and consuming multiple refresh tokens. Resolves to the new access
- * token on success, or null if refresh fails (user needs to re-authenticate).
+ * token on success, or null if refresh fails.
+ *
+ * The session is only discarded when the server refuses the refresh token
+ * (the user needs to re-authenticate). A server that cannot be reached, or
+ * that answers with an error of its own, leaves the tokens for a later try.
  */
 let refreshInFlight: Promise<string | null> | null = null;
 
-async function refreshAccessTokenOnce(): Promise<string | null> {
+export async function refreshAccessTokenOnce(): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
   const refresh = getRefreshToken();
   if (!refresh) return null;
@@ -120,18 +140,20 @@ async function refreshAccessTokenOnce(): Promise<string | null> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: refresh }),
       });
-      if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
         clearTokens();
+        tokensListener?.(null);
         return null;
       }
+      if (!res.ok) return null;
       const tokens = (await res.json()) as {
         access_token: string;
         refresh_token: string;
       };
       setTokensInStorage(tokens.access_token, tokens.refresh_token);
+      tokensListener?.(tokens);
       return tokens.access_token;
     } catch {
-      clearTokens();
       return null;
     } finally {
       // Release the lock so the next 401 can trigger a fresh refresh if

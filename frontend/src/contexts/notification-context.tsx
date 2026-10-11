@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useAuthStore } from "@/lib/auth";
+import { openLiveSocket } from "@/lib/live-socket";
 import {
   userNotificationsApi,
   type UserNotification,
@@ -34,16 +35,14 @@ export function NotificationProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const accessToken = useAuthStore((s) => s.accessToken);
+  // Signed in or not, rather than the token: the socket fetches the current
+  // token itself, and a renewed one is no reason to reconnect.
+  const signedIn = useAuthStore((s) => !!s.accessToken);
   const [notifications, setNotifications] = React.useState<UserNotification[]>(
     [],
   );
   const [unreadCount, setUnreadCount] = React.useState(0);
   const [isLoading, setIsLoading] = React.useState(true);
-  const wsRef = React.useRef<WebSocket | null>(null);
-  const reconnectTimerRef = React.useRef<ReturnType<typeof setTimeout>>(
-    undefined,
-  );
 
   const fetchInitial = React.useCallback(async () => {
     try {
@@ -60,49 +59,8 @@ export function NotificationProvider({
     }
   }, []);
 
-  const connectWs = React.useCallback(() => {
-    if (!accessToken || typeof window === "undefined") return;
-
-    const tokenParam = `token=${encodeURIComponent(accessToken)}`;
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
-    let url: string;
-    if (apiBase) {
-      const parsed = new URL(apiBase);
-      const wsProto = parsed.protocol === "https:" ? "wss:" : "ws:";
-      url = `${wsProto}//${parsed.host}/api/v1/ws/notifications?${tokenParam}`;
-    } else {
-      const wsProto =
-        window.location.protocol === "https:" ? "wss:" : "ws:";
-      url = `${wsProto}//${window.location.host}/api/v1/ws/notifications?${tokenParam}`;
-    }
-
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-
-    ws.onmessage = (event) => {
-      try {
-        const notif: UserNotification = JSON.parse(event.data);
-        setNotifications((prev) => [notif, ...prev].slice(0, 50));
-        setUnreadCount((prev) => prev + 1);
-      } catch {
-        // Ignore malformed messages
-      }
-    };
-
-    ws.onclose = () => {
-      wsRef.current = null;
-      if (accessToken) {
-        reconnectTimerRef.current = setTimeout(connectWs, 5000);
-      }
-    };
-
-    ws.onerror = () => {
-      ws.close();
-    };
-  }, [accessToken]);
-
   React.useEffect(() => {
-    if (!accessToken) {
+    if (!signedIn) {
       setNotifications([]);
       setUnreadCount(0);
       setIsLoading(false);
@@ -110,19 +68,19 @@ export function NotificationProvider({
     }
 
     fetchInitial();
-    connectWs();
 
-    return () => {
-      clearTimeout(reconnectTimerRef.current);
-      if (wsRef.current) {
-        // Detach onclose first, otherwise closing here schedules a reconnect
-        // with the stale token that is never cleaned up.
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-      }
-      wsRef.current = null;
-    };
-  }, [accessToken, fetchInitial, connectWs]);
+    return openLiveSocket("/api/v1/ws/notifications", {
+      onMessage: (text) => {
+        try {
+          const notif: UserNotification = JSON.parse(text);
+          setNotifications((prev) => [notif, ...prev].slice(0, 50));
+          setUnreadCount((prev) => prev + 1);
+        } catch {
+          // Ignore malformed messages
+        }
+      },
+    });
+  }, [signedIn, fetchInitial]);
 
   const markRead = React.useCallback(async (id: string) => {
     try {
