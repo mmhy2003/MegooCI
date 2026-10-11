@@ -39,6 +39,26 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     )
 
 
+def create_reset_token(user_id: str, expires_delta: timedelta) -> str:
+    """A token for the link in a password-reset email.
+
+    It is not an access token: its type is ``reset``, so nothing that asks
+    for a signed-in user accepts it. Whoever reads the email can set a new
+    password with it, and nothing more.
+    """
+    settings = get_settings()
+    payload = {
+        "sub": user_id,
+        "type": "reset",
+        "exp": datetime.now(timezone.utc) + expires_delta,
+    }
+    return jwt.encode(
+        payload,
+        settings.MEGOOCI_JWT_SECRET,
+        algorithm=settings.MEGOOCI_JWT_ALGORITHM,
+    )
+
+
 def create_refresh_token(data: dict) -> str:
     settings = get_settings()
     to_encode = data.copy()

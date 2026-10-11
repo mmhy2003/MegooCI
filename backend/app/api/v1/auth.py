@@ -12,6 +12,7 @@ from app.core.rate_limit import rate_limit
 from app.core.security import (
     create_access_token,
     create_refresh_token,
+    create_reset_token,
     decode_token,
     hash_password,
     verify_password,
@@ -321,10 +322,7 @@ async def forgot_password(
     user = result.scalar_one_or_none()
 
     if user is not None and user.hashed_password is not None:
-        token = create_access_token(
-            {"sub": str(user.id), "type": "reset"},
-            expires_delta=timedelta(hours=1),
-        )
+        token = create_reset_token(str(user.id), timedelta(hours=1))
         frontend_base = settings.MEGOOCI_PUBLIC_URL.rstrip("/")
         reset_link = f"{frontend_base}/reset-password?token={token}"
         sent = await send_password_reset_email(db, user.email, reset_link)
