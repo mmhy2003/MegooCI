@@ -22,6 +22,7 @@ from app.api.v1 import (
     secrets,
     system,
     two_step,
+    two_step_account,
     user_notifications,
     users,
     webhooks_git,
@@ -38,6 +39,9 @@ api_v1_router = APIRouter()
 
 api_v1_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_v1_router.include_router(two_step.router, prefix="/auth/two-step", tags=["auth"])
+api_v1_router.include_router(
+    two_step_account.router, prefix="/auth/two-step", tags=["auth"]
+)
 api_v1_router.include_router(projects.router, prefix="/projects", tags=["projects"])
 api_v1_router.include_router(pipelines.router, prefix="/pipelines", tags=["pipelines"])
 api_v1_router.include_router(builds.router, prefix="/builds", tags=["builds"])

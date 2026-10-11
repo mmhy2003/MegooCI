@@ -121,6 +121,9 @@ async def authenticate_pat(db: AsyncSession, token: str) -> User | None:
     if user is None:
         return None
     user.active_token_scopes = api_token.scopes
+    # A Full-access token has no scopes either, so the scope alone does not
+    # tell a token from a browser session.
+    user.authenticated_with_token = True
     return user
 
 
@@ -168,6 +171,7 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     user.active_token_scopes = None
+    user.authenticated_with_token = False
     return user
 
 
