@@ -46,6 +46,7 @@ Most teams use ~20 % of Jenkins' surface area. MegooCI re-implements that 20 % w
 - **Secrets & environment management** — Fernet-encrypted at rest, scoped at global / project / pipeline level, referenced by name (`${{ secrets.X }}`), never inlined. Visibility toggles and edit support in the UI.
 - **User invitations** — admin-initiated invites with optional SMTP email delivery, configurable expiry, and role pre-assignment.
 - **Long-lived sessions** — 12-hour access tokens with silent refresh up to 30 days.
+- **Two-step verification** — after the password, a code from an authenticator app or a passkey. Recovery codes for a lost device, and a switch for administrators to require it for every account.
 
 ### Planned
 
@@ -233,6 +234,24 @@ Administrators can back up and restore the server's **configuration** under **Ba
 - **Schedule.** Daily or weekly at a time in UTC, keeping the newest N scheduled backups. Needs the `celery-worker` and `celery-beat` services, which the default Compose file runs.
 - **Remote copy (optional).** Every backup can also be uploaded to S3-compatible storage (AWS S3, MinIO, Backblaze B2, …). Enter the endpoint, bucket and keys, and use **Test connection**.
 - **Restore.** Turn maintenance mode on, wait for running builds to finish, then choose **Restore** and type `restore`. The configuration becomes exactly what the backup holds: anything created since is removed together with its build history, and the build history of everything that still exists is kept. A backup of the current state is taken first, and the administrator doing the restore keeps their password and access. A backup can only be restored by the release that has the same database version as the one that made it.
+
+## Two-Step Verification
+
+Signing in always starts with the password. An account with two-step verification then proves itself a second time, with a 6-digit code from an authenticator app or with a passkey.
+
+- **Turning it on.** Under **Settings → Two-step verification**, set up an authenticator app (Google Authenticator, 1Password, Authy, …), add one or more passkeys, or both. Removing a method asks for your password.
+- **Recovery codes.** Adding your first method gives you ten one-time codes, shown once. Any of them works in place of the second step when you have neither your phone nor a passkey. Generate new ones in Settings at any time; the old ones stop working.
+- **Passkeys and the server address.** A passkey works only at the address in `MEGOOCI_PUBLIC_URL`, over HTTPS or on `localhost`. Opened anywhere else, the app hides the passkey option and says where it works. If that address ever changes, existing passkeys stop working; authenticator and recovery codes do not.
+- **Requiring it.** Administrators turn on **Settings → Security → Require two-step verification**, after setting it up on their own account. New accounts then set it up before their first sign-in. People already signed in see a notice, and within 12 hours their session ends and the sign-in page takes them through the setup.
+- **Someone lost everything.** On the **Users** page, **Reset two-step verification** removes a user's authenticator app, passkeys and recovery codes; they sign in with their password and set it up again. For an administrator with nobody left to reset them, run this where the backend runs:
+
+  ```bash
+  docker compose exec backend python -m app.reset_two_step admin@example.com
+  ```
+
+- **`docker login`.** The registry cannot ask for a second step, so an account that uses two-step verification (or must set it up) cannot log in to it with its password. Create an API token under **Settings → API tokens**, with the **Container registry** scope for pulling and pushing, and use it as the password. Deploy tokens are unaffected.
+- **API tokens and MCP** work as before, without a second step. A token cannot change how its owner signs in.
+- **Backups** include two-step verification. Restoring one never changes it for the administrator who runs the restore.
 
 ## Running a Self-Hosted Build Agent
 
