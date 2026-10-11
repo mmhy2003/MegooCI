@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -117,20 +118,26 @@ def _require_action(token_payload: dict | None, action: str) -> None:
 async def _get_or_create_repo(
     db: AsyncSession, project: Project, repo_name: str
 ) -> ContainerRepository:
-    result = await db.execute(
-        select(ContainerRepository).where(
-            ContainerRepository.project_id == project.id,
-            ContainerRepository.name == repo_name,
-        )
+    query = select(ContainerRepository).where(
+        ContainerRepository.project_id == project.id,
+        ContainerRepository.name == repo_name,
     )
-    repo = result.scalar_one_or_none()
+    repo = (await db.execute(query)).scalar_one_or_none()
     if repo is None:
         repo = ContainerRepository(
             project_id=project.id,
             name=repo_name,
         )
-        db.add(repo)
-        await db.flush()
+        try:
+            # In a savepoint, so that losing the race below undoes this insert
+            # and nothing else of the request.
+            async with db.begin_nested():
+                db.add(repo)
+                await db.flush()
+        except IntegrityError:
+            # The first push to a repository starts several uploads at once;
+            # another of them created it after the query above.
+            repo = (await db.execute(query)).scalar_one()
     return repo
 
 
