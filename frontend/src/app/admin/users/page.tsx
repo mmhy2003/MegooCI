@@ -2,26 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import {
-  Users,
-  Mail,
-  Shield,
-  ShieldCheck,
-  Eye,
-  Code2,
-  UserPlus,
-  Plus,
-  KeyRound,
-  MoreHorizontal,
-  Copy,
-  RefreshCw,
-  XCircle,
-  CheckCircle2,
-  Clock,
-  Send,
-  ShieldOff,
-  Trash2,
-} from "lucide-react";
+import { CheckCircle2, Copy, KeyRound, Plus, Send, UserPlus } from "lucide-react";
 import { AppLayout } from "@/components/layout/app-layout";
 import { RequireAdmin } from "@/components/require-permission";
 import { useAuthStore } from "@/lib/auth";
@@ -35,26 +16,16 @@ import {
   type Invite,
   type InviteCreated,
 } from "@/lib/api";
-import { ProjectAssignmentsEditor } from "@/components/ProjectAssignmentsEditor";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AccessKindCards, type AccessChoice } from "@/components/users/AccessKindCards";
 import { InvitationsTab } from "@/components/users/InvitationsTab";
 import { RolesTab } from "@/components/users/RolesTab";
 import { UsersTab } from "@/components/users/UsersTab";
+import { ProjectAccessEditor } from "@/components/users/ProjectAccessEditor";
 import { adminRoleId, memberRoleId } from "@/components/users/access";
 import { cn } from "@/lib/utils";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Select } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
@@ -63,27 +34,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
-import { useConfirm } from "@/components/ui/confirm-dialog";
-
-function roleIcon(name: string) {
-  if (name === "admin") return <ShieldCheck className="h-3.5 w-3.5" />;
-  if (name === "developer") return <Code2 className="h-3.5 w-3.5" />;
-  return <Eye className="h-3.5 w-3.5" />;
-}
-
-function roleBadgeVariant(name: string): "default" | "secondary" | "success" {
-  if (name === "admin") return "default";
-  if (name === "developer") return "success";
-  return "secondary";
-}
-
 
 type PageTab = "users" | "invitations" | "roles";
 const PAGE_TABS: PageTab[] = ["users", "invitations", "roles"];
@@ -108,7 +58,6 @@ function AdminUsersPageInner() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
   const { user: currentUser } = useAuthStore();
-  const confirm = useConfirm();
 
   const [users, setUsers] = React.useState<UserDetail[]>([]);
   const [roles, setRoles] = React.useState<Role[]>([]);
@@ -124,8 +73,7 @@ function AdminUsersPageInner() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createEmail, setCreateEmail] = React.useState("");
   const [createName, setCreateName] = React.useState("");
-  const [createRoleId, setCreateRoleId] = React.useState("");
-  const [createUserType, setCreateUserType] = React.useState<"admin" | "member">("member");
+  const [createKind, setCreateKind] = React.useState<AccessChoice>("member");
   const [creating, setCreating] = React.useState(false);
   const [createdPassword, setCreatedPassword] = React.useState<string | null>(null);
   const [createdUserEmail, setCreatedUserEmail] = React.useState("");
@@ -189,31 +137,24 @@ function AdminUsersPageInner() {
   };
 
   const handleCreateUser = async () => {
-    // For admin type, role_id isn't strictly needed but API requires it —
-    // use any non-admin role as the initial assignment, then promote to admin.
-    const nonAdminRole = roles.find((r) => r.name !== "admin");
-    const effectiveRoleId =
-      createUserType === "admin"
-        ? (nonAdminRole?.id ?? createRoleId)
-        : createRoleId;
-    if (!createEmail || !createName || !effectiveRoleId) return;
+    // An Administrator is created with the admin role, which also sets the
+    // administrator setting. Members get no role row; the viewer id is only
+    // the placeholder the API requires.
+    const roleId = createKind === "administrator" ? adminRoleId(roles) : memberRoleId(roles);
+    if (!createEmail || !createName || !roleId) return;
     setCreating(true);
     try {
       const result: UserCreated = await usersApi.create({
         email: createEmail,
         name: createName,
-        role_id: effectiveRoleId,
+        role_id: roleId,
       });
-      if (createUserType === "admin") {
-        await usersApi.update(result.id, { is_admin: true });
-      }
       toast.success(`User ${createEmail} created`);
       setCreatedPassword(result.generated_password);
       setCreatedUserEmail(createEmail);
       setCreatedUserId(result.id);
       setCreateEmail("");
       setCreateName("");
-      setCreateRoleId("");
       loadData();
     } catch (e: unknown) {
       const msg = (e as { body?: { detail?: string } })?.body?.detail || "Failed to create user";
@@ -253,7 +194,7 @@ function AdminUsersPageInner() {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={() => { setCreateOpen(true); setCreatedPassword(null); setCreatedUserId(null); setCreateUserType("member"); }}
+              onClick={() => { setCreateOpen(true); setCreatedPassword(null); setCreatedUserId(null); setCreateKind("member"); }}
               className="gap-2"
             >
               <Plus className="h-4 w-4" />
@@ -298,9 +239,7 @@ function AdminUsersPageInner() {
         </div>
 
         {tab === "users" && (
-          <>
-        <UsersTab users={users} roles={roles} loading={loading} onChanged={loadData} />
-          </>
+          <UsersTab users={users} roles={roles} loading={loading} onChanged={loadData} />
         )}
         {tab === "invitations" && (
           <InvitationsTab invites={invites} loading={loading} onChanged={loadData} />
@@ -428,15 +367,19 @@ function AdminUsersPageInner() {
                   </div>
                 </div>
               </div>
-              {createUserType === "member" && createdUserId && (() => {
+              {createKind === "member" && createdUserId && (() => {
                 const createdUser = users.find((u) => u.id === createdUserId);
                 return createdUser ? (
                   <div className="space-y-1.5">
-                    <p className="text-sm font-medium">Assign project access</p>
                     <p className="text-xs text-muted-foreground">
-                      This member has no global role. Assign project-scoped access now or do it later via the Users table.
+                      Give them projects now, or later from their Access tab.
                     </p>
-                    <ProjectAssignmentsEditor user={createdUser} onChanged={loadData} />
+                    <ProjectAccessEditor
+                      user={createdUser}
+                      roles={roles}
+                      users={users}
+                      onChanged={loadData}
+                    />
                   </div>
                 ) : null;
               })()}
@@ -452,33 +395,12 @@ function AdminUsersPageInner() {
           ) : (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">Account type</label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCreateUserType("member")}
-                    className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
-                      createUserType === "member"
-                        ? "border-primary bg-primary/5 text-primary"
-                        : "border-input text-muted-foreground hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="font-medium">Member</div>
-                    <div className="text-xs opacity-70">Project-scoped access</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCreateUserType("admin")}
-                    className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
-                      createUserType === "admin"
-                        ? "border-primary bg-primary/5 text-primary"
-                        : "border-input text-muted-foreground hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="font-medium">Admin</div>
-                    <div className="text-xs opacity-70">Full system access</div>
-                  </button>
-                </div>
+                <label className="text-sm font-medium">Access</label>
+                <AccessKindCards
+                  value={createKind}
+                  onChange={setCreateKind}
+                  memberText="Only the projects you give them, next."
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Full name</label>
@@ -498,20 +420,6 @@ function AdminUsersPageInner() {
                   onChange={(e) => setCreateEmail(e.target.value)}
                 />
               </div>
-              {createUserType === "member" && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Initial role</label>
-                  <Select
-                    value={createRoleId}
-                    onChange={(e) => setCreateRoleId(e.target.value)}
-                    options={roles.filter((r) => r.name !== "admin").map((r) => ({ value: r.id, label: r.name }))}
-                    placeholder="Select a role"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Assign project-scoped access after creation via the Users table.
-                  </p>
-                </div>
-              )}
               <DialogFooter>
                 <Button variant="outline" onClick={() => setCreateOpen(false)}>
                   Cancel
@@ -522,7 +430,6 @@ function AdminUsersPageInner() {
                     !createEmail ||
                     !createName ||
                     roles.length === 0 ||
-                    (createUserType === "member" && !createRoleId) ||
                     creating
                   }
                   className="gap-2"
