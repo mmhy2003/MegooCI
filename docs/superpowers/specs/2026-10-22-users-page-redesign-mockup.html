@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Users page — option B, revised</title>
+<style>
+  :root {
+    --bg: hsl(264 90% 4%);
+    --card: hsl(262 60% 7%);
+    --card-2: hsl(262 45% 10%);
+    --border: hsl(262 40% 15%);
+    --border-2: hsl(262 35% 22%);
+    --fg: hsl(176 20% 90%);
+    --muted: hsl(262 15% 62%);
+    --primary: hsl(176 100% 50%);
+    --primary-fg: hsl(264 90% 4%);
+    --dev: hsl(150 60% 55%);
+    --dev-bg: hsl(150 50% 14%);
+    --view: hsl(262 20% 78%);
+    --view-bg: hsl(262 25% 16%);
+    --warn: hsl(38 90% 60%);
+    --warn-bg: hsl(38 60% 12%);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 24px; max-width: 900px; }
+  .lead b { color: var(--fg); }
+  .caption { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin: 30px 0 10px; }
+
+  .app { border: 1px solid var(--border); border-radius: 12px; background: var(--bg); padding: 18px; }
+  .app-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .app-top h3 { margin: 0; font-size: 20px; }
+  .app-top small { color: var(--muted); }
+  .btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-2); background: transparent; color: var(--fg); padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; white-space: nowrap; }
+  .btn.primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+  .btn.sm { padding: 3px 9px; font-size: 12px; }
+  .btn.ghost { border-color: transparent; color: var(--muted); }
+  .btn.danger { color: hsl(0 80% 70%); border-color: hsl(0 50% 30%); }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+  .tab { padding: 8px 14px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
+  .tab.on { color: var(--fg); border-bottom-color: var(--primary); }
+  .tab .count { font-size: 11px; background: var(--card-2); border-radius: 999px; padding: 1px 7px; margin-left: 6px; color: var(--muted); }
+  .tab .warnpip { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); margin-left: 6px; vertical-align: middle; }
+  .input { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; color: var(--muted); font-size: 13px; }
+  .select { background: var(--card); border: 1px solid var(--border-2); border-radius: 8px; padding: 6px 10px; color: var(--fg); font-size: 13px; display: inline-flex; gap: 8px; align-items: center; justify-content: space-between; }
+  .select::after { content: "▾"; color: var(--muted); font-size: 11px; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+  .b-admin { background: var(--primary); color: var(--primary-fg); }
+  .b-on { background: var(--dev-bg); color: var(--dev); }
+  .b-off { background: var(--warn-bg); color: var(--warn); }
+  .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--card-2); border: 1px solid var(--border-2); display: grid; place-items: center; font-size: 12px; font-weight: 600; flex: none; }
+  .avatar.adm { border-color: var(--primary); color: var(--primary); }
+  .who { display: flex; gap: 10px; align-items: center; }
+  .who b { display: block; font-weight: 600; }
+  .email { color: var(--muted); font-size: 12px; }
+  .muted { color: var(--muted); }
+
+  .b-wrap { display: grid; grid-template-columns: 270px 1fr; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; min-height: 600px; }
+  .list { background: var(--card); border-right: 1px solid var(--border); padding: 10px; }
+  .li { display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 8px; margin-bottom: 2px; }
+  .li.on { background: hsl(176 100% 50% / .09); box-shadow: inset 3px 0 0 var(--primary); }
+  .li .meta { font-size: 11px; color: var(--muted); }
+  .li b { font-weight: 600; font-size: 13px; }
+  .grp { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 10px 8px 4px; }
+  .detail { padding: 18px 22px; }
+  .d-head { display: flex; justify-content: space-between; align-items: center; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .d-head .who b { font-size: 18px; }
+
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; margin: 16px 0 8px; }
+  .level { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .lvl { border: 1px solid var(--border-2); border-radius: 10px; padding: 12px 14px; display: flex; gap: 10px; }
+  .lvl.on { border-color: var(--primary); background: hsl(176 100% 50% / .06); }
+  .radio { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border-2); flex: none; margin-top: 2px; }
+  .lvl.on .radio { border-color: var(--primary); box-shadow: inset 0 0 0 3px var(--bg); background: var(--primary); }
+  .lvl b { display: block; }
+  .lvl span { color: var(--muted); font-size: 12.5px; }
+
+  .plist { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; margin-top: 4px; }
+  .prow { display: grid; grid-template-columns: 1fr 112px 22px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .cellsel { font-size: 12px; padding: 3px 8px; border-radius: 6px; display: flex; justify-content: space-between; }
+  .cellsel::after { content: "▾"; font-size: 10px; opacity: .7; }
+  .cellsel.v { background: var(--view-bg); color: var(--view); }
+  .cellsel.d { background: var(--dev-bg); color: var(--dev); }
+  .x { color: var(--muted); text-align: center; }
+  .addrow { display: flex; gap: 8px; align-items: center; background: var(--card); border: 1px dashed var(--border-2); border-radius: 8px; padding: 8px; margin-top: 12px; }
+  .notice { display: flex; gap: 10px; align-items: flex-start; background: var(--warn-bg); border: 1px solid hsl(38 60% 25%); color: hsl(38 80% 80%); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-top: 12px; }
+  .notice b { color: var(--warn); }
+
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .panel { border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 16px; }
+  .panel h4 { margin: 0 0 10px; font-size: 14px; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 10px 12px; align-items: center; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+
+  .perm { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .perm th, .perm td { padding: 7px 10px; border-bottom: 1px solid var(--border); text-align: center; }
+  .perm th:first-child, .perm td:first-child { text-align: left; }
+  .perm th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .perm td.area { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding-top: 12px; }
+  .tick { color: var(--dev); font-weight: 700; }
+  .no { color: var(--border-2); }
+
+  .explain { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 22px; margin-bottom: 8px; }
+  .explain h2 { margin: 0 0 10px; font-size: 17px; }
+  .explain .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  .explain h4 { margin: 0 0 6px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .explain ul { margin: 0; padding-left: 18px; }
+  .explain li { margin: 4px 0; }
+  .explain b { color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Option B, revised</h1>
+  <p class="lead">Two changes since the first version. <b>Projects are now one alphabetical list of names</b>, so "Console Production" and "Console Staging" end up next to each other without the page guessing which is which. <b>"Admin" is now a single choice</b> instead of a flag plus a role. The box below shows what I found in the code and why I'd merge the two.</p>
+
+  <div class="explain">
+    <h2>Admin flag vs "admin" role: what the code actually does</h2>
+    <div class="cols">
+      <div>
+        <h4>Today: two separate switches</h4>
+        <ul>
+          <li><b>"Make admin"</b> sets a yes/no flag on the account. The sidebar admin pages (Users, Integrations, Backups), the admin settings tabs and admin alerts (agent offline, backup failed) go <i>only</i> to flagged users.</li>
+          <li><b>"Assign role → admin"</b> gives the admin role. The server treats it as full admin for every API, MCP and token call, but the UI hides the admin pages because the flag isn't set.</li>
+          <li>The two only match when a user is <b>created</b>. After that they drift:
+            <ul>
+              <li>"Remove admin" clears the flag but leaves the role, so the person still has full admin through the API.</li>
+              <li>"Create user → Admin" sets the flag but gives no role.</li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+      <div>
+        <h4>Proposed: one "Administrator" switch</h4>
+        <ul>
+          <li>The page shows one choice per person: <b>Administrator</b> (everything, every project) or <b>Member</b> (only the projects listed).</li>
+          <li>Turning Administrator on or off sets <b>both</b> the flag and the role together, so they can't drift again. Users who have drifted already are fixed once, as part of this change.</li>
+          <li>"Assign role" and the global role chips go away. The roles left (developer, viewer) are only given <b>per project</b>.</li>
+          <li>A member who still has an old global viewer or developer role, which silently lets them see <i>every</i> project, gets a warning with a one-click fix (example below).</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">1 · A member: access tab</div>
+  <div class="app">
+    <div class="app-top">
+      <div><h3>Users</h3><small>Manage who can sign in and what they can reach.</small></div>
+      <div style="display:flex;gap:8px"><span class="btn">＋ Create user</span><span class="btn primary">Invite member</span></div>
+    </div>
+    <div class="tabs"><span class="tab on">Users<span class="count">7</span></span><span class="tab">Invitations<span class="count">0</span></span><span class="tab">Roles</span></div>
+
+    <div class="b-wrap">
+      <div class="list">
+        <span class="input" style="display:block;margin-bottom:6px">🔍 Search name or email…</span>
+        <div class="grp">Administrators · 2</div>
+        <div class="li"><span class="avatar adm">MY</span><div><b>Mohamed Youssef</b><div class="meta">Every project</div></div></div>
+        <div class="li"><span class="avatar adm">MK</span><div><b>Mourad Khalsi</b><div class="meta">Every project · <span style="color:var(--warn)">two-step off</span></div></div></div>
+        <div class="grp">Members · 5</div>
+        <div class="li on"><span class="avatar">NZ</span><div><b>nizar zaghdoudi</b><div class="meta">17 projects · 6 as developer</div></div></div>
+        <div class="li"><span class="avatar">RB</span><div><b>Ridha Boukouba</b><div class="meta">12 projects</div></div></div>
+        <div class="li"><span class="avatar">MA</span><div><b>majed</b><div class="meta">11 projects</div></div></div>
+        <div class="li"><span class="avatar">RA</span><div><b>ramzi</b><div class="meta">9 projects</div></div></div>
+        <div class="li"><span class="avatar">NA</span><div><b>nabil</b><div class="meta">8 projects</div></div></div>
+      </div>
+
+      <div class="detail">
+        <div class="d-head">
+          <div class="who"><span class="avatar" style="width:42px;height:42px">NZ</span><div><b>nizar zaghdoudi</b><span class="email">nizar.zaghdoudi@slnee.com</span></div></div>
+          <div style="display:flex;gap:6px;align-items:center"><span class="badge b-off">Two-step off</span></div>
+        </div>
+        <div class="tabs" style="margin-top:6px"><span class="tab on">Access</span><span class="tab">Security<span class="warnpip"></span></span><span class="tab">Account</span></div>
+
+        <div class="label">Access level</div>
+        <div class="level">
+          <div class="lvl"><div class="radio"></div><div><b>Administrator</b><span>Everything, on every project, including users, integrations, backups and settings.</span></div></div>
+          <div class="lvl on"><div class="radio"></div><div><b>Member</b><span>Only the projects below, with the role given on each.</span></div></div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px">
+          <div><b>Projects</b> <span class="muted">· 17</span></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="input" style="padding:4px 8px;width:200px">Filter projects…</span><span class="btn sm">Copy access from…</span></div>
+        </div>
+
+        <div class="plist">
+          <div>
+            <div class="prow"><span>CRM Staging</span><span class="cellsel v">viewer</span><span class="x">✕</span></div>
+            <div class="prow"><span>Hawkama Staging</span><span class="cellsel v">viewer</span><span class="x">✕</span></div>
+            <div class="prow"><span>Inbox Production</span><span class="cellsel d">developer</span><span class="x">✕</span></div>
+            <div class="prow"><span>Marketing Staging</span><span class="cellsel d">developer</span><span class="x">✕</span></div>
+            <div class="prow"><span>PMO Production</span><span class="cellsel v">viewer</span><span class="x">✕</span></div>
+            <div class="prow"><span>PMO Staging</span><span class="cellsel v">viewer</span><span class="x">✕</span></div>
+            <div class="prow"><span>Portal Production</span><span class="cellsel v">viewer</span><span class="x">✕</span></div>
+            <div class="prow"><span>RAG Staging</span><span class="cellsel v">viewer</span><span class="x">✕</span></div>
+            <div class="prow"><span>SSO Production</span><span class="cellsel d">developer</span><span class="x">✕</span></div>
+          </div>
+          <div>
+            <div class="prow"><span>SSO Staging</span><span class="cellsel d">developer</span><span class="x">✕</span></div>
+            <div class="prow"><span>Support Production</span><span class="cellsel v">viewer</span><span class="x">✕</span></div>
+            <div class="prow"><span>Support Staging</span><span class="cellsel v">viewer</span><span class="x">✕</span></div>
+            <div class="prow"><span>Taskhub Production</span><span class="cellsel v">viewer</span><span class="x">✕</span></div>
+            <div class="prow"><span>Taskhub Staging</span><span class="cellsel v">viewer</span><span class="x">✕</span></div>
+            <div class="prow"><span>Website Production</span><span class="cellsel d">developer</span><span class="x">✕</span></div>
+            <div class="prow"><span>Website Staging</span><span class="cellsel d">developer</span><span class="x">✕</span></div>
+          </div>
+        </div>
+
+        <div class="addrow">
+          <span class="select" style="flex:1">Add projects…  <span class="muted" style="margin-left:auto;margin-right:6px">pick one or more</span></span>
+          <span class="select" style="width:130px">as viewer</span>
+          <span class="btn sm primary">Add</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">2 · The warning for a member with an old global role (made-up example: your screenshots show none of your members in this state)</div>
+  <div class="app" style="padding:16px 22px">
+    <div class="notice">
+      <span>⚠</span>
+      <div><b>ramzi can see every project.</b> They still have the old global <b>viewer</b> role, which overrides the 9 projects listed. Remove it so they only see those 9. <span class="btn sm" style="margin-left:8px;color:var(--warn);border-color:hsl(38 60% 30%)">Remove global viewer</span></div>
+    </div>
+  </div>
+
+  <div class="caption">3 · An administrator, and the Security and Account tabs</div>
+  <div class="row2">
+    <div class="panel">
+      <div class="who" style="margin-bottom:10px"><span class="avatar adm" style="width:38px;height:38px">MK</span><div><b>Mourad Khalsi</b><span class="email">mourad.khalsi@slnee.com</span></div></div>
+      <div class="tabs"><span class="tab on">Access</span><span class="tab">Security<span class="warnpip"></span></span><span class="tab">Account</span></div>
+      <div class="level" style="grid-template-columns:1fr">
+        <div class="lvl on"><div class="radio"></div><div><b>Administrator</b><span>Everything, on every project. No project list is needed.</span></div></div>
+        <div class="lvl"><div class="radio"></div><div><b>Member</b><span>Only chosen projects.</span></div></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin:10px 0 0">You can't remove administrator from your own account. Changing someone else's asks you to confirm first.</p>
+    </div>
+    <div style="display:grid;gap:18px">
+      <div class="panel">
+        <h4>Security</h4>
+        <div class="kv">
+          <span class="k">Two-step</span><span><span class="badge b-off">Off</span> <span class="muted" style="font-size:12px">· not set up yet</span></span>
+          <span class="k">Reset two-step</span><span><span class="btn sm" style="opacity:.45">Reset</span> <span class="muted" style="font-size:12px">only when it's on</span></span>
+        </div>
+      </div>
+      <div class="panel">
+        <h4>Account</h4>
+        <div class="kv">
+          <span class="k">Status</span><span><span class="badge b-on">Active</span> <span class="btn sm" style="margin-left:6px">Deactivate</span></span>
+          <span class="k">Delete</span><span><span class="btn sm danger">Delete user…</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="caption">4 · Roles tab: a grouped table with ticks instead of chips</div>
+  <div class="app">
+    <table class="perm">
+      <thead><tr><th>Permission</th><th>Administrator</th><th>developer</th><th>viewer</th></tr></thead>
+      <tbody>
+        <tr><td class="area" colspan="4">Projects &amp; pipelines</td></tr>
+        <tr><td>See projects and pipelines</td><td class="tick">✓</td><td class="tick">✓</td><td class="tick">✓</td></tr>
+        <tr><td>Create and change projects and pipelines</td><td class="tick">✓</td><td class="tick">✓</td><td class="no">—</td></tr>
+        <tr><td class="area" colspan="4">Builds &amp; artifacts</td></tr>
+        <tr><td>See builds and their logs</td><td class="tick">✓</td><td class="tick">✓</td><td class="tick">✓</td></tr>
+        <tr><td>Start, cancel and retry builds</td><td class="tick">✓</td><td class="tick">✓</td><td class="no">—</td></tr>
+        <tr><td>Download and manage artifacts</td><td class="tick">✓</td><td class="tick">✓</td><td class="no">—</td></tr>
+        <tr><td class="area" colspan="4">Secrets</td></tr>
+        <tr><td>See secrets</td><td class="tick">✓</td><td class="tick">✓</td><td class="tick">✓</td></tr>
+        <tr><td>Create and change secrets</td><td class="tick">✓</td><td class="tick">✓</td><td class="no">—</td></tr>
+        <tr><td class="area" colspan="4">Server</td></tr>
+        <tr><td>Users, invitations, integrations, agents, backups, settings</td><td class="tick">✓</td><td class="no">—</td><td class="no">—</td></tr>
+      </tbody>
+    </table>
+    <p class="muted" style="font-size:12px;margin:10px 0 0">Shown as plain sentences. The raw permission names (e.g. <code>pipelines.manage</code>) appear on hover.</p>
+  </div>
+</div>
+</body>
+</html>
