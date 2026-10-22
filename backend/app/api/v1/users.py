@@ -119,15 +119,15 @@ async def create_user(
         email=body.email,
         name=body.name,
         hashed_password=hash_password(generated_password),
-        is_admin=role.name == "admin",
         is_active=True,
     )
     db.add(user)
     await db.flush()
 
     if role.name == "admin":
-        db.add(UserRole(user_id=user.id, role_id=body.role_id, scope_type="global"))
-        await db.flush()
+        await set_administrator(
+            db, user, True, actor_id=_current_user.id if _current_user else None
+        )
     # Non-admins start with no role; an admin assigns project roles afterward.
 
     result = await db.execute(

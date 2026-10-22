@@ -13,8 +13,9 @@ from app.core.email import send_invite_email
 from app.core.security import hash_password
 from app.database import get_db
 from app.models.invite import Invite
-from app.models.role import Role, UserRole
+from app.models.role import Role
 from app.models.user import User
+from app.services.administrators import set_administrator
 from app.services.two_step import clock, sign_in
 from app.schemas.two_step import SignInResponse
 from app.schemas.invites import (
@@ -164,14 +165,13 @@ async def accept_invite(
         email=invite.email,
         name=body.name,
         hashed_password=hash_password(body.password),
-        is_admin=is_admin_role,
         is_active=True,
     )
     db.add(user)
     await db.flush()
 
     if is_admin_role:
-        db.add(UserRole(user_id=user.id, role_id=invite.role_id, scope_type="global"))
+        await set_administrator(db, user, True, actor_id=None)
     # Non-admin invitees start with no role; project assignment follows.
 
     invite.status = "accepted"

@@ -18,6 +18,7 @@ from app.core.security import (
 from app.database import get_db
 from app.models.role import Role, UserRole
 from app.models.user import User
+from app.services.administrators import set_administrator
 from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -72,17 +73,20 @@ async def signup(
         email=body.email,
         name=body.name,
         hashed_password=hash_password(body.password),
-        is_admin=is_first_user,
         is_active=True,
     )
     db.add(user)
     await db.flush()
 
-    role_name = "admin" if is_first_user else settings.MEGOOCI_DEFAULT_ROLE
-    role_result = await db.execute(select(Role).where(Role.name == role_name))
-    role = role_result.scalar_one_or_none()
-    if role:
-        db.add(UserRole(user_id=user.id, role_id=role.id, scope_type="global"))
+    if is_first_user:
+        await set_administrator(db, user, True, actor_id=None)
+    else:
+        role_result = await db.execute(
+            select(Role).where(Role.name == settings.MEGOOCI_DEFAULT_ROLE)
+        )
+        role = role_result.scalar_one_or_none()
+        if role:
+            db.add(UserRole(user_id=user.id, role_id=role.id, scope_type="global"))
 
     await db.commit()
     await db.refresh(user)

@@ -532,3 +532,26 @@ async def test_a_backup_without_a_table_empties_it(sf):
     summary = await _restore(sf, payload, ids["admin"])
 
     assert await _count(sf, EnvVar) == 0 and summary["env_vars"] == {"written": 0, "removed": 1}
+
+
+async def test_restore_gives_the_restoring_account_the_admin_role(sf):
+    from app.models.role import Role, UserRole
+
+    ids = await _seed(sf)
+    async with sf() as db:
+        admin_role = await insert(db, Role, name="admin", permissions=["admin"])
+        await insert(db, UserRole, user_id=ids["admin"], role_id=admin_role, scope_type="global")
+        await db.commit()
+    payload = copy.deepcopy(await _export(sf))
+    payload["tables"]["user_roles"] = [
+        row for row in payload["tables"]["user_roles"]
+        if str(row.get("user_id")).replace("-", "") != ids["admin"].hex
+    ]
+
+    await _restore(sf, payload, ids["admin"])
+
+    async with sf() as db:
+        held = (await db.execute(sa.select(UserRole).where(
+            UserRole.user_id == ids["admin"], UserRole.scope_type == "global",
+            UserRole.role_id == admin_role))).scalars().all()
+    assert len(held) == 1, "the restoring administrator keeps the admin role, not only the flag"
