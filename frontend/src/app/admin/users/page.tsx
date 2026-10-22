@@ -36,6 +36,12 @@ import {
   type InviteCreated,
 } from "@/lib/api";
 import { ProjectAssignmentsEditor } from "@/components/ProjectAssignmentsEditor";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { AccessKindCards, type AccessChoice } from "@/components/users/AccessKindCards";
+import { InvitationsTab } from "@/components/users/InvitationsTab";
+import { RolesTab } from "@/components/users/RolesTab";
+import { adminRoleId, memberRoleId } from "@/components/users/access";
+import { cn } from "@/lib/utils";
 import {
   Card,
   CardContent,
@@ -77,35 +83,29 @@ function roleBadgeVariant(name: string): "default" | "secondary" | "success" {
   return "secondary";
 }
 
-function InviteStatusBadge({ status }: { status: string }) {
-  if (status === "pending")
-    return (
-      <Badge variant="pending" className="gap-1">
-        <Clock className="h-3 w-3" /> Pending
-      </Badge>
-    );
-  if (status === "accepted")
-    return (
-      <Badge variant="success" className="gap-1">
-        <CheckCircle2 className="h-3 w-3" /> Accepted
-      </Badge>
-    );
-  if (status === "expired")
-    return (
-      <Badge variant="cancelled" className="gap-1">
-        <Clock className="h-3 w-3" /> Expired
-      </Badge>
-    );
-  if (status === "revoked")
-    return (
-      <Badge variant="failed" className="gap-1">
-        <XCircle className="h-3 w-3" /> Revoked
-      </Badge>
-    );
-  return <Badge variant="secondary">{status}</Badge>;
-}
+
+type PageTab = "users" | "invitations" | "roles";
+const PAGE_TABS: PageTab[] = ["users", "invitations", "roles"];
 
 export default function AdminUsersPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <AdminUsersPageInner />
+    </React.Suspense>
+  );
+}
+
+function AdminUsersPageInner() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab") as PageTab | null;
+  const tab: PageTab = tabParam && PAGE_TABS.includes(tabParam) ? tabParam : "users";
+  const setTab = (next: PageTab) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", next);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
   const { user: currentUser } = useAuthStore();
   const confirm = useConfirm();
 
@@ -116,7 +116,7 @@ export default function AdminUsersPage() {
 
   const [inviteOpen, setInviteOpen] = React.useState(false);
   const [inviteEmail, setInviteEmail] = React.useState("");
-  const [inviteRoleId, setInviteRoleId] = React.useState("");
+  const [inviteKind, setInviteKind] = React.useState<AccessChoice>("member");
   const [inviteSending, setInviteSending] = React.useState(false);
   const [lastInviteLink, setLastInviteLink] = React.useState<string | null>(null);
 
@@ -163,12 +163,15 @@ export default function AdminUsersPage() {
   }, [loadData]);
 
   const handleInvite = async () => {
-    if (!inviteEmail || !inviteRoleId) return;
+    // Members get no role row on accept; the viewer id is only the
+    // placeholder the API requires.
+    const roleId = inviteKind === "administrator" ? adminRoleId(roles) : memberRoleId(roles);
+    if (!inviteEmail || !roleId) return;
     setInviteSending(true);
     try {
       const result: InviteCreated = await invitesApi.create({
         email: inviteEmail,
-        role_id: inviteRoleId,
+        role_id: roleId,
       });
       toast.success(`Invitation sent to ${inviteEmail}`);
       setLastInviteLink(result.invite_link);
@@ -186,55 +189,6 @@ export default function AdminUsersPage() {
     if (lastInviteLink) {
       navigator.clipboard.writeText(lastInviteLink);
       toast.success("Invite link copied to clipboard");
-    }
-  };
-
-  const handleRevokeInvite = async (invite: Invite) => {
-    const ok = await confirm({
-      title: "Revoke invitation?",
-      description: `This will invalidate the invitation sent to ${invite.email}.`,
-      confirmText: "Revoke",
-      tone: "warning",
-    });
-    if (!ok) return;
-    try {
-      await invitesApi.revoke(invite.id);
-      toast.success("Invitation revoked");
-      loadData();
-    } catch {
-      toast.error("Failed to revoke invitation");
-    }
-  };
-
-  const handleResendInvite = async (invite: Invite) => {
-    try {
-      await invitesApi.resend(invite.id);
-      toast.success(`Invitation resent to ${invite.email}`);
-      loadData();
-    } catch {
-      toast.error("Failed to resend invitation");
-    }
-  };
-
-  const handleCleanupInvites = async () => {
-    const nonPending = invites.filter((i) => i.status !== "pending").length;
-    if (nonPending === 0) {
-      toast.info("No old invitations to clear");
-      return;
-    }
-    const ok = await confirm({
-      title: "Clear invitation history?",
-      description: `This will permanently delete ${nonPending} non-pending invitation${nonPending === 1 ? "" : "s"} (accepted, revoked, expired). Pending invitations will not be affected.`,
-      confirmText: "Clear",
-      tone: "warning",
-    });
-    if (!ok) return;
-    try {
-      const result = await invitesApi.cleanup();
-      toast.success(`Cleared ${result.deleted} old invitation${result.deleted === 1 ? "" : "s"}`);
-      loadData();
-    } catch {
-      toast.error("Failed to clear invitation history");
     }
   };
 
@@ -407,14 +361,12 @@ export default function AdminUsersPage() {
 
   return (
     <AppLayout>
-      <div className="mx-auto max-w-5xl space-y-8">
-        <div className="flex items-center justify-between">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-              User Management
-            </h1>
+            <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Users</h1>
             <p className="text-sm text-muted-foreground">
-              Manage users, roles, and invitations.
+              Manage who can sign in and what they can reach.
             </p>
           </div>
           <div className="flex gap-2">
@@ -424,15 +376,48 @@ export default function AdminUsersPage() {
               className="gap-2"
             >
               <Plus className="h-4 w-4" />
-              Create User
+              Create user
             </Button>
             <Button onClick={() => { setInviteOpen(true); setLastInviteLink(null); }} className="gap-2">
               <UserPlus className="h-4 w-4" />
-              Invite Member
+              Invite member
             </Button>
           </div>
         </div>
 
+        <div role="tablist" className="flex gap-1 border-b">
+          {PAGE_TABS.map((t) => {
+            const count =
+              t === "users" ? users.length
+              : t === "invitations" ? invites.filter((i) => i.status === "pending").length
+              : null;
+            return (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => setTab(t)}
+                className={cn(
+                  "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+                  tab === t
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t === "users" ? "Users" : t === "invitations" ? "Invitations" : "Roles"}
+                {!loading && count !== null && (
+                  <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {tab === "users" && (
+          <>
         {/* Users Table */}
         <Card>
           <CardHeader>
@@ -560,149 +545,12 @@ export default function AdminUsersPage() {
           </CardContent>
         </Card>
 
-        {/* Invitations */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Mail className="h-5 w-5" />
-                Invitations
-                {!loading && (
-                  <Badge variant="secondary" className="ml-2">
-                    {invites.filter((i) => i.status === "pending").length} pending
-                  </Badge>
-                )}
-              </CardTitle>
-              <CardDescription>
-                Pending and past invitations. Invited users join with the
-                assigned role.
-              </CardDescription>
-            </div>
-            {!loading && invites.some((i) => i.status !== "pending") && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleCleanupInvites}
-                className="gap-1.5 text-muted-foreground hover:text-destructive shrink-0"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Clear history
-              </Button>
-            )}
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-14 w-full" />
-                ))}
-              </div>
-            ) : invites.length === 0 ? (
-              <p className="py-8 text-center text-muted-foreground">
-                No invitations yet. Click &quot;Invite Member&quot; to get started.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {invites.map((inv) => (
-                  <div
-                    key={inv.id}
-                    className="flex flex-col gap-2 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">{inv.email}</span>
-                        <InviteStatusBadge status={inv.status} />
-                      </div>
-                      <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
-                        <span>
-                          Role: <span className="font-medium text-foreground">{inv.role_name}</span>
-                        </span>
-                        {inv.creator_name && (
-                          <span>Invited by {inv.creator_name}</span>
-                        )}
-                        <span>
-                          Expires {new Date(inv.expires_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
-                    {inv.status === "pending" && (
-                      <div className="flex gap-1 shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleResendInvite(inv)}
-                          title="Resend invitation"
-                        >
-                          <RefreshCw className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRevokeInvite(inv)}
-                          className="text-destructive hover:text-destructive"
-                          title="Revoke invitation"
-                        >
-                          <XCircle className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Roles Reference */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5" />
-              Roles
-            </CardTitle>
-            <CardDescription>Available roles and their permissions.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-14 w-full" />
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {roles.map((r) => (
-                  <div
-                    key={r.id}
-                    className="rounded-lg border px-4 py-3"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Badge variant={roleBadgeVariant(r.name)} className="gap-1">
-                        {roleIcon(r.name)} {r.name}
-                      </Badge>
-                      {r.is_system && (
-                        <span className="text-[10px] text-muted-foreground">(system)</span>
-                      )}
-                    </div>
-                    {r.description && (
-                      <p className="mt-1 text-xs text-muted-foreground">{r.description}</p>
-                    )}
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {r.permissions.map((p) => (
-                        <code
-                          key={p}
-                          className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                        >
-                          {p}
-                        </code>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          </>
+        )}
+        {tab === "invitations" && (
+          <InvitationsTab invites={invites} loading={loading} onChanged={loadData} />
+        )}
+        {tab === "roles" && <RolesTab roles={roles} loading={loading} />}
       </div>
 
       {/* Invite Dialog */}
@@ -712,7 +560,7 @@ export default function AdminUsersPage() {
             <DialogTitle>Invite a new member</DialogTitle>
             <DialogDescription>
               Send an invitation email with a one-time sign-up link.
-              {!lastInviteLink && " The user will be assigned the selected role on sign-up."}
+              {!lastInviteLink && " They join as an Administrator or a Member."}
             </DialogDescription>
           </DialogHeader>
 
@@ -759,12 +607,11 @@ export default function AdminUsersPage() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Role</label>
-                <Select
-                  value={inviteRoleId}
-                  onChange={(e) => setInviteRoleId(e.target.value)}
-                  options={roles.map((r) => ({ value: r.id, label: r.name }))}
-                  placeholder="Select a role"
+                <label className="text-sm font-medium">Access</label>
+                <AccessKindCards
+                  value={inviteKind}
+                  onChange={setInviteKind}
+                  memberText="Only the projects you give them after they join."
                 />
               </div>
               <DialogFooter>
@@ -773,7 +620,7 @@ export default function AdminUsersPage() {
                 </Button>
                 <Button
                   onClick={handleInvite}
-                  disabled={!inviteEmail || !inviteRoleId || inviteSending}
+                  disabled={!inviteEmail || inviteSending}
                   className="gap-2"
                 >
                   <Send className="h-4 w-4" />
