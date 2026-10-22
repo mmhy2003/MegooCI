@@ -40,6 +40,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AccessKindCards, type AccessChoice } from "@/components/users/AccessKindCards";
 import { InvitationsTab } from "@/components/users/InvitationsTab";
 import { RolesTab } from "@/components/users/RolesTab";
+import { UsersTab } from "@/components/users/UsersTab";
 import { adminRoleId, memberRoleId } from "@/components/users/access";
 import { cn } from "@/lib/utils";
 import {
@@ -120,11 +121,6 @@ function AdminUsersPageInner() {
   const [inviteSending, setInviteSending] = React.useState(false);
   const [lastInviteLink, setLastInviteLink] = React.useState<string | null>(null);
 
-  const [roleDialogOpen, setRoleDialogOpen] = React.useState(false);
-  const [roleDialogUserId, setRoleDialogUserId] = React.useState<string | null>(null);
-  const [roleDialogRoleId, setRoleDialogRoleId] = React.useState("");
-  const [roleAssigning, setRoleAssigning] = React.useState(false);
-
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createEmail, setCreateEmail] = React.useState("");
   const [createName, setCreateName] = React.useState("");
@@ -189,121 +185,6 @@ function AdminUsersPageInner() {
     if (lastInviteLink) {
       navigator.clipboard.writeText(lastInviteLink);
       toast.success("Invite link copied to clipboard");
-    }
-  };
-
-  const handleToggleActive = async (u: UserDetail) => {
-    const action = u.is_active ? "deactivate" : "activate";
-    const ok = await confirm({
-      title: `${action.charAt(0).toUpperCase() + action.slice(1)} user?`,
-      description: `Are you sure you want to ${action} ${u.name} (${u.email})?`,
-      confirmText: action.charAt(0).toUpperCase() + action.slice(1),
-      tone: u.is_active ? "warning" : undefined,
-    });
-    if (!ok) return;
-    try {
-      await usersApi.update(u.id, { is_active: !u.is_active });
-      toast.success(`User ${action}d`);
-      loadData();
-    } catch (e: unknown) {
-      const msg = (e as { body?: { detail?: string } })?.body?.detail || `Failed to ${action} user`;
-      toast.error(msg);
-    }
-  };
-
-  const handleResetTwoStep = async (u: UserDetail) => {
-    const ok = await confirm({
-      title: "Reset two-step verification?",
-      description: `This removes the authenticator app, passkeys and recovery codes of ${u.name} (${u.email}). They sign in with their password alone until they set it up again; where it is required, they are asked to at their next sign-in.`,
-      confirmText: "Reset",
-      tone: "warning",
-    });
-    if (!ok) return;
-    try {
-      await usersApi.resetTwoStep(u.id);
-      toast.success(`Two-step verification reset for ${u.name}`);
-      loadData();
-    } catch (e: unknown) {
-      const msg =
-        (e as { body?: { detail?: string } })?.body?.detail ||
-        "Failed to reset two-step verification";
-      toast.error(msg);
-    }
-  };
-
-  const handleDeleteUser = async (u: UserDetail) => {
-    const ok = await confirm({
-      title: "Delete user permanently?",
-      description: `This will permanently delete ${u.name} (${u.email}) and remove all their role assignments. This action cannot be undone.`,
-      confirmText: "Delete",
-      tone: "destructive",
-    });
-    if (!ok) return;
-    try {
-      await usersApi.delete(u.id);
-      toast.success(`User ${u.name} deleted`);
-      loadData();
-    } catch (e: unknown) {
-      const msg = (e as { body?: { detail?: string } })?.body?.detail || "Failed to delete user";
-      toast.error(msg);
-    }
-  };
-
-  const handleToggleAdmin = async (u: UserDetail) => {
-    const action = u.is_admin ? "Remove admin" : "Make admin";
-    const ok = await confirm({
-      title: `${action}?`,
-      description: `Are you sure you want to ${action.toLowerCase()} for ${u.name}?`,
-      confirmText: action,
-      tone: "warning",
-    });
-    if (!ok) return;
-    try {
-      await usersApi.update(u.id, { is_admin: !u.is_admin });
-      toast.success(`Admin status updated`);
-      loadData();
-    } catch (e: unknown) {
-      const msg = (e as { body?: { detail?: string } })?.body?.detail || "Failed to update admin status";
-      toast.error(msg);
-    }
-  };
-
-  const openAssignRole = (userId: string) => {
-    setRoleDialogUserId(userId);
-    setRoleDialogRoleId(roles[0]?.id || "");
-    setRoleDialogOpen(true);
-  };
-
-  const handleAssignRole = async () => {
-    if (!roleDialogUserId || !roleDialogRoleId) return;
-    setRoleAssigning(true);
-    try {
-      await usersApi.assignRole(roleDialogUserId, { role_id: roleDialogRoleId });
-      toast.success("Role assigned");
-      setRoleDialogOpen(false);
-      loadData();
-    } catch (e: unknown) {
-      const msg = (e as { body?: { detail?: string } })?.body?.detail || "Failed to assign role";
-      toast.error(msg);
-    } finally {
-      setRoleAssigning(false);
-    }
-  };
-
-  const handleRemoveRole = async (userId: string, userRoleId: string, roleName: string) => {
-    const ok = await confirm({
-      title: "Remove role?",
-      description: `Remove the "${roleName}" role from this user?`,
-      confirmText: "Remove",
-      tone: "warning",
-    });
-    if (!ok) return;
-    try {
-      await usersApi.removeRole(userId, userRoleId);
-      toast.success("Role removed");
-      loadData();
-    } catch {
-      toast.error("Failed to remove role");
     }
   };
 
@@ -418,133 +299,7 @@ function AdminUsersPageInner() {
 
         {tab === "users" && (
           <>
-        {/* Users Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Users
-              {!loading && (
-                <Badge variant="secondary" className="ml-2">{users.length}</Badge>
-              )}
-            </CardTitle>
-            <CardDescription>All registered users and their roles.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="space-y-3">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-16 w-full" />
-                ))}
-              </div>
-            ) : users.length === 0 ? (
-              <p className="py-8 text-center text-muted-foreground">No users found.</p>
-            ) : (
-              <div className="space-y-2">
-                {users.map((u) => (
-                  <div
-                    key={u.id}
-                    className="flex flex-col gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium truncate">{u.name}</span>
-                        {u.is_admin && (
-                          <Badge variant="default" className="gap-1 text-[10px]">
-                            <ShieldCheck className="h-3 w-3" /> Admin
-                          </Badge>
-                        )}
-                        {!u.is_active && (
-                          <Badge variant="failed" className="text-[10px]">Inactive</Badge>
-                        )}
-                        <Badge
-                          variant={u.two_step_enabled ? "success" : "pending"}
-                          className="text-[10px]"
-                          title="Two-step verification"
-                        >
-                          {u.two_step_enabled ? "Two-step on" : "Two-step off"}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate">{u.email}</p>
-                      <div className="mt-1.5 flex flex-wrap gap-1.5">
-                        {u.roles.filter((r) => r.scope_type === "global").map((r) => (
-                          <Badge
-                            key={r.id}
-                            variant={roleBadgeVariant(r.role_name || "")}
-                            className="gap-1 cursor-pointer hover:opacity-80"
-                            title={`Click to remove "${r.role_name}" role`}
-                            onClick={() =>
-                              handleRemoveRole(u.id, r.id, r.role_name || "Unknown")
-                            }
-                          >
-                            {roleIcon(r.role_name || "")}
-                            {r.role_name}
-                          </Badge>
-                        ))}
-                        {u.roles.filter((r) => r.scope_type === "global").length === 0 && !u.is_admin && (
-                          <span className="text-xs text-muted-foreground italic">No global role</span>
-                        )}
-                      </div>
-                      <div className="mt-2">
-                        <p className="mb-1 text-xs font-medium text-muted-foreground">Project access</p>
-                        <ProjectAssignmentsEditor user={u} onChanged={loadData} />
-                      </div>
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="shrink-0">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openAssignRole(u.id)}>
-                          <Shield className="mr-2 h-4 w-4" /> Assign role
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleToggleAdmin(u)}
-                          disabled={u.id === currentUser?.id}
-                        >
-                          <ShieldCheck className="mr-2 h-4 w-4" />
-                          {u.is_admin ? "Remove admin" : "Make admin"}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => handleToggleActive(u)}
-                          disabled={u.id === currentUser?.id}
-                          className={u.is_active ? "text-destructive" : ""}
-                        >
-                          {u.is_active ? (
-                            <>
-                              <XCircle className="mr-2 h-4 w-4" /> Deactivate
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle2 className="mr-2 h-4 w-4" /> Activate
-                            </>
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleResetTwoStep(u)}
-                          disabled={!u.two_step_enabled || u.id === currentUser?.id}
-                        >
-                          <ShieldOff className="mr-2 h-4 w-4" /> Reset two-step verification
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleDeleteUser(u)}
-                          disabled={u.id === currentUser?.id}
-                          className="text-destructive"
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" /> Delete user
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
+        <UsersTab users={users} roles={roles} loading={loading} onChanged={loadData} />
           </>
         )}
         {tab === "invitations" && (
@@ -629,40 +384,6 @@ function AdminUsersPageInner() {
               </DialogFooter>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Assign Role Dialog */}
-      <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Assign role</DialogTitle>
-            <DialogDescription>
-              Select a role to assign to this user.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Role</label>
-              <Select
-                value={roleDialogRoleId}
-                onChange={(e) => setRoleDialogRoleId(e.target.value)}
-                options={roles.map((r) => ({ value: r.id, label: r.name }))}
-                placeholder="Select a role"
-              />
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setRoleDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleAssignRole}
-                disabled={!roleDialogRoleId || roleAssigning}
-              >
-                {roleAssigning ? "Assigning..." : "Assign"}
-              </Button>
-            </DialogFooter>
-          </div>
         </DialogContent>
       </Dialog>
 
