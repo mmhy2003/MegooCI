@@ -12,7 +12,7 @@ from app.core.security import hash_password
 from app.database import get_db
 from app.models.role import Role, UserRole
 from app.models.user import User
-from app.schemas.roles import UserRoleAssign, UserRoleResponse
+from app.schemas.roles import ProjectRolesBatch, UserRoleAssign, UserRoleResponse
 from app.services.administrators import (
     AdministratorChangeError,
     is_admin_role_row,
@@ -360,6 +360,95 @@ async def assign_role(
         "role_name": role.name,
         "created_at": user_role.created_at,
     }
+
+
+@router.post(
+    "/{user_id}/project-roles",
+    response_model=list[UserRoleResponse],
+)
+async def assign_project_roles(
+    user_id: uuid.UUID,
+    body: ProjectRolesBatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("users.manage")),
+) -> list[dict]:
+    """Give a user a role on several projects at once. Everything is checked
+    before anything is written, so the request adds all of them or none."""
+    from app.models.project import Project
+
+    if await db.get(User, user_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    project_ids = [a.project_id for a in body.assignments]
+    if len(set(project_ids)) != len(project_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Each project may appear only once",
+        )
+
+    role_ids = {a.role_id for a in body.assignments}
+    roles = {
+        role.id: role
+        for role in (await db.execute(select(Role).where(Role.id.in_(role_ids)))).scalars()
+    }
+    if len(roles) != len(role_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+    if any(role.name == "admin" for role in roles.values()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The admin role cannot be scoped to a project",
+        )
+
+    found = set(
+        (await db.execute(select(Project.id).where(Project.id.in_(project_ids)))).scalars()
+    )
+    if found != set(project_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scope_id must reference an existing project",
+        )
+
+    # One role per (user, project): replace in place, as assign_role does.
+    current = {
+        row.scope_id: row
+        for row in (await db.execute(
+            select(UserRole).where(
+                UserRole.user_id == user_id,
+                UserRole.scope_type == "project",
+                UserRole.scope_id.in_(project_ids),
+            )
+        )).scalars()
+    }
+    for assignment in body.assignments:
+        row = current.get(assignment.project_id)
+        if row is None:
+            db.add(UserRole(
+                user_id=user_id,
+                role_id=assignment.role_id,
+                scope_type="project",
+                scope_id=assignment.project_id,
+            ))
+        else:
+            row.role_id = assignment.role_id
+    await db.flush()
+
+    rows = (await db.execute(
+        select(UserRole)
+        .options(selectinload(UserRole.role))
+        .where(UserRole.user_id == user_id, UserRole.scope_type == "project")
+    )).scalars().all()
+    return [
+        {
+            "id": row.id,
+            "user_id": row.user_id,
+            "role_id": row.role_id,
+            "scope_type": row.scope_type,
+            "scope_id": row.scope_id,
+            "role_name": row.role.name if row.role else None,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
 
 
 @router.delete("/{user_id}/roles/{user_role_id}", status_code=status.HTTP_204_NO_CONTENT)
