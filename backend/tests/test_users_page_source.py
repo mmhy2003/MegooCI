@@ -40,3 +40,16 @@ def test_invitations_show_administrator_or_member():
 def test_project_roles_offered_exclude_admin_permission():
     assert "export function isAssignablePerProject" in _read(USERS / "access.ts")
     assert "isAssignablePerProject" in _read(USERS / "ProjectAccessEditor.tsx")
+
+
+def test_escape_closes_only_the_topmost_dialog():
+    """A dialog opened inside another (copy access inside create user) must
+    not take the outer one, and its one-time password, with it on Escape."""
+    dialog = _read(FRONTEND_SRC / "components" / "ui" / "dialog.tsx")
+    assert "openDialogs" in dialog
+    assert "openDialogs[openDialogs.length - 1] === token" in dialog
+
+
+def test_the_project_picker_keeps_escape_to_itself():
+    picker = _read(USERS / "ProjectMultiSelect.tsx")
+    assert 'e.key === "Escape"' in picker and "e.stopPropagation()" in picker

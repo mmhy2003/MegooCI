@@ -57,6 +57,39 @@ export function projectRows(user: UserDetail): UserRoleInfo[] {
     );
 }
 
+/** Project rows whose role carries the admin permission: the server treats
+ *  such a row as administrator access everywhere, not on one project. */
+export function projectAdminRows(user: UserDetail, roles: Role[]): UserRoleInfo[] {
+  const grantsAdmin = new Set(roles.filter((r) => r.permissions.includes(ADMIN)).map((r) => r.id));
+  return projectRows(user).filter((r) => grantsAdmin.has(r.role_id));
+}
+
+const LIST_GROUPS: AccessKind[] = ["half", "administrator", "member"];
+
+/** People in the order the list shows them: by group, then by name. */
+export function listOrder(users: UserDetail[]): UserDetail[] {
+  return LIST_GROUPS.flatMap((kind) =>
+    users
+      .filter((u) => accessKind(u) === kind)
+      .sort((x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: "base" })),
+  );
+}
+
+/** The person to show: the one asked for, else the one already on screen,
+ *  else the first in the list. Keeping the one on screen stops the pane
+ *  jumping when a change moves that person to another group. */
+export function selectedUser(
+  users: UserDetail[],
+  requested: string | null,
+  pinned: string | null,
+): UserDetail {
+  return (
+    users.find((u) => u.id === requested) ??
+    users.find((u) => u.id === pinned) ??
+    listOrder(users)[0]
+  );
+}
+
 /** Global rows other than admin: each one reaches every project. */
 export function leftoverGlobalRoles(
   user: UserDetail,

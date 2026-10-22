@@ -63,6 +63,10 @@ function DialogTrigger({
   );
 }
 
+// Open dialogs, innermost last: Escape closes only the innermost one, so a
+// dialog opened from inside another does not take the outer one with it.
+const openDialogs: symbol[] = [];
+
 function DialogContent({
   className,
   children,
@@ -71,11 +75,17 @@ function DialogContent({
   const { open, setOpen } = React.useContext(DialogContext);
 
   React.useEffect(() => {
+    if (!open) return;
+    const token = Symbol("dialog");
+    openDialogs.push(token);
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape" && openDialogs[openDialogs.length - 1] === token) setOpen(false);
     };
-    if (open) document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+      openDialogs.splice(openDialogs.indexOf(token), 1);
+    };
   }, [open, setOpen]);
 
   if (!open) return null;

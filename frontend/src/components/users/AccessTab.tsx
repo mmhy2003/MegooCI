@@ -8,7 +8,13 @@ import { useAuthStore } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { AccessKindCards, type AccessChoice } from "./AccessKindCards";
-import { accessKind, leftoverGlobalRoles, missingAdminHalf, projectRows } from "./access";
+import {
+  accessKind,
+  leftoverGlobalRoles,
+  missingAdminHalf,
+  projectAdminRows,
+  projectRows,
+} from "./access";
 import { ProjectAccessEditor } from "./ProjectAccessEditor";
 
 function errorDetail(e: unknown, fallback: string): string {
@@ -41,6 +47,7 @@ export function AccessTab({
   const kind = accessKind(user);
   const missing = missingAdminHalf(user);
   const leftovers = kind === "member" ? leftoverGlobalRoles(user, roles) : [];
+  const adminViaProject = kind === "member" ? projectAdminRows(user, roles) : [];
 
   const setAdministrator = async (on: boolean) => {
     const ok = await confirm({
@@ -64,7 +71,7 @@ export function AccessTab({
   const removeGlobalRole = async (rowId: string, roleName: string) => {
     try {
       await usersApi.removeRole(user.id, rowId);
-      toast.success(`Removed the global ${roleName} role`);
+      toast.success(`Removed the ${roleName} role`);
       onChanged();
     } catch (e) {
       toast.error(errorDetail(e, "Failed to remove the role"));
@@ -121,6 +128,21 @@ export function AccessTab({
             onClick={() => removeGlobalRole(row.id, row.role_name ?? "")}
           >
             Remove global {row.role_name}
+          </Button>
+        </Notice>
+      ))}
+
+      {adminViaProject.map((row) => (
+        <Notice key={row.id}>
+          <p>
+            {`${user.name} has full administrator access through the custom role ${row.role_name}, given on ${row.project_name ?? "a project"}: the server applies it everywhere, not only there.`}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => removeGlobalRole(row.id, row.role_name ?? "")}
+          >
+            Remove {row.role_name} on {row.project_name}
           </Button>
         </Notice>
       ))}

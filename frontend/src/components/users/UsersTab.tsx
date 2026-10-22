@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { ArrowLeft } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Role, UserDetail } from "@/lib/api";
@@ -7,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { UserDetailPane } from "./UserDetailPane";
-import { listOrder, UserList } from "./UserList";
+import { UserList } from "./UserList";
+import { selectedUser } from "./access";
 
 export function UsersTab({
   users,
@@ -23,6 +25,7 @@ export function UsersTab({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [pinned, setPinned] = React.useState<string | null>(null);
 
   const setUserParam = (id: string | null) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -36,9 +39,11 @@ export function UsersTab({
     return <p className="py-10 text-center text-muted-foreground">No users found.</p>;
   }
 
-  // A stale or missing ?user falls back to the first person in the list.
+  // ?user wins; a stale or missing one keeps whoever is on screen, so a
+  // change that moves them to another group does not switch the pane.
   const chosen = users.find((u) => u.id === searchParams.get("user")) ?? null;
-  const selected = chosen ?? listOrder(users)[0];
+  const selected = selectedUser(users, searchParams.get("user"), pinned);
+  if (selected.id !== pinned) setPinned(selected.id);
 
   return (
     <div className="grid overflow-hidden rounded-lg border md:min-h-[560px] md:grid-cols-[280px_1fr]">

@@ -40,7 +40,17 @@ export function ProjectMultiSelect({
     onChange(chosen.has(id) ? value.filter((v) => v !== id) : [...value, id]);
 
   return (
-    <div ref={ref} className="relative min-w-0 flex-1">
+    <div
+      ref={ref}
+      className="relative min-w-0 flex-1"
+      onKeyDown={(e) => {
+        // Escape closes the list only, not a dialog this sits in.
+        if (e.key === "Escape" && open) {
+          e.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

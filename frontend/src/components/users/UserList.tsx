@@ -5,7 +5,14 @@ import { Search } from "lucide-react";
 import type { Role, UserDetail } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { accessKind, leftoverGlobalRoles, projectRows, type AccessKind } from "./access";
+import {
+  accessKind,
+  leftoverGlobalRoles,
+  listOrder,
+  projectAdminRows,
+  projectRows,
+  type AccessKind,
+} from "./access";
 
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -25,6 +32,9 @@ function MetaLine({ user, roles }: { user: UserDetail; roles: Role[] }) {
   if (!user.two_step_enabled) warnings.push("two-step off");
   if (kind === "member" && leftoverGlobalRoles(user, roles).length > 0) {
     warnings.push("sees all projects");
+  }
+  if (kind === "member" && projectAdminRows(user, roles).length > 0) {
+    warnings.push("full admin via a custom role");
   }
 
   let text: string;
@@ -65,15 +75,6 @@ export function Avatar({ user, size = "md" }: { user: UserDetail; size?: "md" | 
     >
       {initials(user.name || user.email)}
     </span>
-  );
-}
-
-/** People in the order the list shows them: by group, then by name. */
-export function listOrder(users: UserDetail[]): UserDetail[] {
-  return GROUPS.flatMap((group) =>
-    users
-      .filter((u) => accessKind(u) === group.kind)
-      .sort((x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: "base" })),
   );
 }
 
