@@ -1624,6 +1624,16 @@ export const usersApi = {
       body: JSON.stringify(data),
     }),
 
+  /** Give a role on several projects at once: all are written, or none. */
+  assignProjectRoles: (
+    userId: string,
+    assignments: { project_id: string; role_id: string }[],
+  ) =>
+    fetchApi<UserRoleAssignment[]>(`/api/v1/users/${userId}/project-roles`, {
+      method: "POST",
+      body: JSON.stringify({ assignments }),
+    }),
+
   removeRole: (userId: string, userRoleId: string) =>
     fetchApi<void>(`/api/v1/users/${userId}/roles/${userRoleId}`, {
       method: "DELETE",

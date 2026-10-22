@@ -23,7 +23,7 @@ async def test_assign_project_role_rejects_missing_project(sf):
     async with sf() as db:
         with pytest.raises(HTTPException) as exc:
             await assign_role(uid, UserRoleAssign(role_id=dev, scope_type="project",
-                              scope_id=uuid.uuid4()), db=db, _current_user=None)
+                              scope_id=uuid.uuid4()), db=db, current_user=None)
     assert exc.value.status_code in (400, 404)
 
 
@@ -38,7 +38,7 @@ async def test_assign_rejects_admin_at_project_scope(sf):
     async with sf() as db:
         with pytest.raises(HTTPException) as exc:
             await assign_role(uid, UserRoleAssign(role_id=admin, scope_type="project",
-                              scope_id=pid), db=db, _current_user=None)
+                              scope_id=pid), db=db, current_user=None)
     assert exc.value.status_code == 400
 
 
@@ -55,11 +55,11 @@ async def test_reassign_project_replaces_role(sf):
         await db.commit()
     async with sf() as db:
         await assign_role(uid, UserRoleAssign(role_id=dev, scope_type="project", scope_id=pid),
-                          db=db, _current_user=None)
+                          db=db, current_user=None)
         await db.commit()
     async with sf() as db:
         await assign_role(uid, UserRoleAssign(role_id=view, scope_type="project", scope_id=pid),
-                          db=db, _current_user=None)
+                          db=db, current_user=None)
         await db.commit()
     async with sf() as db:
         rows = (await db.execute(select(UserRole).where(

@@ -12,7 +12,12 @@ from app.core.security import hash_password
 from app.database import get_db
 from app.models.role import Role, UserRole
 from app.models.user import User
-from app.schemas.roles import UserRoleAssign, UserRoleResponse
+from app.schemas.roles import ProjectRolesBatch, UserRoleAssign, UserRoleResponse
+from app.services.administrators import (
+    AdministratorChangeError,
+    is_admin_role_row,
+    set_administrator,
+)
 from app.schemas.users import (
     UserCreateRequest,
     UserCreatedResponse,
@@ -114,15 +119,15 @@ async def create_user(
         email=body.email,
         name=body.name,
         hashed_password=hash_password(generated_password),
-        is_admin=role.name == "admin",
         is_active=True,
     )
     db.add(user)
     await db.flush()
 
     if role.name == "admin":
-        db.add(UserRole(user_id=user.id, role_id=body.role_id, scope_type="global"))
-        await db.flush()
+        await set_administrator(
+            db, user, True, actor_id=_current_user.id if _current_user else None
+        )
     # Non-admins start with no role; an admin assigns project roles afterward.
 
     result = await db.execute(
@@ -182,16 +187,33 @@ async def update_user(
     if body.is_active is not None:
         user.is_active = body.is_active
     if body.is_admin is not None:
-        if user.id == current_user.id and not body.is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You cannot remove your own admin privilege",
-            )
-        user.is_admin = body.is_admin
+        await _set_administrator(db, user, body.is_admin, current_user)
     await db.commit()
     await db.refresh(user)
     pnames = await _project_name_map(db, [user])
     return _user_to_detail(user, pnames, await two_step_status.is_on(db, user.id))
+
+
+async def _holds_global_role(db: AsyncSession, user_id: uuid.UUID, role_id: uuid.UUID) -> bool:
+    found = await db.execute(
+        select(UserRole.id).where(
+            UserRole.user_id == user_id,
+            UserRole.role_id == role_id,
+            UserRole.scope_type == "global",
+        )
+    )
+    return found.first() is not None
+
+
+async def _set_administrator(
+    db: AsyncSession, user: User, on: bool, current_user: User | None
+) -> None:
+    try:
+        await set_administrator(
+            db, user, on, actor_id=current_user.id if current_user else None
+        )
+    except AdministratorChangeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.post("/{user_id}/two-step/reset", status_code=status.HTTP_204_NO_CONTENT)
@@ -230,12 +252,13 @@ async def assign_role(
     user_id: uuid.UUID,
     body: UserRoleAssign,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("users.manage")),
+    current_user: User = Depends(require_permission("users.manage")),
 ) -> dict:
     from app.models.project import Project
 
     user_result = await db.execute(select(User).where(User.id == user_id))
-    if user_result.scalar_one_or_none() is None:
+    user = user_result.scalar_one_or_none()
+    if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     role_result = await db.execute(select(Role).where(Role.id == body.role_id))
@@ -278,6 +301,32 @@ async def assign_role(
                 "created_at": prior.created_at,
             }
 
+    if role.name == "admin" and body.scope_type == "global":
+        # The admin role is half of being an administrator; the flag is the
+        # other half, so it goes through the one function that sets both.
+        if user.is_admin and await _holds_global_role(db, user_id, body.role_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User already has this role in the specified scope",
+            )
+        await _set_administrator(db, user, True, current_user)
+        row = (await db.execute(
+            select(UserRole).where(
+                UserRole.user_id == user_id,
+                UserRole.role_id == body.role_id,
+                UserRole.scope_type == "global",
+            )
+        )).scalar_one()
+        return {
+            "id": row.id,
+            "user_id": row.user_id,
+            "role_id": row.role_id,
+            "scope_type": row.scope_type,
+            "scope_id": row.scope_id,
+            "role_name": role.name,
+            "created_at": row.created_at,
+        }
+
     # Exact-duplicate guard (unchanged) for non-project or first-time project rows.
     existing = await db.execute(
         select(UserRole).where(
@@ -313,12 +362,101 @@ async def assign_role(
     }
 
 
+@router.post(
+    "/{user_id}/project-roles",
+    response_model=list[UserRoleResponse],
+)
+async def assign_project_roles(
+    user_id: uuid.UUID,
+    body: ProjectRolesBatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("users.manage")),
+) -> list[dict]:
+    """Give a user a role on several projects at once. Everything is checked
+    before anything is written, so the request adds all of them or none."""
+    from app.models.project import Project
+
+    if await db.get(User, user_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    project_ids = [a.project_id for a in body.assignments]
+    if len(set(project_ids)) != len(project_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Each project may appear only once",
+        )
+
+    role_ids = {a.role_id for a in body.assignments}
+    roles = {
+        role.id: role
+        for role in (await db.execute(select(Role).where(Role.id.in_(role_ids)))).scalars()
+    }
+    if len(roles) != len(role_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+    if any(role.name == "admin" for role in roles.values()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The admin role cannot be scoped to a project",
+        )
+
+    found = set(
+        (await db.execute(select(Project.id).where(Project.id.in_(project_ids)))).scalars()
+    )
+    if found != set(project_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scope_id must reference an existing project",
+        )
+
+    # One role per (user, project): replace in place, as assign_role does.
+    current = {
+        row.scope_id: row
+        for row in (await db.execute(
+            select(UserRole).where(
+                UserRole.user_id == user_id,
+                UserRole.scope_type == "project",
+                UserRole.scope_id.in_(project_ids),
+            )
+        )).scalars()
+    }
+    for assignment in body.assignments:
+        row = current.get(assignment.project_id)
+        if row is None:
+            db.add(UserRole(
+                user_id=user_id,
+                role_id=assignment.role_id,
+                scope_type="project",
+                scope_id=assignment.project_id,
+            ))
+        else:
+            row.role_id = assignment.role_id
+    await db.flush()
+
+    rows = (await db.execute(
+        select(UserRole)
+        .options(selectinload(UserRole.role))
+        .where(UserRole.user_id == user_id, UserRole.scope_type == "project")
+    )).scalars().all()
+    return [
+        {
+            "id": row.id,
+            "user_id": row.user_id,
+            "role_id": row.role_id,
+            "scope_type": row.scope_type,
+            "scope_id": row.scope_id,
+            "role_name": row.role.name if row.role else None,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
+
+
 @router.delete("/{user_id}/roles/{user_role_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_role(
     user_id: uuid.UUID,
     user_role_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_permission("users.manage")),
+    current_user: User = Depends(require_permission("users.manage")),
 ) -> None:
     result = await db.execute(
         select(UserRole).where(UserRole.id == user_role_id, UserRole.user_id == user_id)
@@ -328,6 +466,9 @@ async def remove_role(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User role assignment not found"
         )
+    if await is_admin_role_row(db, user_role):
+        await _set_administrator(db, await db.get(User, user_id), False, current_user)
+        return
     await db.delete(user_role)
 
 

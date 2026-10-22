@@ -24,6 +24,7 @@ import app.models  # noqa: F401 — every table must be registered on the metada
 from app.models.agent import Agent
 from app.models.base import Base
 from app.models.build import Build, Stage, Step
+from app.models.role import Role, UserRole
 from app.models.two_step import UserPasskey, UserRecoveryCode, UserTwoStep
 from app.models.user import User
 from app.services.backup.tables import (
@@ -119,6 +120,31 @@ async def _keep_acting_admin(
     account["is_admin"] = True
     account["is_active"] = True
     return account["id"]
+
+
+def _keep_acting_admin_role(rows: dict[str, list[dict[str, Any]]], account_id: uuid.UUID) -> None:
+    """The restoring account keeps the global admin role as well as the
+    flag: an administrator holds both. A backup without a role named admin
+    is left as it is."""
+    admin_role = next((row for row in rows[Role.__tablename__] if row.get("name") == "admin"), None)
+    if admin_role is None:
+        return
+    held = rows[UserRole.__tablename__]
+    if any(
+        row.get("user_id") == account_id
+        and row.get("role_id") == admin_role["id"]
+        and row.get("scope_type") == "global"
+        for row in held
+    ):
+        return
+    held.append({
+        "id": uuid.uuid4(),
+        "user_id": account_id,
+        "role_id": admin_role["id"],
+        "scope_type": "global",
+        "scope_id": None,
+        "created_at": datetime.now(timezone.utc),
+    })
 
 
 _TWO_STEP_TABLES = (UserTwoStep.__table__, UserPasskey.__table__, UserRecoveryCode.__table__)
@@ -268,6 +294,7 @@ async def apply_configuration(
 
     account_id = await _keep_acting_admin(db, rows[User.__tablename__], acting_user_id)
     if account_id is not None:
+        _keep_acting_admin_role(rows, account_id)
         await _keep_acting_admin_two_step(db, rows, acting_user_id, account_id)
     await _keep_agent_connections(db, rows[Agent.__tablename__])
     await _cancel_pending_builds(db)

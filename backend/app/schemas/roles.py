@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RoleBase(BaseModel):
@@ -45,3 +45,12 @@ class UserRoleResponse(BaseModel):
     scope_id: uuid.UUID | None = None
     role_name: str | None = None
     created_at: datetime
+
+
+class ProjectRoleAssignment(BaseModel):
+    project_id: uuid.UUID
+    role_id: uuid.UUID
+
+
+class ProjectRolesBatch(BaseModel):
+    assignments: list[ProjectRoleAssignment] = Field(min_length=1, max_length=500)

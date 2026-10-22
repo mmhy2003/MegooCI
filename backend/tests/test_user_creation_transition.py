@@ -49,3 +49,21 @@ async def test_create_admin_user_keeps_global_admin(sf):
         roles = (await db.execute(select(UserRole).where(UserRole.user_id == u.id))).scalars().all()
     assert u.is_admin is True
     assert len(roles) == 1 and roles[0].scope_type == "global"
+
+
+async def test_create_admin_user_writes_an_audit_entry(sf):
+    from app.api.v1.users import create_user
+    from app.models.audit import AuditLogEntry
+    from app.schemas.users import UserCreateRequest
+    from sqlalchemy import select
+    async with sf() as db:
+        admin = await seed_role(db, "admin", ["admin"])
+        await db.commit()
+    async with sf() as db:
+        created = await create_user(UserCreateRequest(email="b@e.com", name="B", role_id=admin),
+                                    db=db, _current_user=None)
+        await db.commit()
+    async with sf() as db:
+        actions = (await db.execute(select(AuditLogEntry.action).where(
+            AuditLogEntry.target_id == created["id"]))).scalars().all()
+    assert actions == ["administrator_granted"]

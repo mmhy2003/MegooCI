@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.security import hash_password
-from app.models.role import Role, UserRole
 from app.models.user import User
+from app.services.administrators import set_administrator
 
 logger = logging.getLogger(__name__)
 
@@ -51,17 +51,12 @@ async def seed_admin_user(db: AsyncSession) -> None:
         email=email,
         name=email.split("@")[0],
         hashed_password=hash_password(password),
-        is_admin=True,
         is_active=True,
     )
     db.add(user)
     await db.flush()
 
-    # Assign the "admin" role globally.
-    role_result = await db.execute(select(Role).where(Role.name == "admin"))
-    role = role_result.scalar_one_or_none()
-    if role:
-        db.add(UserRole(user_id=user.id, role_id=role.id, scope_type="global"))
+    await set_administrator(db, user, True, actor_id=None)
 
     await db.commit()
     logger.info("Admin user created successfully: %s", email)
