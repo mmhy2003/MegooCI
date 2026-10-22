@@ -123,16 +123,19 @@ name: my-app
 stages:
   - name: test
     steps:
-      - run: npm test
+      - name: unit-tests       # optional; shown on the build page
+        run: npm test
 
   - name: build
     steps:
-      - docker_build:
+      - name: build-image
+        docker_build:
           context: "."
           dockerfile: Dockerfile
           tags:
             - "ghcr.io/org/app:${{ env.VERSION }}"
-      - docker_push:
+      - name: push-image
+        docker_push:
           tags:
             - "ghcr.io/org/app:${{ env.VERSION }}"
     artifacts:
@@ -144,10 +147,12 @@ stages:
     when:
       branch: main
     steps:
-      - wait_input:
+      - name: approve-deploy
+        wait_input:
           prompt: "Deploy to production?"
           timeout: 86400
-      - ssh_exec:
+      - name: deploy-app
+        ssh_exec:
           host: deploy.example.com
           user: deploy
           private_key: ${{ secrets.SSH_KEY }}
@@ -155,6 +160,8 @@ stages:
             - "cd /opt/app && docker compose pull"
             - "docker compose up -d"
 ```
+
+A step's `name` is optional. Without one, the build page shows a label built from what the step does, such as `npm test`, `Build app:1.0` or `SSH deploy@deploy.example.com`. Names are at most 255 characters and may repeat.
 
 To deploy to Kubernetes instead, store a kubeconfig as a secret and use `kube_apply` — it applies the manifests, then waits for every applied Deployment/StatefulSet/DaemonSet to finish rolling out:
 

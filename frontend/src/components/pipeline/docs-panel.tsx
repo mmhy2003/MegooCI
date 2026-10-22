@@ -26,6 +26,7 @@ import {
   CopyPlus,
   Trash2,
   Bot,
+  Tag,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -55,13 +56,35 @@ env:
 stages:
   - name: build
     steps:
-      - run: "echo Hello"
+      - name: say-hello      # optional — shown on the build page
+        run: "echo Hello"
 
   - name: deploy
     when:
       branch: main
     steps:
-      - run: "echo Deploying..."`,
+      - name: deploy-app
+        run: "echo Deploying..."`,
+  },
+  {
+    id: "step_names",
+    title: "Naming Steps",
+    icon: <Tag className="h-4 w-4" />,
+    description:
+      "Give any step a name to show on the build page, in the build logs and in notifications (build.failed_step, build.waiting_step). A name is a non-empty string of at most 255 characters, and names may repeat. A step without a name gets a label built from what it does: the first line of its command, the image it builds, the host it connects to, and so on. When two labels in one stage are the same, the later one gets a number, as in npm test (2). A plain string step such as - \"npm test\" cannot carry a name; write it with name and run to name it.",
+    yaml: `stages:
+  - name: build-image
+    steps:
+      - name: build-backend           # shown as "build-backend"
+        docker_build:
+          context: "."
+          tags: ["registry.example.com/app/backend:latest"]
+
+      - docker_build:                 # shown as "Build frontend:latest"
+          context: "./frontend"
+          tags: ["registry.example.com/app/frontend:latest"]
+
+      - "npm test"                    # shown as "npm test"`,
   },
   {
     id: "runs_on",

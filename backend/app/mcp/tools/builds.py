@@ -63,8 +63,8 @@ class BuildLogsInput(ToolInput):
     step: str | None = Field(
         None,
         description=(
-            "Exact step name to show. Omit to see the failed steps, or every "
-            "step when none failed."
+            "Exact step name to show, as get_build lists it. Omit to see the "
+            "failed steps, or every step when none failed."
         ),
     )
     tail_lines: int = Field(

@@ -30,6 +30,8 @@ from typing import Any
 
 import yaml
 
+from app.services.step_labels import numbered, step_label
+
 STEP_TYPE_KEYS = {
     "run",
     "write_file",
@@ -477,11 +479,15 @@ def _compile_stage(
         artifacts_paths = [str(p) for p in artifacts_raw]
 
     steps_raw = stage_def.get("steps", [])
-    steps: list[dict[str, Any]] = []
+    steps = [_compile_step(step_def, stage_env) for step_def in steps_raw]
 
-    for i, step_def in enumerate(steps_raw):
-        step = _compile_step(step_def, stage_env, default_index=i)
-        steps.append(step)
+    # Unnamed steps are labelled by what they do. Written names are kept as
+    # they are; a label that repeats one in the same stage gets a number.
+    taken = {step["name"] for step in steps if step["name"] is not None}
+    for step in steps:
+        if step["name"] is None:
+            step["name"] = numbered(step_label(step["step_type"], step["config"]), taken)
+            taken.add(step["name"])
 
     return {
         "name": name,
@@ -539,22 +545,22 @@ def normalize_runs_on(value: Any) -> dict[str, Any] | None:
 def _compile_step(
     step_def: str | dict[str, Any],
     parent_env: dict[str, str],
-    default_index: int = 0,
 ) -> dict[str, Any]:
     """Compile a single step definition.
 
     Accepts either a plain string (treated as a run command) or a dict.
     Detects the step type by checking which action key is present.
+    ``name`` is None when the YAML gives none; the stage fills in a label.
     """
     if isinstance(step_def, str):
         return {
-            "name": f"step-{default_index}",
+            "name": None,
             "step_type": "run",
             "config": {"command": step_def},
             "env": parent_env,
         }
 
-    name = step_def.get("name", f"step-{default_index}")
+    name = step_def.get("name")
     step_env = {**parent_env, **step_def.get("env", {})}
     when = step_def.get("when")
 
@@ -767,10 +773,22 @@ def _validate_http_request(value: Any, prefix: str) -> list[str]:
     return errors
 
 
+# Matches the length of the steps.name column.
+MAX_STEP_NAME_LENGTH = 255
+
+
 def _validate_step(step: dict[str, Any], stage_name: str, step_index: int) -> list[str]:
     """Validate a single step definition. Returns a list of errors."""
     errors: list[str] = []
     prefix = f"Stage '{stage_name}', step {step_index}"
+
+    if "name" in step:
+        name = step["name"]
+        if not isinstance(name, str) or not name.strip() or len(name) > MAX_STEP_NAME_LENGTH:
+            errors.append(
+                f"{prefix}: 'name' must be a non-empty string of at most "
+                f"{MAX_STEP_NAME_LENGTH} characters"
+            )
 
     found_types = [k for k in STEP_TYPE_KEYS if k in step]
 

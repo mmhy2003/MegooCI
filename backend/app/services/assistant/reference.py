@@ -53,6 +53,9 @@ never a `notify` step at the end, which does not run after a failure. Read the \
 11. When the conversation says an earlier change was proposed but not applied, \
 the editor and your working copy do not contain it. To build on it, put its \
 YAML into the working copy with `write_document`, then make the new change.
+12. When you write a pipeline or add steps, name every step you write with a short \
+`name` that says what it does (e.g. `build-backend-image`), so the build page \
+tells the steps apart. Do not rename steps the user did not ask about.
 """
 
 

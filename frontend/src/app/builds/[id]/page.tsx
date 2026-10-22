@@ -505,7 +505,7 @@ export default function BuildDetailPage() {
                             </span>
                             <div className="min-w-0 flex-1">
                               <span className="font-medium">{step.name}</span>
-                              {step.command && (
+                              {step.command && step.command.trim() !== step.name && (
                                 <code className="ml-0 mt-1 block break-all text-xs text-muted-foreground sm:ml-2 sm:mt-0 sm:inline">
                                   {step.command}
                                 </code>

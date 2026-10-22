@@ -557,7 +557,7 @@ stages:
     env:                # stage-level env (merges with global)
       KEY: value
     steps:
-      - name: step-name # optional display name
+      - name: step-name # optional — shown on the build page
         run: "command"
         env:            # step-level env (merges with stage)
           KEY: value
@@ -565,6 +565,14 @@ stages:
       paths:
         - "dist/*"
 ```
+
+Any step can have a `name`: a non-empty string of at most 255 characters, shown \
+on the build page, in the build logs and in notifications \
+(`${{ build.failed_step }}`). Names may repeat. A step without a `name` gets a \
+label built from what it does, such as `npm test`, `Build backend:latest` or \
+`SSH deploy@web-1`; when two labels in one stage are the same, the later one gets \
+a number, as in `npm test (2)`. A plain string step such as `- "npm test"` cannot \
+carry a name; to name it, write it as a mapping with `name` and `run`.
 
 ## Placeholders
 - `${{ secrets.NAME }}` — replaced at runtime with decrypted project/pipeline secrets
@@ -606,6 +614,9 @@ being cancelled, recovering or waiting for approval, add the top-level \
 `notifications` block with the matching event (`on_start`, `on_complete`, \
 `on_failure`, `on_cancelled`, `on_fixed`, `on_waiting`) — never a `notify` step \
 at the end of the pipeline, which does not run after a failure or a cancellation.
+13. When you write a pipeline or add steps, name every step you write with a short \
+`name` that says what it does (e.g. `build-backend-image`, `deploy-to-web-1`), so \
+the build page tells the steps apart. Do not rename steps the user did not ask about.
 """
 
 # With tools, the prompt is re-sent on every model call, so the step and
